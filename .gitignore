@@ -1,13 +1,17 @@
 # Ignore non-app reference directories and scratch files
 Icon-Video Player/
 clean-kotlin-blueprint/
-Animebox website/
 *.png
 !logo (1).png
 !app showcase screenshots/*.png
 !app showcase screenshots/*.jpg
+!Animebox website/**/*.png
+!Animebox website/**/*.jpg
+!Animebox website/**/*.svg
+!Animebox website/**/*.webp
 *.jpg
 !app showcase screenshots/*.jpg
+!Animebox website/**/*.jpg
 
 # OS & IDE
 .idea/

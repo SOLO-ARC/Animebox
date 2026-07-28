@@ -1,0 +1,28 @@
+plugins = []
+headers = []
+redirects = []
+
+[functions]
+
+[functions."*"]
+
+[build]
+publish = "D:\\Animexera APP\\Animebox website\\dist\\client"
+publishOrigin = "ui"
+commandOrigin = "ui"
+base = "D:\\Animexera APP\\Animebox website"
+command = "npm run build"
+
+[build.environment]
+
+[build.processing]
+
+[build.processing.css]
+
+[build.processing.html]
+
+[build.processing.images]
+
+[build.processing.js]
+
+[build.services]
