@@ -4,6 +4,10 @@
   <img src="logo (1).png" width="160" alt="AnimeBox Logo" />
 </p>
 
+<p align="center">
+  <a href="https://github.com/SOLO-ARC/Animebox/releases/latest"><b>Download Latest APK</b></a>
+</p>
+
 AnimeBox is an Android application built for streaming anime on mobile devices and Android TV. It provides a clean interface, customizable video playback controls, and multi-profile support.
 
 ---
