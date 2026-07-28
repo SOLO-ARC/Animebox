@@ -1,0 +1,25 @@
+# Ignore non-app reference directories and scratch files
+Icon-Video Player/
+clean-kotlin-blueprint/
+*.png
+!logo (1).png
+!app showcase screenshots/*.png
+!app showcase screenshots/*.jpg
+*.jpg
+!app showcase screenshots/*.jpg
+
+# OS & IDE
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+hs_err_pid*.log
+
+# Gradle & Build artifacts
+.gradle/
+build/
+app/build/
+library/build/
+*.apk
+*.aar
