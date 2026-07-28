@@ -12,11 +12,11 @@ AnimeBox is an Android application built for streaming anime on mobile devices a
 
 | Home | Details |
 | :---: | :---: |
-| <img src="app showcase screenshots/Screenshot_20260712-190055_Animexera~2.png" width="340" alt="Home" /> | <img src="app showcase screenshots/Screenshot_20260712-190123_Animexera~2.png" width="340" alt="Details" /> |
+| <img src="app showcase screenshots/Screenshot_20260712-190055_Animexera~2.png" width="340" alt="Home" /> | <img src="app showcase screenshots/Screenshot_20260712-190233_Animexera~2.png" width="340" alt="Details" /> |
 
 | Search | Player |
 | :---: | :---: |
-| <img src="app showcase screenshots/Screenshot_20260712-190233_Animexera~2.png" width="340" alt="Search" /> | <img src="app showcase screenshots/photo_2026-07-29_03-09-17.jpg" width="340" alt="Player" /> |
+| <img src="app showcase screenshots/Screenshot_20260712-190123_Animexera~2.png" width="340" alt="Search" /> | <img src="app showcase screenshots/photo_2026-07-29_03-09-17.jpg" width="340" alt="Player" /> |
 
 ---
 
