@@ -146,12 +146,12 @@ android {
         buildConfigField(
             "String",
             "VERCEL_MULTIMOVIE_API",
-            "\"" + (localProperties["vercel.multimovie.api"] ?: "https://multimovieapi-placeholder.vercel.app") + "\""
+            "\"" + (localProperties["vercel.multimovie.api"] ?: "https://animeapi-multi.placeholder.com") + "\""
         )
         buildConfigField(
             "String",
             "VERCEL_SCRAPER_API",
-            "\"" + (localProperties["vercel.scraper.api"] ?: "https://anime-scraper-placeholder.vercel.app") + "\""
+            "\"" + (localProperties["vercel.scraper.api"] ?: "https://animeapi1.placeholder.com") + "\""
         )
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
