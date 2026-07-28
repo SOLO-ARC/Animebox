@@ -2299,7 +2299,7 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
             if (type == "hindi") {
                 // 1. Query fast anidrive API first
                 try {
-                    val aniDriveUrl = "https://anidrive-stream-finder.lovable.app/api/public/stream?anilist=$anilistId&ep=$episodeNum"
+                    val aniDriveUrl = "${com.lagradost.cloudstream3.BuildConfig.LOVABLE_ANIDRIVE_API}/api/public/stream?anilist=$anilistId&ep=$episodeNum"
                     val req = okhttp3.Request.Builder().url(aniDriveUrl).build()
                     okhttp3.OkHttpClient().newCall(req).execute().use { resp ->
                         if (resp.isSuccessful) {

@@ -153,6 +153,11 @@ android {
             "VERCEL_SCRAPER_API",
             "\"" + (localProperties["vercel.scraper.api"] ?: "https://animeapi1.placeholder.com") + "\""
         )
+        buildConfigField(
+            "String",
+            "LOVABLE_ANIDRIVE_API",
+            "\"" + (localProperties["lovable.anidrive.api"] ?: "https://anidrive.placeholder.com") + "\""
+        )
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
