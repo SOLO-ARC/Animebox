@@ -33,15 +33,9 @@ AnimeBox is an Android application built for streaming anime on mobile devices a
 
 ## Building from Source
 
-> **Note**: This repository contains the Android application client source code only. API endpoints in the published repository use generic placeholders. To build and run the app with full streaming capabilities, you must configure your own streaming API endpoints in your `local.properties` file:
-> ```properties
-> vercel.multimovie.api=https://your-multimovie-api.example.com
-> vercel.scraper.api=https://your-scraper-api.example.com
-> lovable.anidrive.api=https://your-anidrive-api.example.com
-> ```
+> **Note**: To build and use this application from the source code, you must configure your own streaming API sources.
 
 1. Clone this repository.
 2. Open the `animebox` project folder in Android Studio.
-3. Configure your API endpoints in `animebox/local.properties`.
-4. Sync Gradle dependencies.
-5. Run `assembleDebug` or install directly onto a connected Android device running Android 7.0+.
+3. Sync Gradle dependencies.
+4. Run `assembleDebug` or install directly onto a connected Android device running Android 7.0+.
