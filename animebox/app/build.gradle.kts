@@ -143,6 +143,16 @@ android {
             "ANILIST_KEY",
             "\"" + (System.getenv("ANILIST_KEY") ?: localProperties["anilist.key"]) + "\""
         )
+        buildConfigField(
+            "String",
+            "VERCEL_MULTIMOVIE_API",
+            "\"" + (localProperties["vercel.multimovie.api"] ?: "https://multimovieapi-placeholder.vercel.app") + "\""
+        )
+        buildConfigField(
+            "String",
+            "VERCEL_SCRAPER_API",
+            "\"" + (localProperties["vercel.scraper.api"] ?: "https://anime-scraper-placeholder.vercel.app") + "\""
+        )
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

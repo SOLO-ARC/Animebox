@@ -2598,7 +2598,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         var introStart = 0L; var introEnd = 0L
                                         var outroStart = 0L; var outroEnd = 0L
                                         try {
-                                            val subUrl = "https://multimovieapi-main.vercel.app/api/anime?anilistId=$anilistId&episode=$episodeNum&type=sub"
+                                            val subUrl = "${com.lagradost.cloudstream3.BuildConfig.VERCEL_MULTIMOVIE_API}/api/anime?anilistId=$anilistId&episode=$episodeNum&type=sub"
                                             val subReq = okhttp3.Request.Builder().url(subUrl).build()
                                             okhttp3.OkHttpClient().newCall(subReq).execute().use { subRes ->
                                                 if (subRes.isSuccessful) {
@@ -2639,7 +2639,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 } catch (e: Exception) { e.printStackTrace() }
 
                 // 2. Fallback to multimovieapi Hindi endpoint if anidrive fails
-                val hindiUrl = "https://multimovieapi-main.vercel.app/api/hindi?anilistId=$anilistId&episode=$episodeNum"
+                val hindiUrl = "${com.lagradost.cloudstream3.BuildConfig.VERCEL_MULTIMOVIE_API}/api/hindi?anilistId=$anilistId&episode=$episodeNum"
                 val hindiReq = okhttp3.Request.Builder().url(hindiUrl).build()
                 val hindiList = mutableListOf<Map<String, String>>()
                 try {
@@ -2665,7 +2665,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 var subtitleUrl = ""
                 var introStart = 0L; var introEnd = 0L
                 var outroStart = 0L; var outroEnd = 0L
-                val subUrl = "https://multimovieapi-main.vercel.app/api/anime?anilistId=$anilistId&episode=$episodeNum&type=sub"
+                val subUrl = "${com.lagradost.cloudstream3.BuildConfig.VERCEL_MULTIMOVIE_API}/api/anime?anilistId=$anilistId&episode=$episodeNum&type=sub"
                 val subReq = okhttp3.Request.Builder().url(subUrl).build()
                 try {
                     okhttp3.OkHttpClient().newCall(subReq).execute().use { subRes ->
@@ -2718,7 +2718,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     )
                 } else null
             } else {
-                val url = "https://multimovieapi-main.vercel.app/api/anime?anilistId=$anilistId&episode=$episodeNum&type=$type"
+                val url = "${com.lagradost.cloudstream3.BuildConfig.VERCEL_MULTIMOVIE_API}/api/anime?anilistId=$anilistId&episode=$episodeNum&type=$type"
                 val request = okhttp3.Request.Builder().url(url).build()
                 try {
                 okhttp3.OkHttpClient().newCall(request).execute().use { response ->
@@ -2793,7 +2793,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
             streamInfo = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 try {
                     val sType = if (type == "dub") "dub" else "sub"
-                    val url = "https://anime-scraper-v1.vercel.app/default/$anilistId/$sType/$episodeNum"
+                    val url = "${com.lagradost.cloudstream3.BuildConfig.VERCEL_SCRAPER_API}/default/$anilistId/$sType/$episodeNum"
                     val req = okhttp3.Request.Builder().url(url).build()
                     okhttp3.OkHttpClient().newCall(req).execute().use { resp ->
                         if (resp.isSuccessful) {
