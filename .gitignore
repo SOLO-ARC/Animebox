@@ -2,6 +2,7 @@ Icon-Video Player/
 clean-kotlin-blueprint/
 anime-download-hub-main/
 anidrive-stream-finder-main/
+Animebox website/
 .netlify/
 *.png
 !logo (1).png
