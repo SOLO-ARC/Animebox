@@ -1,15 +1,15 @@
+redirectsOrigin = "config"
 plugins = []
 headers = []
-redirects = []
 
 [functions]
 
 [functions."*"]
 
 [build]
-publish = "D:\\Animexera APP\\Animebox website\\dist\\client"
-publishOrigin = "ui"
-commandOrigin = "ui"
+publish = "D:\\Animexera APP\\Animebox website\\dist"
+publishOrigin = "config"
+commandOrigin = "config"
 base = "D:\\Animexera APP\\Animebox website"
 command = "npm run build"
 
@@ -26,3 +26,15 @@ command = "npm run build"
 [build.processing.js]
 
 [build.services]
+
+[[redirects]]
+from = "/*"
+to = "/index.html"
+status = 200.0
+force = false
+
+[redirects.query]
+
+[redirects.conditions]
+
+[redirects.headers]
