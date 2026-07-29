@@ -16,11 +16,12 @@ if (fs.existsSync(assetsDir)) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AnimeBox - Stream Anime for Android</title>
     <meta name="description" content="Official AnimeBox app landing page for Android." />
+    ${cssFile ? `<link rel="stylesheet" href="/Animebox/assets/${cssFile}">` : ''}
     ${cssFile ? `<link rel="stylesheet" href="./assets/${cssFile}">` : ''}
   </head>
   <body class="bg-[#09090b] text-white">
     <div id="root"></div>
-    ${jsFile ? `<script type="module" src="./assets/${jsFile}"></script>` : ''}
+    ${jsFile ? `<script type="module" src="/Animebox/assets/${jsFile}"></script>` : ''}
   </body>
 </html>`;
 
