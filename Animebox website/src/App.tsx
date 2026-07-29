@@ -15,7 +15,8 @@ import {
   Tv,
   Play,
   Download,
-  ExternalLink
+  ExternalLink,
+  Github
 } from "lucide-react";
 
 // Default curated mix of popular anime TV shows and iconic anime movies
@@ -32,6 +33,10 @@ const DEFAULT_COVERS = [
   "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx11061-N5EWBZSQAawL.jpg", // Hunter x Hunter (TV)
   "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx128893-nFlSjL9SszA0.jpg", // Jujutsu Kaisen 0 (Movie)
   "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx20464-6BG40F3mBofF.jpg", // Haikyuu!! (TV)
+  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx20605-t6oP7c6WbXsp.jpg", // Tokyo Ghoul
+  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx113415-LHn2ptFZF18W.jpg", // Chainsaw Man
+  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101291-729r7UfaERpT.jpg", // Bunny Girl Senpai
+  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx1535-4rLyJ62ChA2T.jpg", // Death Note
 ];
 
 function AndroidIcon({ className = "w-6 h-6" }: { className?: string }) {
@@ -50,12 +55,12 @@ export default function App() {
   useEffect(() => {
     const query = `
       query {
-        tv: Page(page: 1, perPage: 12) {
+        tv: Page(page: 1, perPage: 16) {
           media(sort: POPULARITY_DESC, type: ANIME, format: TV) {
             coverImage { extraLarge large }
           }
         }
-        movies: Page(page: 1, perPage: 12) {
+        movies: Page(page: 1, perPage: 16) {
           media(sort: POPULARITY_DESC, type: ANIME, format: MOVIE) {
             coverImage { extraLarge large }
           }
@@ -80,107 +85,120 @@ export default function App() {
           if (tvCovers[i]) mixed.push(tvCovers[i]);
           if (movieCovers[i]) mixed.push(movieCovers[i]);
         }
-        if (mixed.length >= 8) {
+        if (mixed.length >= 12) {
           setCovers(mixed);
         }
       })
       .catch((err) => console.error("AniList fetch error:", err));
   }, []);
 
-  // Split covers into 4 columns for smooth vertical scrolling animation
-  const col1 = covers.slice(0, 6);
-  const col2 = covers.slice(6, 12);
-  const col3 = covers.slice(12, 18).length > 0 ? covers.slice(12, 18) : covers.slice(0, 6).reverse();
-  const col4 = covers.slice(18, 24).length > 0 ? covers.slice(18, 24) : covers.slice(6, 12).reverse();
+  // Split covers into 6 columns for dense, smaller poster cards matching Screenshot 2
+  const col1 = covers.slice(0, 5);
+  const col2 = covers.slice(5, 10);
+  const col3 = covers.slice(10, 15);
+  const col4 = covers.slice(15, 20).length > 0 ? covers.slice(15, 20) : covers.slice(0, 5).reverse();
+  const col5 = covers.slice(5, 10).reverse();
+  const col6 = covers.slice(10, 15).reverse();
 
   return (
     <div className="min-h-screen bg-[#09090b] text-white selection:bg-purple-500 selection:text-white font-sans relative overflow-x-hidden">
       
-      {/* Ambient Neon Glass Glow Accents */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-        <div className="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[900px] h-[600px] bg-purple-600/15 rounded-full blur-[160px]" />
-        <div className="absolute top-[45%] left-[-10%] w-[500px] h-[500px] bg-pink-600/10 rounded-full blur-[140px]" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] bg-indigo-600/15 rounded-full blur-[160px]" />
-      </div>
-
-      {/* Background Moving Poster Cards Grid (Mix of Popular TV Shows & Movies) */}
-      <div className="absolute inset-0 z-0 overflow-hidden opacity-65 select-none pointer-events-none">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 -rotate-3 scale-110 h-[220vh]">
+      {/* Background Moving Poster Cards Grid (Smaller cards, 6 columns, matching Screenshot 2) */}
+      <div className="absolute inset-0 z-0 overflow-hidden opacity-60 select-none pointer-events-none">
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3 sm:gap-4 p-3 -rotate-3 scale-110 h-[240vh]">
           
           {/* Column 1 - Scroll Up */}
-          <div className="flex flex-col gap-4 animate-scroll-up">
+          <div className="flex flex-col gap-3 sm:gap-4 animate-scroll-up">
             {col1.concat(col1).map((url, i) => (
-              <div key={`col1-${i}`} className="aspect-[2/3] rounded-3xl overflow-hidden shadow-2xl border border-white/15 bg-white/5">
-                <img src={url} alt="Anime Cover" className="w-full h-full object-cover filter brightness-95" loading="lazy" />
+              <div key={`col1-${i}`} className="aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border border-white/10 bg-white/5">
+                <img src={url} alt="Anime Cover" className="w-full h-full object-cover filter brightness-95 contrast-105" loading="lazy" />
               </div>
             ))}
           </div>
 
           {/* Column 2 - Scroll Down */}
-          <div className="flex flex-col gap-4 animate-scroll-down">
+          <div className="flex flex-col gap-3 sm:gap-4 animate-scroll-down">
             {col2.concat(col2).map((url, i) => (
-              <div key={`col2-${i}`} className="aspect-[2/3] rounded-3xl overflow-hidden shadow-2xl border border-white/15 bg-white/5">
-                <img src={url} alt="Anime Cover" className="w-full h-full object-cover filter brightness-95" loading="lazy" />
+              <div key={`col2-${i}`} className="aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border border-white/10 bg-white/5">
+                <img src={url} alt="Anime Cover" className="w-full h-full object-cover filter brightness-95 contrast-105" loading="lazy" />
               </div>
             ))}
           </div>
 
           {/* Column 3 - Scroll Up */}
-          <div className="flex flex-col gap-4 animate-scroll-up hidden sm:flex">
+          <div className="flex flex-col gap-3 sm:gap-4 animate-scroll-up">
             {col3.concat(col3).map((url, i) => (
-              <div key={`col3-${i}`} className="aspect-[2/3] rounded-3xl overflow-hidden shadow-2xl border border-white/15 bg-white/5">
-                <img src={url} alt="Anime Cover" className="w-full h-full object-cover filter brightness-95" loading="lazy" />
+              <div key={`col3-${i}`} className="aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border border-white/10 bg-white/5">
+                <img src={url} alt="Anime Cover" className="w-full h-full object-cover filter brightness-95 contrast-105" loading="lazy" />
               </div>
             ))}
           </div>
 
           {/* Column 4 - Scroll Down */}
-          <div className="flex flex-col gap-4 animate-scroll-down hidden sm:flex">
+          <div className="flex flex-col gap-3 sm:gap-4 animate-scroll-down hidden sm:flex">
             {col4.concat(col4).map((url, i) => (
-              <div key={`col4-${i}`} className="aspect-[2/3] rounded-3xl overflow-hidden shadow-2xl border border-white/15 bg-white/5">
-                <img src={url} alt="Anime Cover" className="w-full h-full object-cover filter brightness-95" loading="lazy" />
+              <div key={`col4-${i}`} className="aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border border-white/10 bg-white/5">
+                <img src={url} alt="Anime Cover" className="w-full h-full object-cover filter brightness-95 contrast-105" loading="lazy" />
+              </div>
+            ))}
+          </div>
+
+          {/* Column 5 - Scroll Up */}
+          <div className="flex flex-col gap-3 sm:gap-4 animate-scroll-up hidden md:flex">
+            {col5.concat(col5).map((url, i) => (
+              <div key={`col5-${i}`} className="aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border border-white/10 bg-white/5">
+                <img src={url} alt="Anime Cover" className="w-full h-full object-cover filter brightness-95 contrast-105" loading="lazy" />
+              </div>
+            ))}
+          </div>
+
+          {/* Column 6 - Scroll Down */}
+          <div className="flex flex-col gap-3 sm:gap-4 animate-scroll-down hidden md:flex">
+            {col6.concat(col6).map((url, i) => (
+              <div key={`col6-${i}`} className="aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border border-white/10 bg-white/5">
+                <img src={url} alt="Anime Cover" className="w-full h-full object-cover filter brightness-95 contrast-105" loading="lazy" />
               </div>
             ))}
           </div>
 
         </div>
 
-        {/* Lighter glass gradient overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-[#09090b] via-[#09090b]/55 to-[#09090b]/65 backdrop-blur-[1px]" />
+        {/* Crisp radial and linear dark overlay for high-contrast text rendering */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-[#09090b] backdrop-blur-[1px]" />
       </div>
 
-      {/* Top Header Navigation featuring Actual AnimeBox Logo */}
-      <nav className="relative z-20 border-b border-white/10 bg-black/40 backdrop-blur-xl sticky top-0 shadow-lg">
-        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+      {/* Top Header Navigation - Large Logo Without Box Enclosure */}
+      <nav className="relative z-30 border-b border-white/10 bg-black/40 backdrop-blur-2xl sticky top-0 shadow-2xl">
+        <div className="max-w-6xl mx-auto px-6 h-20 flex items-center justify-between">
+          <div className="flex items-center gap-3.5 group cursor-pointer">
             <img 
               src="./logo.png" 
               alt="AnimeBox Logo" 
-              className="w-9 h-9 rounded-xl border border-white/20 object-contain p-0.5 bg-black/60 shadow-xl" 
+              className="w-11 h-11 object-contain drop-shadow-[0_4px_12px_rgba(255,255,255,0.25)] transition-transform duration-300 group-hover:scale-105" 
             />
-            <span className="font-bold text-xl tracking-tight bg-gradient-to-r from-white via-white to-purple-200 bg-clip-text text-transparent">
+            <span className="font-extrabold text-2xl tracking-tight bg-gradient-to-r from-white via-white to-purple-200 bg-clip-text text-transparent drop-shadow-md">
               AnimeBox
             </span>
           </div>
 
-          <div className="flex items-center gap-6 text-sm font-medium text-white/80">
-            <a href="#features" className="hover:text-purple-300 transition">Features</a>
-            <a href="#showcase" className="hover:text-purple-300 transition">Showcase</a>
-            <a href="#download" className="hover:text-purple-300 transition">Download</a>
+          <div className="flex items-center gap-8 text-sm font-semibold text-white/80">
+            <a href="#features" className="hover:text-white transition drop-shadow-sm">Features</a>
+            <a href="#showcase" className="hover:text-white transition drop-shadow-sm">Showcase</a>
+            <a href="#download" className="hover:text-white transition drop-shadow-sm">Download</a>
           </div>
         </div>
       </nav>
 
-      {/* Hero Section */}
-      <header className="relative z-10 max-w-4xl mx-auto px-6 pt-24 pb-20 text-center flex flex-col items-center justify-center min-h-[75vh]">
+      {/* Hero Section - Padded to prevent bottom text overlap on single viewports */}
+      <header className="relative z-10 max-w-4xl mx-auto px-6 pt-20 pb-36 text-center flex flex-col items-center justify-center min-h-[90vh]">
         
-        <h1 className="text-4xl sm:text-6xl md:text-7xl font-black tracking-tight leading-[1.1] drop-shadow-2xl">
-          Just press play.
+        <h1 className="text-5xl sm:text-7xl md:text-8xl font-black tracking-tight leading-[1.1]">
+          <span className="text-white drop-shadow-[0_10px_25px_rgba(0,0,0,0.9)]">Just press play.</span>
           <br />
-          <span className="text-white/70 font-semibold">Anime, made simple.</span>
+          <span className="text-white/80 font-extrabold drop-shadow-[0_8px_20px_rgba(0,0,0,0.9)]">Anime, made simple.</span>
         </h1>
 
-        <p className="mt-6 text-base sm:text-xl text-white/90 font-medium max-w-xl drop-shadow-md">
+        <p className="mt-6 text-base sm:text-xl text-white/90 font-medium max-w-xl drop-shadow-[0_4px_12px_rgba(0,0,0,0.95)]">
           Your anime, your language, your pace.
         </p>
 
@@ -203,23 +221,23 @@ export default function App() {
           </a>
         </div>
 
-        <div className="mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-white/75 font-semibold">
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-white/80 font-semibold drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
           <span>APK · 98 MB</span>
           <span className="h-1 w-1 rounded-full bg-white/60" />
           <span>Android 8.0+</span>
         </div>
       </header>
 
-      {/* App Showcase Section */}
+      {/* App Showcase Section - Cleanly Separated Viewport */}
       <section
         id="showcase"
-        className="relative z-10 max-w-6xl mx-auto px-6 pt-16 pb-24 border-t border-white/10"
+        className="relative z-10 max-w-6xl mx-auto px-6 pt-24 pb-28 border-t border-white/10"
       >
         <div className="mb-12 text-center">
-          <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
+          <h2 className="text-3xl sm:text-5xl font-black tracking-tight text-white drop-shadow-[0_8px_20px_rgba(0,0,0,0.9)]">
             Built for how you actually watch.
           </h2>
-          <p className="mt-3 text-sm sm:text-base text-white/70">
+          <p className="mt-4 text-base sm:text-lg text-white/70 font-medium max-w-xl mx-auto drop-shadow-md">
             Pick your audio, jump between episodes, and get back to the show.
           </p>
         </div>
@@ -238,16 +256,16 @@ export default function App() {
         </div>
 
         {/* Showcase Feature Chips with Glassmorphism */}
-        <div className="mt-10 flex flex-wrap items-center justify-center gap-4 text-xs sm:text-sm text-white/90">
-          <div className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full border border-white/20 bg-white/[0.06] backdrop-blur-xl shadow-lg">
+        <div className="mt-12 flex flex-wrap items-center justify-center gap-4 text-xs sm:text-sm text-white/90">
+          <div className="inline-flex items-center gap-2 px-5 py-3 rounded-full border border-white/20 bg-black/60 backdrop-blur-2xl shadow-xl">
             <Languages className="w-4 h-4 text-purple-400" />
             <span>Japanese, English and Hindi audio — switch anytime.</span>
           </div>
-          <div className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full border border-white/20 bg-white/[0.06] backdrop-blur-xl shadow-lg">
+          <div className="inline-flex items-center gap-2 px-5 py-3 rounded-full border border-white/20 bg-black/60 backdrop-blur-2xl shadow-xl">
             <PlayCircle className="w-4 h-4 text-purple-400" />
             <span>Episode selector right inside the player.</span>
           </div>
-          <div className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full border border-white/20 bg-white/[0.06] backdrop-blur-xl shadow-lg">
+          <div className="inline-flex items-center gap-2 px-5 py-3 rounded-full border border-white/20 bg-black/60 backdrop-blur-2xl shadow-xl">
             <Sparkles className="w-4 h-4 text-purple-400" />
             <span>Clean player UI that stays out of the way.</span>
           </div>
@@ -285,7 +303,7 @@ export default function App() {
             </p>
           </div>
 
-          {/* Custom Video Player with Play Button Icon */}
+          {/* Custom Video Player with Play Icon */}
           <div className="p-6 rounded-3xl border border-white/15 bg-white/[0.04] backdrop-blur-2xl shadow-xl hover:border-blue-500/50 hover:bg-white/[0.07] transition group">
             <div className="w-12 h-12 rounded-2xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center mb-4 group-hover:scale-110 transition">
               <Play className="w-6 h-6 text-blue-400 fill-blue-400/20" />
@@ -356,13 +374,33 @@ export default function App() {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="relative z-10 border-t border-white/10 py-8 text-center text-xs text-white/40 bg-black/40 backdrop-blur-md">
-        <div className="max-w-4xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div>© {new Date().getFullYear()} AnimeBox</div>
-          <div className="flex items-center gap-6">
+      {/* Redesigned Glassmorphic Footer */}
+      <footer className="relative z-20 border-t border-white/10 bg-black/60 backdrop-blur-2xl py-12">
+        <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="flex items-center gap-3">
+            <img src="./logo.png" alt="AnimeBox Logo" className="w-8 h-8 object-contain" />
+            <span className="font-bold text-lg text-white">AnimeBox</span>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-center gap-6 text-xs text-white/70 font-medium">
+            <a href="#features" className="hover:text-white transition">Features</a>
+            <a href="#showcase" className="hover:text-white transition">Showcase</a>
+            <a href="#why" className="hover:text-white transition">Why AnimeBox</a>
             <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="hover:text-white transition">Download APK</a>
-            <a href="https://github.com/SOLO-ARC/Animebox" target="_blank" rel="noopener noreferrer" className="hover:text-white transition">GitHub Source</a>
+          </div>
+
+          <div className="flex items-center gap-4 text-xs text-white/50">
+            <span>© {new Date().getFullYear()} AnimeBox</span>
+            <span>•</span>
+            <a 
+              href="https://github.com/SOLO-ARC/Animebox" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 hover:text-white transition"
+            >
+              <Github className="w-3.5 h-3.5" />
+              <span>GitHub</span>
+            </a>
           </div>
         </div>
       </footer>
