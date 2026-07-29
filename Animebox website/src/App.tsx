@@ -4,14 +4,15 @@ import {
   ShieldCheck, 
   Users, 
   PlayCircle, 
-  Database, 
-  ExternalLink,
-  Sliders,
+  Globe,
+  Film,
   Layers,
   Heart,
   Wifi,
   Languages,
-  CheckCircle2
+  CheckCircle2,
+  Sliders,
+  Tv
 } from "lucide-react";
 
 // Default curated anime covers matching the reference screenshot layout
@@ -46,7 +47,7 @@ export default function App() {
   useEffect(() => {
     const query = `
       query {
-        Page(page: 1, perPage: 16) {
+        Page(page: 1, perPage: 24) {
           media(sort: POPULARITY_DESC, type: ANIME) {
             coverImage {
               extraLarge
@@ -74,32 +75,63 @@ export default function App() {
       .catch((err) => console.error("AniList fetch error:", err));
   }, []);
 
+  // Split covers into 4 columns for smooth vertical scrolling animation
+  const col1 = covers.slice(0, 6);
+  const col2 = covers.slice(6, 12);
+  const col3 = covers.slice(0, 6).reverse();
+  const col4 = covers.slice(6, 12).reverse();
+
   return (
     <div className="min-h-screen bg-[#09090b] text-white selection:bg-purple-500 selection:text-white font-sans relative overflow-x-hidden">
       
-      {/* Background Poster Cards Grid with Dark Overlay */}
-      <div className="absolute inset-0 z-0 overflow-hidden opacity-35 select-none pointer-events-none">
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4 p-4 -rotate-3 scale-110 transform-gpu">
-          {covers.concat(covers).map((coverUrl, idx) => (
-            <div 
-              key={idx} 
-              className="aspect-[2/3] rounded-3xl overflow-hidden shadow-2xl border border-white/10 bg-white/5 transition-transform duration-700 hover:scale-105"
-            >
-              <img 
-                src={coverUrl} 
-                alt="Anime Poster" 
-                className="w-full h-full object-cover filter brightness-90 contrast-105" 
-                loading="lazy"
-              />
-            </div>
-          ))}
+      {/* Background Moving Poster Cards Grid with Increased Visibility */}
+      <div className="absolute inset-0 z-0 overflow-hidden opacity-65 select-none pointer-events-none">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 -rotate-3 scale-110 h-[200vh]">
+          
+          {/* Column 1 - Scroll Up */}
+          <div className="flex flex-col gap-4 animate-scroll-up">
+            {col1.concat(col1).map((url, i) => (
+              <div key={`col1-${i}`} className="aspect-[2/3] rounded-3xl overflow-hidden shadow-2xl border border-white/15 bg-white/5">
+                <img src={url} alt="Anime Cover" className="w-full h-full object-cover filter brightness-95" loading="lazy" />
+              </div>
+            ))}
+          </div>
+
+          {/* Column 2 - Scroll Down */}
+          <div className="flex flex-col gap-4 animate-scroll-down">
+            {col2.concat(col2).map((url, i) => (
+              <div key={`col2-${i}`} className="aspect-[2/3] rounded-3xl overflow-hidden shadow-2xl border border-white/15 bg-white/5">
+                <img src={url} alt="Anime Cover" className="w-full h-full object-cover filter brightness-95" loading="lazy" />
+              </div>
+            ))}
+          </div>
+
+          {/* Column 3 - Scroll Up */}
+          <div className="flex flex-col gap-4 animate-scroll-up hidden sm:flex">
+            {col3.concat(col3).map((url, i) => (
+              <div key={`col3-${i}`} className="aspect-[2/3] rounded-3xl overflow-hidden shadow-2xl border border-white/15 bg-white/5">
+                <img src={url} alt="Anime Cover" className="w-full h-full object-cover filter brightness-95" loading="lazy" />
+              </div>
+            ))}
+          </div>
+
+          {/* Column 4 - Scroll Down */}
+          <div className="flex flex-col gap-4 animate-scroll-down hidden sm:flex">
+            {col4.concat(col4).map((url, i) => (
+              <div key={`col4-${i}`} className="aspect-[2/3] rounded-3xl overflow-hidden shadow-2xl border border-white/15 bg-white/5">
+                <img src={url} alt="Anime Cover" className="w-full h-full object-cover filter brightness-95" loading="lazy" />
+              </div>
+            ))}
+          </div>
+
         </div>
-        {/* Dark radial gradient overlay for high contrast text readability */}
-        <div className="absolute inset-0 bg-gradient-to-t from-[#09090b] via-[#09090b]/75 to-[#09090b]/80 backdrop-blur-[1px]" />
+
+        {/* Lighter gradient overlay so posters remain clearly visible */}
+        <div className="absolute inset-0 bg-gradient-to-t from-[#09090b] via-[#09090b]/55 to-[#09090b]/65 backdrop-blur-[1px]" />
       </div>
 
       {/* Top Header Navigation */}
-      <nav className="relative z-20 border-b border-white/10 bg-black/40 backdrop-blur-md sticky top-0">
+      <nav className="relative z-20 border-b border-white/10 bg-black/50 backdrop-blur-md sticky top-0">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img 
@@ -124,21 +156,21 @@ export default function App() {
         <h1 className="text-4xl sm:text-6xl md:text-7xl font-black tracking-tight leading-[1.1] drop-shadow-2xl">
           Just press play.
           <br />
-          <span className="text-white/60 font-semibold">Anime, made simple.</span>
+          <span className="text-white/70 font-semibold">Anime, made simple.</span>
         </h1>
 
-        <p className="mt-6 text-base sm:text-xl text-white/80 font-normal max-w-xl drop-shadow-md">
+        <p className="mt-6 text-base sm:text-xl text-white/90 font-medium max-w-xl drop-shadow-md">
           Your anime, your language, your pace.
         </p>
 
         {/* Hero Download Button matching Screenshot 1 */}
         <div id="download" className="relative mt-10 group z-20">
-          <div className="absolute -inset-4 rounded-full bg-white/25 blur-2xl transition group-hover:bg-white/40" />
+          <div className="absolute -inset-4 rounded-full bg-white/30 blur-2xl transition group-hover:bg-white/50" />
           <a
             href={downloadUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="relative inline-flex items-center gap-4 rounded-full bg-white px-8 py-4 sm:px-10 sm:py-5 text-black shadow-[0_20px_60px_-10px_rgba(255,255,255,0.4)] transition hover:scale-[1.03] active:scale-100"
+            className="relative inline-flex items-center gap-4 rounded-full bg-white px-8 py-4 sm:px-10 sm:py-5 text-black shadow-[0_20px_60px_-10px_rgba(255,255,255,0.5)] transition hover:scale-[1.03] active:scale-100"
           >
             <AndroidIcon className="h-7 w-7 sm:h-8 sm:w-8 text-black" />
             <span className="flex flex-col items-start leading-tight">
@@ -150,9 +182,9 @@ export default function App() {
           </a>
         </div>
 
-        <div className="mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-white/60 font-medium">
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-white/75 font-semibold">
           <span>APK · 98 MB</span>
-          <span className="h-1 w-1 rounded-full bg-white/40" />
+          <span className="h-1 w-1 rounded-full bg-white/60" />
           <span>Android 8.0+</span>
         </div>
       </header>
@@ -166,14 +198,14 @@ export default function App() {
           <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
             Built for how you actually watch.
           </h2>
-          <p className="mt-3 text-sm sm:text-base text-white/60">
+          <p className="mt-3 text-sm sm:text-base text-white/70">
             Pick your audio, jump between episodes, and get back to the show.
           </p>
         </div>
 
         {/* Horizontal Phone Mockup displaying Jujutsu Kaisen Player Screenshot */}
         <div className="relative mx-auto w-full max-w-4xl">
-          <div className="absolute -inset-8 rounded-[3rem] bg-purple-600/10 blur-3xl" />
+          <div className="absolute -inset-8 rounded-[3rem] bg-purple-600/15 blur-3xl" />
           
           <div className="relative rounded-[2.5rem] border-[10px] border-[#18181b] bg-black p-2 shadow-2xl overflow-hidden group">
             <img
@@ -185,16 +217,16 @@ export default function App() {
         </div>
 
         {/* Showcase Feature Chips */}
-        <div className="mt-10 flex flex-wrap items-center justify-center gap-4 text-xs sm:text-sm text-white/70">
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 bg-white/5 backdrop-blur-md">
+        <div className="mt-10 flex flex-wrap items-center justify-center gap-4 text-xs sm:text-sm text-white/80">
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/15 bg-black/60 backdrop-blur-md">
             <Languages className="w-4 h-4 text-purple-400" />
             <span>Japanese, English and Hindi audio — switch anytime.</span>
           </div>
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 bg-white/5 backdrop-blur-md">
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/15 bg-black/60 backdrop-blur-md">
             <PlayCircle className="w-4 h-4 text-purple-400" />
             <span>Episode selector right inside the player.</span>
           </div>
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 bg-white/5 backdrop-blur-md">
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/15 bg-black/60 backdrop-blur-md">
             <Sparkles className="w-4 h-4 text-purple-400" />
             <span>Clean player UI that stays out of the way.</span>
           </div>
@@ -209,15 +241,15 @@ export default function App() {
         </div>
 
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          <div className="p-6 rounded-3xl border border-white/10 bg-white/[0.03] backdrop-blur-md hover:border-purple-500/40 transition">
-            <Database className="w-6 h-6 text-purple-400 mb-4" />
-            <h3 className="text-base font-semibold">AniList Data Integration</h3>
+          <div className="p-6 rounded-3xl border border-white/10 bg-black/60 backdrop-blur-md hover:border-purple-500/40 transition">
+            <Globe className="w-6 h-6 text-purple-400 mb-4" />
+            <h3 className="text-base font-semibold">Multi-Audio Support</h3>
             <p className="text-xs text-white/60 mt-2 leading-relaxed">
-              Fetches anime metadata, cover art, tags, genres, and community ratings directly from AniList.
+              Switch seamlessly between Japanese (Sub), English (Dub), and Hindi audio tracks on supported titles.
             </p>
           </div>
 
-          <div className="p-6 rounded-3xl border border-white/10 bg-white/[0.03] backdrop-blur-md hover:border-purple-500/40 transition">
+          <div className="p-6 rounded-3xl border border-white/10 bg-black/60 backdrop-blur-md hover:border-purple-500/40 transition">
             <Users className="w-6 h-6 text-pink-400 mb-4" />
             <h3 className="text-base font-semibold">Multiple Profiles</h3>
             <p className="text-xs text-white/60 mt-2 leading-relaxed">
@@ -225,15 +257,15 @@ export default function App() {
             </p>
           </div>
 
-          <div className="p-6 rounded-3xl border border-white/10 bg-white/[0.03] backdrop-blur-md hover:border-purple-500/40 transition">
-            <Sliders className="w-6 h-6 text-blue-400 mb-4" />
+          <div className="p-6 rounded-3xl border border-white/10 bg-black/60 backdrop-blur-md hover:border-purple-500/40 transition">
+            <Film className="w-6 h-6 text-blue-400 mb-4" />
             <h3 className="text-base font-semibold">Custom Video Player</h3>
             <p className="text-xs text-white/60 mt-2 leading-relaxed">
-              Built-in video player with volume/brightness gestures, skip intro/outro options, and subtitle controls.
+              Advanced video player featuring volume/brightness gestures, skip intro/outro controls, and subtitle options.
             </p>
           </div>
 
-          <div className="p-6 rounded-3xl border border-white/10 bg-white/[0.03] backdrop-blur-md hover:border-purple-500/40 transition">
+          <div className="p-6 rounded-3xl border border-white/10 bg-black/60 backdrop-blur-md hover:border-purple-500/40 transition">
             <Wifi className="w-6 h-6 text-indigo-400 mb-4" />
             <h3 className="text-base font-semibold">Search & Discovery</h3>
             <p className="text-xs text-white/60 mt-2 leading-relaxed">
@@ -241,7 +273,7 @@ export default function App() {
             </p>
           </div>
 
-          <div className="p-6 rounded-3xl border border-white/10 bg-white/[0.03] backdrop-blur-md hover:border-purple-500/40 transition">
+          <div className="p-6 rounded-3xl border border-white/10 bg-black/60 backdrop-blur-md hover:border-purple-500/40 transition">
             <Layers className="w-6 h-6 text-emerald-400 mb-4" />
             <h3 className="text-base font-semibold">Backup & Restore</h3>
             <p className="text-xs text-white/60 mt-2 leading-relaxed">
@@ -249,7 +281,7 @@ export default function App() {
             </p>
           </div>
 
-          <div className="p-6 rounded-3xl border border-white/10 bg-white/[0.03] backdrop-blur-md hover:border-purple-500/40 transition">
+          <div className="p-6 rounded-3xl border border-white/10 bg-black/60 backdrop-blur-md hover:border-purple-500/40 transition">
             <ShieldCheck className="w-6 h-6 text-amber-400 mb-4" />
             <h3 className="text-base font-semibold">Personal Watchlist</h3>
             <p className="text-xs text-white/60 mt-2 leading-relaxed">
@@ -261,7 +293,7 @@ export default function App() {
 
       {/* Why AnimeBox Section */}
       <section id="why" className="relative z-10 max-w-4xl mx-auto px-6 py-16 border-t border-white/10">
-        <div className="p-8 sm:p-10 rounded-3xl border border-white/10 bg-white/[0.02] backdrop-blur-md">
+        <div className="p-8 sm:p-10 rounded-3xl border border-white/10 bg-black/60 backdrop-blur-md">
           <div className="flex items-center gap-3 text-purple-400 mb-4">
             <Heart className="w-5 h-5" />
             <h2 className="text-xl font-bold tracking-tight text-white">Why AnimeBox Exists</h2>
@@ -275,7 +307,7 @@ export default function App() {
             AnimeBox was created to solve these interface and accessibility issues by providing a smooth, user-focused mobile experience.
           </p>
 
-          <div className="mt-6 p-4 rounded-2xl bg-black/50 border border-white/10 text-xs text-white/60 leading-relaxed">
+          <div className="mt-6 p-4 rounded-2xl bg-black/70 border border-white/10 text-xs text-white/60 leading-relaxed">
             <strong className="text-white block mb-1">Important Notice:</strong>
             This repository and source code <span className="text-white font-semibold">do not contain or host any streaming sources or copyrighted video content</span>. 
             For streaming, API endpoints can be configured locally or linked directly to official legal streaming services like Crunchyroll, Netflix, or local providers using AniList/TMDB metadata.
@@ -284,7 +316,7 @@ export default function App() {
       </section>
 
       {/* Footer */}
-      <footer className="relative z-10 border-t border-white/10 py-8 text-center text-xs text-white/40">
+      <footer className="relative z-10 border-t border-white/10 py-8 text-center text-xs text-white/40 bg-black/60">
         <div className="max-w-4xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>© {new Date().getFullYear()} AnimeBox</div>
           <div className="flex items-center gap-6">
