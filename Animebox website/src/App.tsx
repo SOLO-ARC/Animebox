@@ -33,6 +33,7 @@ const ANILIST_QUERY = `
   }
 `;
 
+// Curated high-resolution extraLarge poster covers for fallback
 const DEFAULT_COVERS = [
   "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21519-CLbDvwR4TGRB.png", // Your Name
   "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-YCDoj1EkAxL8.png", // One Punch Man
@@ -95,8 +96,10 @@ export default function App() {
         const mixed: string[] = [];
         const max = Math.max(tv.length, movies.length);
         for (let i = 0; i < max; i++) {
-          if (tv[i]?.coverImage?.large) mixed.push(tv[i].coverImage.large);
-          if (movies[i]?.coverImage?.large) mixed.push(movies[i].coverImage.large);
+          const tvUrl = tv[i]?.coverImage?.extraLarge || tv[i]?.coverImage?.large;
+          const movieUrl = movies[i]?.coverImage?.extraLarge || movies[i]?.coverImage?.large;
+          if (tvUrl) mixed.push(tvUrl);
+          if (movieUrl) mixed.push(movieUrl);
         }
         if (mixed.length >= 12) {
           setCovers(mixed);
@@ -124,8 +127,8 @@ export default function App() {
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white font-sans">
       
-      {/* Moving colorful poster collage */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden opacity-75">
+      {/* Moving high-resolution poster collage */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden opacity-80">
         <div className="absolute inset-0 flex gap-3 p-3 sm:gap-4 sm:p-4 -rotate-2 scale-105">
           {columns.map((col, ci) => {
             const doubled = [...col, ...col];
@@ -145,14 +148,14 @@ export default function App() {
                     {doubled.map((src, ri) => (
                       <div
                         key={`${ci}-${ri}`}
-                        className="relative aspect-[2/3] w-full overflow-hidden rounded-xl bg-neutral-900 shadow-lg shadow-black/50 border border-white/10"
+                        className="relative aspect-[2/3] w-full overflow-hidden rounded-xl bg-neutral-900 shadow-xl border border-white/10"
                       >
                         {src ? (
                           <img
                             src={src}
                             alt="Anime Poster"
                             loading="lazy"
-                            className="h-full w-full object-cover filter brightness-95 contrast-105"
+                            className="h-full w-full object-cover"
                           />
                         ) : (
                           <div className="h-full w-full animate-pulse bg-neutral-800" />
@@ -174,28 +177,32 @@ export default function App() {
       {/* Bottom shadow */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[60vh] bg-gradient-to-t from-black via-black/95 to-transparent" />
 
-      {/* Header featuring actual AnimeBox logo */}
+      {/* Header with Logo Only (No AnimeBox text) */}
       <header className="relative z-10 flex items-center justify-between px-6 py-6 sm:px-10 max-w-7xl mx-auto">
-        <div className="flex items-center gap-3">
+        <a href="#" className="flex items-center">
           <img 
             src="./logo.png" 
             alt="AnimeBox Logo" 
-            className="w-10 h-10 object-contain drop-shadow-md" 
+            className="w-12 h-12 sm:w-14 sm:h-14 object-contain drop-shadow-xl transition-transform duration-300 hover:scale-105" 
           />
-          <span className="font-bold text-xl tracking-tight text-white">
-            AnimeBox
-          </span>
-        </div>
+        </a>
         <nav className="hidden items-center gap-8 text-sm font-medium text-white/70 md:flex">
           <a href="#features" className="transition hover:text-white">Features</a>
           <a href="#showcase" className="transition hover:text-white">Showcase</a>
           <a href="#why" className="transition hover:text-white">Why AnimeBox</a>
-          <a href="#download" className="transition hover:text-white">Download</a>
+          <a 
+            href={downloadUrl} 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="transition hover:text-white"
+          >
+            Download
+          </a>
         </nav>
       </header>
 
       {/* Hero Section */}
-      <section className="relative z-10 mx-auto flex max-w-4xl flex-col items-center px-6 pt-16 pb-28 text-center sm:pt-24">
+      <section className="relative z-10 mx-auto flex max-w-4xl flex-col items-center px-6 pt-16 pb-32 text-center sm:pt-24">
         <h1 className="text-5xl font-bold tracking-tight sm:text-6xl md:text-7xl leading-tight">
           Just press play.
           <br />
@@ -232,12 +239,12 @@ export default function App() {
         </div>
       </section>
 
-      {/* App Showcase Section */}
+      {/* App Showcase Section - Positioned comfortably below hero */}
       <section
         id="showcase"
-        className="relative z-10 mx-auto max-w-6xl px-6 pb-24"
+        className="relative z-10 mx-auto max-w-6xl px-6 pt-10 pb-32"
       >
-        <div className="mb-10 text-center">
+        <div className="mb-12 text-center">
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
             Built for how you actually watch.
           </h2>
@@ -290,7 +297,7 @@ export default function App() {
       {/* Main Features Grid */}
       <section
         id="features"
-        className="relative z-10 mx-auto max-w-5xl px-6 pb-24"
+        className="relative z-10 mx-auto max-w-5xl px-6 pb-28"
       >
         <div className="text-center mb-10">
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Features You'll Love</h2>
@@ -345,7 +352,7 @@ export default function App() {
       {/* Why AnimeBox Exists Section */}
       <section
         id="why"
-        className="relative z-10 mx-auto max-w-4xl px-6 pb-24"
+        className="relative z-10 mx-auto max-w-4xl px-6 pb-28"
       >
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-8 backdrop-blur-md sm:p-10">
           <div className="flex items-center gap-3 text-purple-400 mb-4">
@@ -369,34 +376,19 @@ export default function App() {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="relative z-10 border-t border-white/10 bg-black/80 py-12 text-xs text-white/40">
-        <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-3">
-            <img src="./logo.png" alt="AnimeBox Logo" className="w-8 h-8 object-contain" />
-            <span className="font-bold text-sm text-white">AnimeBox</span>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-center gap-6 text-white/60">
-            <a href="#features" className="hover:text-white transition">Features</a>
-            <a href="#showcase" className="hover:text-white transition">Showcase</a>
-            <a href="#why" className="hover:text-white transition">Why AnimeBox</a>
-            <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="hover:text-white transition">Download APK</a>
-          </div>
-
-          <div className="flex items-center gap-4 text-white/40">
-            <span>© {new Date().getFullYear()} AnimeBox</span>
-            <span>·</span>
-            <a 
-              href="https://github.com/SOLO-ARC/Animebox" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 hover:text-white transition"
-            >
-              <Github className="h-3.5 w-3.5" />
-              <span>GitHub</span>
-            </a>
-          </div>
+      {/* Clean Centered Footer with Only © 2026 AnimeBox and GitHub Link */}
+      <footer className="relative z-10 border-t border-white/10 bg-black/80 py-10 text-xs text-white/50">
+        <div className="max-w-4xl mx-auto px-6 flex items-center justify-center gap-6">
+          <span>© {new Date().getFullYear()} AnimeBox</span>
+          <a 
+            href="https://github.com/SOLO-ARC/Animebox" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-white/60 hover:text-white transition"
+          >
+            <Github className="h-4 w-4" />
+            <span>GitHub</span>
+          </a>
         </div>
       </footer>
 
