@@ -12,23 +12,26 @@ import {
   Languages,
   CheckCircle2,
   Sliders,
-  Tv
+  Tv,
+  Play,
+  Download,
+  ExternalLink
 } from "lucide-react";
 
-// Default curated anime covers matching the reference screenshot layout
+// Default curated mix of popular anime TV shows and iconic anime movies
 const DEFAULT_COVERS = [
-  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-YCDoj1EkAxL8.png", // One Punch Man
-  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101291-729r7UfaERpT.jpg", // Bunny Girl Senpai
-  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21459-Ro2qTzA6M0vB.jpg", // My Hero Academia
-  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx11061-N5EWBZSQAawL.jpg", // Hunter x Hunter
-  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx20464-6BG40F3mBofF.jpg", // Haikyuu!!
-  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101922-PEn1rB905jqc.jpg", // Demon Slayer
-  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx20954-UMjLWY3HX54a.jpg", // Silent Voice
-  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx20605-t6oP7c6WbXsp.jpg", // Tokyo Ghoul
-  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx113415-LHn2ptFZF18W.jpg", // Chainsaw Man
-  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx16498-m5ZWy5xFyqSC.jpg", // Attack on Titan
-  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx113415-ffl2T3D3w2eG.jpg", // Jujutsu Kaisen
-  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx1535-4rLyJ62ChA2T.jpg", // Death Note
+  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21519-CLbDvwR4TGRB.png", // Your Name (Movie)
+  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-YCDoj1EkAxL8.png", // One Punch Man (TV)
+  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx20954-UMjLWY3HX54a.jpg", // A Silent Voice (Movie)
+  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101922-PEn1rB905jqc.jpg", // Demon Slayer (TV)
+  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx105333-eW02jL1yTfl9.jpg", // Weathering With You (Movie)
+  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx113415-ffl2T3D3w2eG.jpg", // Jujutsu Kaisen (TV)
+  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx199-m5ZWy5xFyqSC.jpg", // Spirited Away (Movie)
+  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx16498-m5ZWy5xFyqSC.jpg", // Attack on Titan (TV)
+  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx131573-0wS307vR4JgX.jpg", // Suzume (Movie)
+  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx11061-N5EWBZSQAawL.jpg", // Hunter x Hunter (TV)
+  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx128893-nFlSjL9SszA0.jpg", // Jujutsu Kaisen 0 (Movie)
+  "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx20464-6BG40F3mBofF.jpg", // Haikyuu!! (TV)
 ];
 
 function AndroidIcon({ className = "w-6 h-6" }: { className?: string }) {
@@ -43,16 +46,18 @@ export default function App() {
   const downloadUrl = "https://github.com/SOLO-ARC/Animebox/releases/latest";
   const [covers, setCovers] = useState<string[]>(DEFAULT_COVERS);
 
-  // Dynamically fetch top trending anime covers from AniList GraphQL API
+  // Dynamically fetch a 50/50 mix of popular TV Anime shows and Anime Movies from AniList GraphQL API
   useEffect(() => {
     const query = `
       query {
-        Page(page: 1, perPage: 24) {
-          media(sort: POPULARITY_DESC, type: ANIME) {
-            coverImage {
-              extraLarge
-              large
-            }
+        tv: Page(page: 1, perPage: 12) {
+          media(sort: POPULARITY_DESC, type: ANIME, format: TV) {
+            coverImage { extraLarge large }
+          }
+        }
+        movies: Page(page: 1, perPage: 12) {
+          media(sort: POPULARITY_DESC, type: ANIME, format: MOVIE) {
+            coverImage { extraLarge large }
           }
         }
       }
@@ -65,11 +70,18 @@ export default function App() {
     })
       .then((res) => res.json())
       .then((data) => {
-        const fetchedCovers = data?.data?.Page?.media
-          ?.map((m: any) => m.coverImage?.extraLarge || m.coverImage?.large)
-          ?.filter(Boolean);
-        if (fetchedCovers && fetchedCovers.length >= 8) {
-          setCovers(fetchedCovers);
+        const tvCovers = data?.data?.tv?.media?.map((m: any) => m.coverImage?.extraLarge || m.coverImage?.large) || [];
+        const movieCovers = data?.data?.movies?.media?.map((m: any) => m.coverImage?.extraLarge || m.coverImage?.large) || [];
+        
+        // Interleave TV shows and Movies for a rich mixed grid
+        const mixed: string[] = [];
+        const maxLen = Math.max(tvCovers.length, movieCovers.length);
+        for (let i = 0; i < maxLen; i++) {
+          if (tvCovers[i]) mixed.push(tvCovers[i]);
+          if (movieCovers[i]) mixed.push(movieCovers[i]);
+        }
+        if (mixed.length >= 8) {
+          setCovers(mixed);
         }
       })
       .catch((err) => console.error("AniList fetch error:", err));
@@ -78,15 +90,22 @@ export default function App() {
   // Split covers into 4 columns for smooth vertical scrolling animation
   const col1 = covers.slice(0, 6);
   const col2 = covers.slice(6, 12);
-  const col3 = covers.slice(0, 6).reverse();
-  const col4 = covers.slice(6, 12).reverse();
+  const col3 = covers.slice(12, 18).length > 0 ? covers.slice(12, 18) : covers.slice(0, 6).reverse();
+  const col4 = covers.slice(18, 24).length > 0 ? covers.slice(18, 24) : covers.slice(6, 12).reverse();
 
   return (
     <div className="min-h-screen bg-[#09090b] text-white selection:bg-purple-500 selection:text-white font-sans relative overflow-x-hidden">
       
-      {/* Background Moving Poster Cards Grid with Increased Visibility */}
+      {/* Ambient Neon Glass Glow Accents */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
+        <div className="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[900px] h-[600px] bg-purple-600/15 rounded-full blur-[160px]" />
+        <div className="absolute top-[45%] left-[-10%] w-[500px] h-[500px] bg-pink-600/10 rounded-full blur-[140px]" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] bg-indigo-600/15 rounded-full blur-[160px]" />
+      </div>
+
+      {/* Background Moving Poster Cards Grid (Mix of Popular TV Shows & Movies) */}
       <div className="absolute inset-0 z-0 overflow-hidden opacity-65 select-none pointer-events-none">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 -rotate-3 scale-110 h-[200vh]">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 -rotate-3 scale-110 h-[220vh]">
           
           {/* Column 1 - Scroll Up */}
           <div className="flex flex-col gap-4 animate-scroll-up">
@@ -126,31 +145,33 @@ export default function App() {
 
         </div>
 
-        {/* Lighter gradient overlay so posters remain clearly visible */}
+        {/* Lighter glass gradient overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-[#09090b] via-[#09090b]/55 to-[#09090b]/65 backdrop-blur-[1px]" />
       </div>
 
-      {/* Top Header Navigation */}
-      <nav className="relative z-20 border-b border-white/10 bg-black/50 backdrop-blur-md sticky top-0">
+      {/* Top Header Navigation featuring Actual AnimeBox Logo */}
+      <nav className="relative z-20 border-b border-white/10 bg-black/40 backdrop-blur-xl sticky top-0 shadow-lg">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img 
-              src="./photo_2026-07-27_05-42-31.jpg" 
+              src="./logo.png" 
               alt="AnimeBox Logo" 
-              className="w-8 h-8 rounded-xl border border-white/15 object-cover shadow-lg" 
+              className="w-9 h-9 rounded-xl border border-white/20 object-contain p-0.5 bg-black/60 shadow-xl" 
             />
-            <span className="font-bold text-lg tracking-tight text-white">AnimeBox</span>
+            <span className="font-bold text-xl tracking-tight bg-gradient-to-r from-white via-white to-purple-200 bg-clip-text text-transparent">
+              AnimeBox
+            </span>
           </div>
 
-          <div className="flex items-center gap-6 text-sm font-medium text-white/70">
-            <a href="#features" className="hover:text-white transition">Features</a>
-            <a href="#showcase" className="hover:text-white transition">Showcase</a>
-            <a href="#download" className="hover:text-white transition">Download</a>
+          <div className="flex items-center gap-6 text-sm font-medium text-white/80">
+            <a href="#features" className="hover:text-purple-300 transition">Features</a>
+            <a href="#showcase" className="hover:text-purple-300 transition">Showcase</a>
+            <a href="#download" className="hover:text-purple-300 transition">Download</a>
           </div>
         </div>
       </nav>
 
-      {/* Hero Section matching Screenshot 1 */}
+      {/* Hero Section */}
       <header className="relative z-10 max-w-4xl mx-auto px-6 pt-24 pb-20 text-center flex flex-col items-center justify-center min-h-[75vh]">
         
         <h1 className="text-4xl sm:text-6xl md:text-7xl font-black tracking-tight leading-[1.1] drop-shadow-2xl">
@@ -163,7 +184,7 @@ export default function App() {
           Your anime, your language, your pace.
         </p>
 
-        {/* Hero Download Button matching Screenshot 1 */}
+        {/* Hero Download Button */}
         <div id="download" className="relative mt-10 group z-20">
           <div className="absolute -inset-4 rounded-full bg-white/30 blur-2xl transition group-hover:bg-white/50" />
           <a
@@ -189,7 +210,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* App Showcase Section matching Screenshot 2 */}
+      {/* App Showcase Section */}
       <section
         id="showcase"
         className="relative z-10 max-w-6xl mx-auto px-6 pt-16 pb-24 border-t border-white/10"
@@ -205,7 +226,7 @@ export default function App() {
 
         {/* Horizontal Phone Mockup displaying Jujutsu Kaisen Player Screenshot */}
         <div className="relative mx-auto w-full max-w-4xl">
-          <div className="absolute -inset-8 rounded-[3rem] bg-purple-600/15 blur-3xl" />
+          <div className="absolute -inset-8 rounded-[3rem] bg-purple-600/20 blur-3xl" />
           
           <div className="relative rounded-[2.5rem] border-[10px] border-[#18181b] bg-black p-2 shadow-2xl overflow-hidden group">
             <img
@@ -216,84 +237,104 @@ export default function App() {
           </div>
         </div>
 
-        {/* Showcase Feature Chips */}
-        <div className="mt-10 flex flex-wrap items-center justify-center gap-4 text-xs sm:text-sm text-white/80">
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/15 bg-black/60 backdrop-blur-md">
+        {/* Showcase Feature Chips with Glassmorphism */}
+        <div className="mt-10 flex flex-wrap items-center justify-center gap-4 text-xs sm:text-sm text-white/90">
+          <div className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full border border-white/20 bg-white/[0.06] backdrop-blur-xl shadow-lg">
             <Languages className="w-4 h-4 text-purple-400" />
             <span>Japanese, English and Hindi audio — switch anytime.</span>
           </div>
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/15 bg-black/60 backdrop-blur-md">
+          <div className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full border border-white/20 bg-white/[0.06] backdrop-blur-xl shadow-lg">
             <PlayCircle className="w-4 h-4 text-purple-400" />
             <span>Episode selector right inside the player.</span>
           </div>
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/15 bg-black/60 backdrop-blur-md">
+          <div className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full border border-white/20 bg-white/[0.06] backdrop-blur-xl shadow-lg">
             <Sparkles className="w-4 h-4 text-purple-400" />
             <span>Clean player UI that stays out of the way.</span>
           </div>
         </div>
       </section>
 
-      {/* Main Features Grid */}
+      {/* Main Features Glassmorphism Grid */}
       <section id="features" className="relative z-10 max-w-5xl mx-auto px-6 py-20 border-t border-white/10">
         <div className="text-center mb-12">
           <h2 className="text-3xl font-bold tracking-tight">Features You'll Love</h2>
-          <p className="text-sm text-white/60 mt-2">Designed from the ground up for performance and comfort.</p>
+          <p className="text-sm text-white/60 mt-2">Designed from the ground up for performance, quality, and comfort.</p>
         </div>
 
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          <div className="p-6 rounded-3xl border border-white/10 bg-black/60 backdrop-blur-md hover:border-purple-500/40 transition">
-            <Globe className="w-6 h-6 text-purple-400 mb-4" />
+          
+          {/* Multi-Audio Support with Languages Icon */}
+          <div className="p-6 rounded-3xl border border-white/15 bg-white/[0.04] backdrop-blur-2xl shadow-xl hover:border-purple-500/50 hover:bg-white/[0.07] transition group">
+            <div className="w-12 h-12 rounded-2xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center mb-4 group-hover:scale-110 transition">
+              <Languages className="w-6 h-6 text-purple-400" />
+            </div>
             <h3 className="text-base font-semibold">Multi-Audio Support</h3>
             <p className="text-xs text-white/60 mt-2 leading-relaxed">
               Switch seamlessly between Japanese (Sub), English (Dub), and Hindi audio tracks on supported titles.
             </p>
           </div>
 
-          <div className="p-6 rounded-3xl border border-white/10 bg-black/60 backdrop-blur-md hover:border-purple-500/40 transition">
-            <Users className="w-6 h-6 text-pink-400 mb-4" />
+          {/* Multiple Profiles */}
+          <div className="p-6 rounded-3xl border border-white/15 bg-white/[0.04] backdrop-blur-2xl shadow-xl hover:border-pink-500/50 hover:bg-white/[0.07] transition group">
+            <div className="w-12 h-12 rounded-2xl bg-pink-500/15 border border-pink-500/30 flex items-center justify-center mb-4 group-hover:scale-110 transition">
+              <Users className="w-6 h-6 text-pink-400" />
+            </div>
             <h3 className="text-base font-semibold">Multiple Profiles</h3>
             <p className="text-xs text-white/60 mt-2 leading-relaxed">
               Support for creating and managing separate user profiles, including dedicated kids profiles.
             </p>
           </div>
 
-          <div className="p-6 rounded-3xl border border-white/10 bg-black/60 backdrop-blur-md hover:border-purple-500/40 transition">
-            <Film className="w-6 h-6 text-blue-400 mb-4" />
+          {/* Custom Video Player with Play Button Icon */}
+          <div className="p-6 rounded-3xl border border-white/15 bg-white/[0.04] backdrop-blur-2xl shadow-xl hover:border-blue-500/50 hover:bg-white/[0.07] transition group">
+            <div className="w-12 h-12 rounded-2xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center mb-4 group-hover:scale-110 transition">
+              <Play className="w-6 h-6 text-blue-400 fill-blue-400/20" />
+            </div>
             <h3 className="text-base font-semibold">Custom Video Player</h3>
             <p className="text-xs text-white/60 mt-2 leading-relaxed">
               Advanced video player featuring volume/brightness gestures, skip intro/outro controls, and subtitle options.
             </p>
           </div>
 
-          <div className="p-6 rounded-3xl border border-white/10 bg-black/60 backdrop-blur-md hover:border-purple-500/40 transition">
-            <Wifi className="w-6 h-6 text-indigo-400 mb-4" />
+          {/* Search & Discovery */}
+          <div className="p-6 rounded-3xl border border-white/15 bg-white/[0.04] backdrop-blur-2xl shadow-xl hover:border-indigo-500/50 hover:bg-white/[0.07] transition group">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center mb-4 group-hover:scale-110 transition">
+              <Wifi className="w-6 h-6 text-indigo-400" />
+            </div>
             <h3 className="text-base font-semibold">Search & Discovery</h3>
             <p className="text-xs text-white/60 mt-2 leading-relaxed">
-              Search through anime series with category and tag filters.
+              Search through anime series with category, genre, and tag filters.
             </p>
           </div>
 
-          <div className="p-6 rounded-3xl border border-white/10 bg-black/60 backdrop-blur-md hover:border-purple-500/40 transition">
-            <Layers className="w-6 h-6 text-emerald-400 mb-4" />
+          {/* Backup & Restore */}
+          <div className="p-6 rounded-3xl border border-white/15 bg-white/[0.04] backdrop-blur-2xl shadow-xl hover:border-emerald-500/50 hover:bg-white/[0.07] transition group">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mb-4 group-hover:scale-110 transition">
+              <Layers className="w-6 h-6 text-emerald-400" />
+            </div>
             <h3 className="text-base font-semibold">Backup & Restore</h3>
             <p className="text-xs text-white/60 mt-2 leading-relaxed">
               Export profile data and app settings to a JSON file and import them back anytime.
             </p>
           </div>
 
-          <div className="p-6 rounded-3xl border border-white/10 bg-black/60 backdrop-blur-md hover:border-purple-500/40 transition">
-            <ShieldCheck className="w-6 h-6 text-amber-400 mb-4" />
+          {/* Personal Watchlist */}
+          <div className="p-6 rounded-3xl border border-white/15 bg-white/[0.04] backdrop-blur-2xl shadow-xl hover:border-amber-500/50 hover:bg-white/[0.07] transition group">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center mb-4 group-hover:scale-110 transition">
+              <ShieldCheck className="w-6 h-6 text-amber-400" />
+            </div>
             <h3 className="text-base font-semibold">Personal Watchlist</h3>
             <p className="text-xs text-white/60 mt-2 leading-relaxed">
               Per-profile anime saving and watch history tracking.
             </p>
           </div>
+
         </div>
       </section>
 
       {/* Why AnimeBox Section */}
       <section id="why" className="relative z-10 max-w-4xl mx-auto px-6 py-16 border-t border-white/10">
-        <div className="p-8 sm:p-10 rounded-3xl border border-white/10 bg-black/60 backdrop-blur-md">
+        <div className="p-8 sm:p-10 rounded-3xl border border-white/15 bg-white/[0.04] backdrop-blur-2xl shadow-2xl">
           <div className="flex items-center gap-3 text-purple-400 mb-4">
             <Heart className="w-5 h-5" />
             <h2 className="text-xl font-bold tracking-tight text-white">Why AnimeBox Exists</h2>
@@ -307,7 +348,7 @@ export default function App() {
             AnimeBox was created to solve these interface and accessibility issues by providing a smooth, user-focused mobile experience.
           </p>
 
-          <div className="mt-6 p-4 rounded-2xl bg-black/70 border border-white/10 text-xs text-white/60 leading-relaxed">
+          <div className="mt-6 p-4 rounded-2xl bg-black/60 border border-white/10 text-xs text-white/60 leading-relaxed">
             <strong className="text-white block mb-1">Important Notice:</strong>
             This repository and source code <span className="text-white font-semibold">do not contain or host any streaming sources or copyrighted video content</span>. 
             For streaming, API endpoints can be configured locally or linked directly to official legal streaming services like Crunchyroll, Netflix, or local providers using AniList/TMDB metadata.
@@ -316,7 +357,7 @@ export default function App() {
       </section>
 
       {/* Footer */}
-      <footer className="relative z-10 border-t border-white/10 py-8 text-center text-xs text-white/40 bg-black/60">
+      <footer className="relative z-10 border-t border-white/10 py-8 text-center text-xs text-white/40 bg-black/40 backdrop-blur-md">
         <div className="max-w-4xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>© {new Date().getFullYear()} AnimeBox</div>
           <div className="flex items-center gap-6">
