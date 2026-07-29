@@ -43,13 +43,19 @@ jobs:
         run: npm run build
         working-directory: './Animebox website'
 
+      - name: Create 404.html and .nojekyll fallback
+        run: |
+          cp dist/index.html dist/404.html
+          touch dist/.nojekyll
+        working-directory: './Animebox website'
+
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v5
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './Animebox website/dist/client'
+          path: './Animebox website/dist'
 
       - name: Deploy to GitHub Pages
         id: deployment
