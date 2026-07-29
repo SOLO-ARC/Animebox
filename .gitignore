@@ -1,6 +1,7 @@
 # Ignore non-app reference directories and scratch files
 Icon-Video Player/
 clean-kotlin-blueprint/
+anime-download-hub-main/
 *.png
 !logo (1).png
 !app showcase screenshots/*.png
