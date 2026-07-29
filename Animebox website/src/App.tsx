@@ -125,7 +125,7 @@ export default function App() {
   source.forEach((src, i) => columns[i % COL_COUNT].push(src));
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-black text-white font-sans">
+    <main className="relative min-h-screen overflow-hidden bg-black text-white selection:bg-white/20 selection:text-white font-sans">
       
       {/* Moving high-resolution poster collage */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden opacity-80">
