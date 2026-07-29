@@ -8,9 +8,19 @@
   <a href="https://github.com/SOLO-ARC/Animebox/releases/latest"><b>Download Latest APK</b></a>
 </p>
 
-AnimeBox is an Android application built for exploring and watching anime on mobile devices. It fetches anime data, ratings, and metadata directly from AniList, providing a clean interface, customizable video player controls, and multi-profile support.
+AnimeBox is an Android application built for exploring and tracking anime on mobile devices. It fetches anime metadata, ratings, and series information directly from AniList, providing a clean interface, customizable video player controls, and multi-profile support.
 
-This source code can also be used as a base for anime database apps, tracking platforms, or rating applications. For video playback, you can integrate your own streaming sources or link directly to official streaming platforms such as Crunchyroll, Netflix, or others based on your preference.
+---
+
+## Why AnimeBox Exists
+
+Many mainstream anime streaming services often fall short for dedicated fans. Platforms like Crunchyroll frequently remove anime titles from their catalog, offer dated user interfaces, and sometimes deliver lower video resolutions or basic subtitle options compared to modern media standards. On the other hand, platforms like Netflix offer a polished UI and high playback quality, but their anime collections are heavily region-locked, limited in size, or completely unavailable in many countries.
+
+AnimeBox was created to solve these interface and accessibility issues by providing a smooth, user-focused mobile experience.
+
+> **Important**: This source code **does not contain or host any streaming sources or copyrighted video content**.
+> - **For Streaming Apps**: If you plan to build a video playback client, streaming API endpoints must be provided by you.
+> - **For Database & Tracking Apps**: If you are building an anime rating, database, or tracking app, you can use AniList or TMDB metadata to redirect users to official legal streaming services like Crunchyroll, Netflix, or local providers available in their region.
 
 ---
 
@@ -28,7 +38,7 @@ This source code can also be used as a base for anime database apps, tracking pl
 
 ## Features
 
-- **AniList Data Integration**: Uses AniList to display anime information, ratings, and cover art.
+- **AniList Data Integration**: Uses AniList to display anime information, ratings, genres, and cover art.
 - **Multiple Profiles**: Support for creating and managing separate user profiles, including dedicated kids profiles.
 - **Home & Banner Feed**: Hero carousel highlighting popular titles, along with a continue watching section.
 - **Custom Player**: Built-in video player with volume/brightness gestures, skip intro/outro options, quality selectors, and subtitle controls.
@@ -40,7 +50,7 @@ This source code can also be used as a base for anime database apps, tracking pl
 
 ## Building from Source
 
-> **Note**: To build and use this application from the source code, you can integrate your own streaming API sources or link direct watch URLs.
+> **Note**: To build and use this application from the source code, you can integrate your own streaming API sources or link direct watch URLs to official providers.
 
 1. Clone this repository.
 2. Open the `animebox` project folder in Android Studio.
