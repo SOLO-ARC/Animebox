@@ -80,6 +80,7 @@ function preloadAll(urls: string[]): Promise<void> {
 
 export default function App() {
   const downloadUrl = "https://github.com/SOLO-ARC/Animebox/releases/latest";
+  const githubUrl = "https://github.com/SOLO-ARC/Animebox";
   const [covers, setCovers] = useState<string[]>(DEFAULT_COVERS);
   const [ready, setReady] = useState(false);
 
@@ -177,24 +178,32 @@ export default function App() {
       {/* Bottom shadow */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[60vh] bg-gradient-to-t from-black via-black/95 to-transparent" />
 
-      {/* Header with Logo Only (No AnimeBox text) */}
+      {/* Header with Larger Logo & GitHub Nav Link */}
       <header className="relative z-10 flex items-center justify-between px-6 py-6 sm:px-10 max-w-7xl mx-auto">
         <a href="#" className="flex items-center">
           <img 
             src="./logo.png" 
             alt="AnimeBox Logo" 
-            className="w-12 h-12 sm:w-14 sm:h-14 object-contain drop-shadow-xl transition-transform duration-300 hover:scale-105" 
+            className="w-16 h-16 sm:w-20 sm:h-20 object-contain drop-shadow-2xl transition-transform duration-300 hover:scale-105" 
           />
         </a>
         <nav className="hidden items-center gap-8 text-sm font-medium text-white/70 md:flex">
           <a href="#features" className="transition hover:text-white">Features</a>
           <a href="#showcase" className="transition hover:text-white">Showcase</a>
-          <a href="#why" className="transition hover:text-white">Why AnimeBox</a>
+          <a 
+            href={githubUrl} 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="inline-flex items-center gap-2 transition hover:text-white"
+          >
+            <Github className="h-4 w-4 text-white" />
+            <span>GitHub</span>
+          </a>
           <a 
             href={downloadUrl} 
             target="_blank" 
             rel="noopener noreferrer" 
-            className="transition hover:text-white"
+            className="transition hover:text-white font-semibold"
           >
             Download
           </a>
@@ -239,7 +248,7 @@ export default function App() {
         </div>
       </section>
 
-      {/* App Showcase Section - Positioned comfortably below hero */}
+      {/* App Showcase Section */}
       <section
         id="showcase"
         className="relative z-10 mx-auto max-w-6xl px-6 pt-10 pb-32"
@@ -349,39 +358,12 @@ export default function App() {
         </div>
       </section>
 
-      {/* Why AnimeBox Exists Section */}
-      <section
-        id="why"
-        className="relative z-10 mx-auto max-w-4xl px-6 pb-28"
-      >
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-8 backdrop-blur-md sm:p-10">
-          <div className="flex items-center gap-3 text-purple-400 mb-4">
-            <Heart className="h-5 w-5" />
-            <h2 className="text-xl font-bold tracking-tight text-white">Why AnimeBox Exists</h2>
-          </div>
-
-          <p className="text-sm text-white/70 leading-relaxed">
-            Mainstream anime streaming platforms like Crunchyroll frequently remove anime titles from their catalog, feature dated user interfaces, and deliver lower video playback options. On the other hand, platforms like Netflix offer a polished UI, but their anime collections are heavily region-locked or limited in selection.
-          </p>
-
-          <p className="text-sm text-white/70 leading-relaxed mt-4">
-            AnimeBox was created to solve these interface and accessibility hurdles with a clean, user-focused mobile experience.
-          </p>
-
-          <div className="mt-6 p-4 rounded-xl bg-neutral-900/90 border border-white/10 text-xs text-white/60 leading-relaxed">
-            <strong className="text-white block mb-1">Important Notice:</strong>
-            This repository and source code <span className="text-white font-semibold">do not host any streaming sources or video content</span>. 
-            For streaming, API endpoints can be configured locally or linked directly to official platforms like Crunchyroll, Netflix, or TMDB/AniList metadata.
-          </div>
-        </div>
-      </section>
-
       {/* Clean Centered Footer with Only © 2026 AnimeBox and GitHub Link */}
       <footer className="relative z-10 border-t border-white/10 bg-black/80 py-10 text-xs text-white/50">
         <div className="max-w-4xl mx-auto px-6 flex items-center justify-center gap-6">
           <span>© {new Date().getFullYear()} AnimeBox</span>
           <a 
-            href="https://github.com/SOLO-ARC/Animebox" 
+            href={githubUrl} 
             target="_blank" 
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 text-white/60 hover:text-white transition"
