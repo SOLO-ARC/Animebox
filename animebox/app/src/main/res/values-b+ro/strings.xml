@@ -22,7 +22,7 @@
     <string name="new_update_format" formatted="true">Actualizare nouă găsită! \n%1$s -&gt; %2$s</string>
     <string name="filler" formatted="true">Filler</string>
     <string name="duration_format" formatted="true">%d min</string>
-    <!-- <string name="app_name">CloudStream</string> -->
+    <!-- <string name="app_name">FireFly</string> -->
     <string name="title_home">Prima pagină</string>
     <string name="title_search">Căutare</string>
     <string name="title_downloads">Descărcări</string>
@@ -363,7 +363,7 @@
     <string name="history">Istoric</string>
     <string name="action_mark_as_watched">Marcați ca vizionat</string>
     <string name="autoplay_next_settings">Redă automat următorul episod</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="play_trailer_button">Vizionează trailerul</string>
     <string name="update_started">Actualizarea a început</string>
     <string name="episode_sync_settings">Actualizați progresul ceasului</string>

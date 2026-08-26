@@ -23,7 +23,7 @@
     <string name="new_update_format" formatted="true">نوێکاری نوێ دۆزرایەوە!\n%1$s-&gt;%2$s</string>
     <string name="filler" formatted="true">فیلەر</string>
     <string name="duration_format" formatted="true">min%d</string>
-    <string name="app_name">کلاود ستریم</string>
+    <string name="app_name">FireFly</string>
     <string name="title_home">سەرەکی</string>
     <string name="title_search">گەڕان</string>
     <string name="title_downloads">داونڵۆد</string>

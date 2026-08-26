@@ -18,7 +18,7 @@
     <string name="new_update_format" formatted="true">নতুন আপডেট এসেছে! \n%1$s -&gt; %2$s</string>
     <string name="filler" formatted="true">ফিলার</string>
     <string name="duration_format" formatted="true">%d মিনিট</string>
-    <string name="app_name">ক্লাউডস্ট্রিম</string>
+    <string name="app_name">FireFly</string>
     <string name="title_search">খুঁজুন</string>
     <string name="title_downloads">ডাউনলোডসমূহ</string>
     <string name="title_settings">সেটিংস</string>

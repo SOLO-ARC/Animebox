@@ -165,7 +165,7 @@
     <string name="home_more_info">Meir informasjon</string>
     <string name="sort_close">Lukk</string>
     <string name="player_speed_text_format" formatted="true">Avspelinghastigheit (%.2fx)</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="next_episode_time_min_format" formatted="true">%dm</string>
     <string name="updates_settings_des">Sjå etter nye oppdateringar automatisk ved oppstart</string>
     <string name="discord">Bli med i Discord</string>

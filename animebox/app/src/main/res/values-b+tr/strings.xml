@@ -22,7 +22,7 @@
     <string name="new_update_format" formatted="true">Yeni güncelleme bulundu! \n%1$s -&gt; %2$s</string>
     <string name="filler" formatted="true">Dolgu</string>
     <string name="duration_format" formatted="true">%d dakika</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="play_with_app_name">CloudStream ile oynat</string>
     <string name="title_home">Ana sayfa</string>
     <string name="title_search">Ara</string>

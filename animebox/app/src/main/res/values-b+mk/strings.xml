@@ -5,7 +5,7 @@
     <string name="rated_format" formatted="true">Оценето: %.1f</string>
     <string name="new_update_format" formatted="true">Пронајдена нова верзија!\n%1$s -&gt; %2$s</string>
     <string name="filler" formatted="true">Филтер</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="title_home">Дома</string>
     <string name="title_search">Барај</string>
     <string name="title_downloads">Преземања</string>

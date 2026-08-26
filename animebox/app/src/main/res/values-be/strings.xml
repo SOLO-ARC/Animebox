@@ -24,7 +24,7 @@
     <string name="new_update_format" formatted="true">Знойдзена новае абнаўленне!\n%1$s -&gt; %2$s</string>
     <string name="filler" formatted="true">Запаўняльнік</string>
     <string name="duration_format" formatted="true">%d хвіл</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="play_with_app_name">Прайграць праз CloudStream</string>
     <string name="title_home">Дамашняя</string>
     <string name="title_search">Пошук</string>

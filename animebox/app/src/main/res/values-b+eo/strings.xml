@@ -85,7 +85,7 @@
     <string name="next_episode_time_min_format" formatted="true">%dm</string>
     <string name="new_update_format" formatted="true">Nova ĝisdatigo trovita! \n%1$s -&gt; %2$s</string>
     <string name="filler" formatted="true">Speciala epizodo</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="download_started">Elŝuto Komencite</string>
     <string name="reload_error">Reprovi konekton…</string>
     <string name="stream">Elsendfluo</string>

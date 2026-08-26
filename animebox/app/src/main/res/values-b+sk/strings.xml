@@ -11,7 +11,7 @@
     <string name="result_open_in_browser">Otvoriť v prehliadači</string>
     <string name="skip_loading">Preskočiť načítavanie</string>
     <string name="cast_format" formatted="true">Hrajú: %s</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="result_poster_img_des">Plagát</string>
     <string name="next_episode_time_day_format" formatted="true">%1$dd %2$dh %3$dm</string>
     <string name="next_episode_time_min_format" formatted="true">%dm</string>

@@ -78,4 +78,14 @@ object ProfileManager {
         current.add(UserProfile(newId, name, avatarUrl))
         saveProfiles(context, current)
     }
+
+    fun deleteProfile(context: Context, profileId: String) {
+        val current = getProfiles(context).filterNot { it.id == profileId }
+        if (current.isNotEmpty()) {
+            saveProfiles(context, current)
+            if (getActiveProfile(context) == profileId) {
+                setActiveProfile(context, current.first().id)
+            }
+        }
+    }
 }

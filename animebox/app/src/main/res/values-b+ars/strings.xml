@@ -38,7 +38,7 @@
     <string name="new_update_format" formatted="true">!تم العثور على تحديث جديد \n%1$s -&gt; %2$s</string>
     <string name="rated_format" formatted="true">%.1f:قدر</string>
     <string name="duration_format" formatted="true">%dاقل</string>
-    <string name="app_name">كلاودستريم</string>
+    <string name="app_name">FireFly</string>
     <string name="title_search">بحث</string>
     <string name="title_downloads">التحميلات</string>
     <string name="title_settings">اعدادات</string>

@@ -102,7 +102,8 @@ object SearchResultBuilder {
             }
         }
 
-        shadow?.isVisible = showTitle
+        val isResume = card is DataStoreHelper.ResumeWatchingResult
+        shadow?.isVisible = if (isResume) false else showTitle
 
         when (card.quality) {
             SearchQuality.BlueRay -> R.string.quality_blueray
@@ -130,7 +131,7 @@ object SearchResultBuilder {
         }
 
         cardText?.text = card.name
-        cardText?.isVisible = showTitle
+        cardText?.isVisible = if (isResume) false else showTitle
         cardView.isVisible = true
         if (!card.posterUrl.isNullOrEmpty()) {
             cardView.loadImage(card.posterUrl, card.posterHeaders) {
@@ -259,12 +260,7 @@ object SearchResultBuilder {
                     bar?.visibility = View.VISIBLE
                 }
                 playImg?.visibility = View.VISIBLE
-                if (card.type?.isMovieType() == false && showEpisodeText) {
-                    episodeText?.context?.getShortSeasonText(card.episode, card.season)?.let {text->
-                        episodeText.text = text
-                        episodeText.isVisible = true
-                    }
-                }
+                episodeText?.isVisible = false
             }
 
             is AnimeSearchResponse -> {

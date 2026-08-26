@@ -19,7 +19,7 @@
     <string formatted="true" name="new_update_format">Намерена е нова актуализация! \n%1$s -&gt; %2$s</string>
     <string formatted="true" name="filler">Шаблон</string>
     <string formatted="true" name="duration_format">%d мин</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="play_with_app_name">Пусни с CloudStream</string>
     <string name="title_home">Начало</string>
     <string name="title_search">Търсене</string>

@@ -22,7 +22,7 @@
     <string name="new_update_format" formatted="true">發現新版本！ \n%1$s -&gt; %2$s</string>
     <string name="filler" formatted="true">填充</string>
     <string name="duration_format" formatted="true">%d 分鐘</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="play_with_app_name">使用 CloudStream 播放</string>
     <string name="title_home">主畫面</string>
     <string name="title_search">搜尋</string>

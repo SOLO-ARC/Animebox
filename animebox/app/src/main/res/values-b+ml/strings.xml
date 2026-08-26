@@ -4,7 +4,7 @@
     <string name="player_speed_text_format" formatted="true">വേഗം (%.2fx)</string>
     <string name="rated_format" formatted="true">റേറ്റിംഗ്: %.1f</string>
     <string name="new_update_format" formatted="true">പുതിയ അപ്ഡേറ്റ്! \n%1$s -&gt; %2$s</string>
-    <string name="app_name">ക്ലൗഡ് സ്ട്രീം</string>
+    <string name="app_name">FireFly</string>
     <string name="title_home">ഹോം</string>
     <string name="title_search">തിരയുക</string>
     <string name="title_downloads">ഡൗൺലോഡ്സ്</string>

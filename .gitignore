@@ -3,8 +3,20 @@ clean-kotlin-blueprint/
 anime-download-hub-main/
 anidrive-stream-finder-main/
 Animebox website/
+anime-scraper-v1/
+animebox-admin/
+lovable api/
+multimoviesapi/
+Animestudio's logo/
 .netlify/
+
+# Extractors and proprietary download engines
+animebox/app/src/main/java/com/lagradost/cloudstream3/ui/animebox/extractors/
+animebox/app/src/main/java/com/lagradost/cloudstream3/ui/animebox/download/
+
 *.png
+!fireflytransparentlogo.png
+!FireFlyHomescreenlogo.png
 !logo (1).png
 !app showcase screenshots/*.png
 !app showcase screenshots/*.jpg
@@ -23,6 +35,7 @@ Animebox website/
 .DS_Store
 Thumbs.db
 hs_err_pid*.log
+replay_pid*.log
 
 # Gradle & Build artifacts
 .gradle/
@@ -31,3 +44,4 @@ app/build/
 library/build/
 *.apk
 *.aar
+

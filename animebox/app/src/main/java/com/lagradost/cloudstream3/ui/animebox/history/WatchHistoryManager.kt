@@ -21,10 +21,12 @@ data class WatchHistoryItem(
 /**
  * Persist watch progress ("Continue Watching") locally bound specifically to the current active profile
  */
-class WatchHistoryManager(context: Context) {
+class WatchHistoryManager(private val context: Context, private val profileId: String? = null) {
 
-    private val activeProfile = ProfileManager.getActiveProfile(context)
-    private val prefs = context.getSharedPreferences("AnimeBoxHistory_$activeProfile", Context.MODE_PRIVATE)
+    private fun getPrefs(): android.content.SharedPreferences {
+        val activeProfile = profileId ?: ProfileManager.getActiveProfile(context)
+        return context.getSharedPreferences("AnimeBoxHistory_$activeProfile", Context.MODE_PRIVATE)
+    }
 
     /**
      * Save watch position for a specific anime episode
@@ -39,8 +41,8 @@ class WatchHistoryManager(context: Context) {
     ) {
         val historyList = getWatchHistory().toMutableList()
         
-        // Remove existing item to avoid duplicate
-        historyList.removeAll { it.anilistId == anilistId }
+        // Remove existing entry for this specific episode to update its progress
+        historyList.removeAll { it.anilistId == anilistId && it.episodeNumber == episodeNumber }
 
         // Insert new item at the top
         historyList.add(0, WatchHistoryItem(
@@ -55,14 +57,14 @@ class WatchHistoryManager(context: Context) {
         // Keep maximum of 15 history items
         val trimmedList = historyList.take(15)
         
-        prefs.edit().putString("history_list", trimmedList.toJson()).apply()
+        getPrefs().edit().putString("history_list", trimmedList.toJson()).apply()
     }
 
     /**
      * Retrieve complete watch history
      */
     fun getWatchHistory(): List<WatchHistoryItem> {
-        val json = prefs.getString("history_list", null) ?: return emptyList()
+        val json = getPrefs().getString("history_list", null) ?: return emptyList()
         return try {
             tryParseJson<List<WatchHistoryItem>>(json) ?: emptyList()
         } catch (e: Exception) {

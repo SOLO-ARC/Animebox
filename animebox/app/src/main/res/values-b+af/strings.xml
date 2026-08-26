@@ -92,7 +92,7 @@
     <string name="action_remove_watching">Verwyder</string>
     <string name="stream">Netwerk stroom</string>
     <string name="type_on_hold">Op rus</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="home_play">Speel</string>
     <string name="download_storage_text">Interne Berging</string>
     <string name="app_dub_sub_episode_text_format" formatted="true">%1$s Ep %2$d</string>

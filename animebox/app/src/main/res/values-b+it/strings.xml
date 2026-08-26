@@ -22,7 +22,7 @@
     <string name="new_update_format" formatted="true">Nuovo aggiornamento trovato! \n%1$s -&gt; %2$s</string>
     <string name="filler" formatted="true">Filler</string>
     <string name="duration_format" formatted="true">%d min</string>
-    <!-- <string name="app_name">CloudStream</string> -->
+    <!-- <string name="app_name">FireFly</string> -->
     <string name="play_with_app_name">Riproduci con CloudStream</string>
     <string name="title_home">Home</string>
     <string name="title_search">Cerca</string>
@@ -448,7 +448,7 @@
     <string name="history">Cronologia</string>
     <string name="enable_skip_op_from_database_des">Mostra popup di salto per apertura/fine</string>
     <string name="clipboard_too_large">Testo troppo lungo. Impossibile salvare negli appunti.</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="automatic_plugin_download">Scarica automaticamente i plugins</string>
     <string name="update_notification_failed">Impossibile installare la nuova versione dell\'app</string>
     <string name="episode_sync_settings">Aggiorna progresso di visione</string>

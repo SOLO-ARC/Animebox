@@ -23,7 +23,7 @@
     <string name="new_update_format" formatted="true">Đã tìm thấy bản cập nhật mới! \n%1$s -&gt; %2$s</string>
     <string name="filler" formatted="true">Bộ lọc</string>
     <string name="duration_format" formatted="true">%d phút</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="play_with_app_name">Phát bằng CloudStream</string>
     <string name="title_home">Trang chủ</string>
     <string name="title_search">Tìm kiếm</string>

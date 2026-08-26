@@ -9,17 +9,23 @@ import coil3.asDrawable
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import com.lagradost.cloudstream3.R
+import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.mvvm.safe
 import com.lagradost.cloudstream3.ui.player.SubtitleData
 import com.lagradost.cloudstream3.ui.result.ExtractorSubtitleLink
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.UiText
+import com.lagradost.cloudstream3.utils.downloader.DownloadFileManagement.getBasePath
+import com.lagradost.cloudstream3.utils.downloader.DownloadFileManagement.getDefaultDir
 import com.lagradost.cloudstream3.utils.downloader.DownloadFileManagement.getFileName
 import com.lagradost.cloudstream3.utils.downloader.DownloadFileManagement.getFolder
 import com.lagradost.cloudstream3.utils.txt
+import com.lagradost.safefile.closeQuietly
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 
 /** Separate object with helper functions for the downloader */
@@ -93,22 +99,84 @@ object DownloadUtils {
         return timeFormated?.asString(context) ?: ""
     }
 
-    internal fun downloadSubtitle(
+    internal suspend fun downloadSubtitle(
         context: Context?,
         link: ExtractorSubtitleLink,
         fileName: String,
         folder: String
-    ) {
-        ioSafe {
-            VideoDownloadManager.downloadThing(
-                context ?: return@ioSafe,
-                link,
-                "$fileName ${link.name}",
+    ): DownloadObjects.DownloadStatus? = withContext(Dispatchers.IO) {
+        val ctx = context ?: return@withContext null
+        val ext = when {
+            link.url.contains(".ass", ignoreCase = true) || link.url.contains(".ssa", ignoreCase = true) -> "ass"
+            link.url.contains(".srt", ignoreCase = true) -> "srt"
+            link.url.contains(".ttml", ignoreCase = true) || link.url.contains(".xml", ignoreCase = true) -> "ttml"
+            link.url.contains(".vtt", ignoreCase = true) -> "vtt"
+            else -> "vtt"
+        }
+        val cleanName = link.name.trim()
+        val subDisplayName = if (cleanName.isBlank()) fileName else "$fileName $cleanName"
+
+        try {
+            val (baseFile, _) = ctx.getBasePath()
+            val targetBase = baseFile ?: getDefaultDir(ctx) ?: return@withContext null
+            val subStream = VideoDownloadManager.setupStream(
+                targetBase,
+                subDisplayName,
                 folder,
-                if (link.url.contains(".srt")) "srt" else "vtt",
-                false,
-                null, createNotificationCallback = {}
+                ext,
+                false
             )
+
+            val headers = link.headers.toMutableMap()
+            if (!headers.containsKey("user-agent") && !headers.containsKey("User-Agent")) {
+                headers["user-agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36"
+            }
+            if (link.referer.isNotBlank() && !headers.containsKey("referer") && !headers.containsKey("Referer")) {
+                headers["referer"] = link.referer
+            }
+
+            val response = app.get(
+                url = link.url.replace(" ", "%20"),
+                headers = headers,
+                referer = link.referer,
+                verify = false
+            )
+
+            if (!response.isSuccessful) {
+                subStream.delete()
+                return@withContext DownloadObjects.DownloadStatus(retrySame = false, tryNext = true, success = false)
+            }
+
+            val bytes = response.body.bytes()
+            if (bytes.isEmpty()) {
+                subStream.delete()
+                return@withContext DownloadObjects.DownloadStatus(retrySame = false, tryNext = true, success = false)
+            }
+
+            val outputStream = subStream.open()
+            outputStream.write(bytes)
+            outputStream.flush()
+            outputStream.closeQuietly()
+
+            return@withContext DownloadObjects.DownloadStatus(retrySame = false, tryNext = false, success = true)
+        } catch (t: Throwable) {
+            logError(t)
+            // Fallback to downloadThing if direct fetch fails
+            return@withContext try {
+                VideoDownloadManager.downloadThing(
+                    ctx,
+                    link,
+                    subDisplayName,
+                    folder,
+                    ext,
+                    false,
+                    null,
+                    createNotificationCallback = {}
+                )
+            } catch (t2: Throwable) {
+                logError(t2)
+                null
+            }
         }
     }
 
@@ -120,12 +188,19 @@ object DownloadUtils {
         context?.let { ctx ->
             val fileName = getFileName(ctx, meta)
             val folder = getFolder(meta.type ?: return, meta.mainName)
-            downloadSubtitle(
-                ctx,
-                ExtractorSubtitleLink(link.name, link.url, "", link.headers),
-                fileName,
-                folder
-            )
+            ioSafe {
+                downloadSubtitle(
+                    ctx,
+                    ExtractorSubtitleLink(
+                        link.name,
+                        link.url,
+                        link.headers["referer"] ?: link.headers["Referer"] ?: "",
+                        link.headers
+                    ),
+                    fileName,
+                    folder
+                )
+            }
         }
     }
 

@@ -14,7 +14,7 @@
     <string name="rated_format" formatted="true">Lidzīgi: %.1f</string>
     <string name="new_update_format" formatted="true">Jauns atjauninājums atrasts! \n%1$s -&gt; %2$s</string>
     <string name="duration_format" formatted="true">%d galvenais</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="play_with_app_name">Atskaņo ar cloudstream</string>
     <string name="title_home">Sākums</string>
     <string name="title_search">Meklēt</string>

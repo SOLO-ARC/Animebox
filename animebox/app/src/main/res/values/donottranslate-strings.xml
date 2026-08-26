@@ -52,7 +52,7 @@
     <string name="download_parallel_key">download_parallel_key</string>
     <string name="download_concurrent_key">download_concurrent_key</string>
     <string name="download_path_key_visual">download_path_key_visual</string>
-    <string name="app_name_download_path">Cloudstream</string>
+    <string name="app_name_download_path">FireFly</string>
     <string name="app_layout_key">app_layout_key</string>
     <string name="primary_color_key">primary_color_key</string>
     <string name="restore_key">restore_key</string>

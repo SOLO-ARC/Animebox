@@ -19,7 +19,7 @@
     <string name="new_update_format" formatted="true">Nalezena nová aktualizace! \n%1$s -&gt; %2$s</string>
     <string name="filler" formatted="true">Výplň</string>
     <string name="duration_format" formatted="true">%d min</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="title_home">Domů</string>
     <string name="title_search">Hledat</string>
     <string name="title_downloads">Stahování</string>

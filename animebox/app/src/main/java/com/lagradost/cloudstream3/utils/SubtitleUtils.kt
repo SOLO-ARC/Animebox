@@ -9,7 +9,7 @@ object SubtitleUtils {
 
     // Only these files are allowed, so no videos as subtitles
     private val allowedExtensions = listOf(
-        ".vtt", ".srt", ".txt", ".ass",
+        ".vtt", ".srt", ".txt", ".ass", ".ssa",
         ".ttml", ".sbv", ".dfxp"
     )
 

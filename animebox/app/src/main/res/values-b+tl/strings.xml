@@ -16,7 +16,7 @@
     <string name="player_speed_text_format" formatted="true">Bilis (%.2fx)</string>
     <string name="rated_format" formatted="true">Rated: %.1f</string>
     <string name="new_update_format" formatted="true">Bagong update! \n%1$s -&gt; %2$s</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="title_home">Home</string>
     <string name="title_search">Maghanap</string>
     <string name="title_downloads">Mga Downloads</string>

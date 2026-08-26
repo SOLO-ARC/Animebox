@@ -1,36 +1,51 @@
 package com.lagradost.cloudstream3.ui.animebox
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import com.lagradost.cloudstream3.R
+import com.lagradost.cloudstream3.ui.animebox.profiles.ProfileManager
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.rememberAsyncImagePainter
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import com.lagradost.cloudstream3.ui.animebox.api.AniListClient
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -49,9 +64,9 @@ class AnimeBoxSearchActivity : ComponentActivity() {
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
-                    primary = Color(0xFFD0BCFF),
-                    background = Color(0xFF121212),
-                    surface = Color(0xFF1E1E1E)
+                    primary = Color(0xFFFF6B00),
+                    background = Color(0xFF141416),
+                    surface = Color(0xFF1E1E22)
                 )
             ) {
                 SearchScreen()
@@ -67,17 +82,49 @@ class AnimeBoxSearchActivity : ComponentActivity() {
         var isLoading by remember { mutableStateOf(false) }
         val coroutineScope = rememberCoroutineScope()
         val focusManager = LocalFocusManager.current
+        val context = LocalContext.current
+
+        val searchHistKey = remember { "user_search_history_${ProfileManager.getActiveProfile(context)}" }
+        var recentSearchesList by remember {
+            mutableStateOf(
+                context.getSharedPreferences("AnimeBoxPrefs", Context.MODE_PRIVATE)
+                    .getStringSet(searchHistKey, emptySet())?.toList() ?: emptyList()
+            )
+        }
+
+        val saveRecentQuery: (String) -> Unit = { q ->
+            if (q.isNotBlank()) {
+                val updated = (listOf(q.trim()) + recentSearchesList.filterNot { it.equals(q.trim(), ignoreCase = true) }).take(3)
+                recentSearchesList = updated
+                context.getSharedPreferences("AnimeBoxPrefs", Context.MODE_PRIVATE)
+                    .edit().putStringSet(searchHistKey, updated.toSet()).apply()
+            }
+        }
+
+        val removeRecentQuery: (String) -> Unit = { q ->
+            val updated = recentSearchesList.filterNot { it.equals(q, ignoreCase = true) }
+            recentSearchesList = updated
+            context.getSharedPreferences("AnimeBoxPrefs", Context.MODE_PRIVATE)
+                .edit().putStringSet(searchHistKey, updated.toSet()).apply()
+        }
+
+        val clearAllRecentQueries: () -> Unit = {
+            recentSearchesList = emptyList()
+            context.getSharedPreferences("AnimeBoxPrefs", Context.MODE_PRIVATE)
+                .edit().remove(searchHistKey).apply()
+        }
 
         var searchJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
-        val performSearch = {
+        val performSearch: (String) -> Unit = { targetQuery ->
             searchJob?.cancel()
             focusManager.clearFocus()
-            if (query.isNotBlank()) {
+            if (targetQuery.isNotBlank()) {
                 isLoading = true
+                saveRecentQuery(targetQuery)
                 searchJob = coroutineScope.launch {
-                    kotlinx.coroutines.delay(400L)
-                    val response = AniListClient.searchAnime(query)
+                    kotlinx.coroutines.delay(350L)
+                    val response = AniListClient.searchAnime(targetQuery)
                     searchResults = if (response != null) parseSearchResults(response) else emptyList()
                     isLoading = false
                 }
@@ -87,83 +134,296 @@ class AnimeBoxSearchActivity : ComponentActivity() {
             }
         }
 
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("Search Anime", fontWeight = FontWeight.Bold, color = Color.White) },
-                    navigationIcon = {
-                        IconButton(onClick = { finish() }) {
-                            Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF121212))
-                )
-            },
-            containerColor = Color(0xFF121212)
-        ) { paddingValues ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF141416))
+        ) {
+            // Background search artwork image
+            Image(
+                painter = painterResource(id = R.drawable.search_screen_bg),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Black layer with 80% opacity over the background for increased contrast
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.80f))
+            )
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(paddingValues)
+                    .statusBarsPadding()
                     .padding(horizontal = 16.dp)
             ) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
+                // Top Search Bar (Back Arrow + Rounded Pill Search Box #232328)
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 12.dp),
-                    placeholder = { Text("Type anime title...", color = Color.Gray) },
-                    leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = "SearchIcon", tint = Color.Gray) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { performSearch() }),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFFD0BCFF),
-                        unfocusedBorderColor = Color.DarkGray
-                    )
-                )
+                        .padding(top = 8.dp, bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = { finish() },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = CustomBackChevronIcon,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF232328))
+                            .padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = CustomSearchIcon,
+                                contentDescription = "Search",
+                                tint = Color(0xFF8E8E93),
+                                modifier = Modifier.size(20.dp)
+                            )
+
+                            Spacer(modifier = Modifier.width(10.dp))
+
+                            BasicTextField(
+                                value = query,
+                                onValueChange = { 
+                                    query = it
+                                    if (it.isNotBlank()) {
+                                        performSearch(it)
+                                    } else {
+                                        searchResults = emptyList()
+                                    }
+                                },
+                                singleLine = true,
+                                cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
+                                textStyle = TextStyle(
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Normal,
+                                    platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+                                ),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(onSearch = { performSearch(query) }),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
+                                decorationBox = { innerTextField ->
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
+                                        if (query.isEmpty()) {
+                                            Text(
+                                                text = "Search shows, movies, games...",
+                                                color = Color(0xFF8E8E93),
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Normal,
+                                                style = TextStyle(
+                                                    platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+                                                )
+                                            )
+                                        }
+                                        innerTextField()
+                                    }
+                                }
+                            )
+
+                            if (query.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { 
+                                        query = ""
+                                        searchResults = emptyList()
+                                    },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear",
+                                        tint = Color(0xFF8E8E93),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
 
                 if (isLoading) {
                     Box(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
                         contentAlignment = Alignment.Center
                     ) {
-                        CircularProgressIndicator(color = Color(0xFFD0BCFF))
+                        CircularProgressIndicator(color = Color(0xFFFF6B00))
                     }
                 } else {
-                    if (searchResults.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = if (query.isEmpty()) "Find your favorite anime shows" else "No anime results found",
-                                color = Color.Gray,
-                                fontSize = 14.sp
-                            )
-                        }
-                    } else {
-                        LazyVerticalGrid(
-                            columns = GridCells.Fixed(3),
-                            verticalArrangement = Arrangement.spacedBy(16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .padding(bottom = 16.dp)
-                        ) {
-                            items(searchResults) { anime ->
-                                SearchPosterCard(anime = anime, onClick = {
-                                    val intent = Intent(this@AnimeBoxSearchActivity, AnimeBoxDetailActivity::class.java).apply {
-                                        putExtra("anilistId", anime.id)
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .padding(bottom = 6.dp)
+                    ) {
+                        // 1. Recent Searches (When query is empty)
+                        if (query.isEmpty() && recentSearchesList.isNotEmpty()) {
+                            item(span = { GridItemSpan(3) }) {
+                                Column {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 4.dp, bottom = 6.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Recent Searches",
+                                            color = Color.White,
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "Clear All",
+                                            color = Color(0xFFFF6B00),
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .clickable { clearAllRecentQueries() }
+                                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                        )
                                     }
-                                    startActivity(intent)
-                                })
+
+                                    recentSearchesList.take(3).forEach { recentText ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    query = recentText
+                                                    performSearch(recentText)
+                                                }
+                                                .padding(vertical = 8.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = recentText,
+                                                color = Color(0xFFDDDDDD),
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Remove",
+                                                tint = Color(0xFF8E8E93),
+                                                modifier = Modifier
+                                                    .size(20.dp)
+                                                    .clickable { removeRecentQuery(recentText) }
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                }
+                            }
+                        }
+
+                        // 2. Typeahead suggestions (when query is being typed - max 4 suggestions)
+                        if (query.isNotBlank() && searchResults.isNotEmpty()) {
+                            val suggestions = (listOf(query) + searchResults.map { it.title }).distinct().take(4)
+                            item(span = { GridItemSpan(3) }) {
+                                Column {
+                                    suggestions.forEach { suggestionText ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    query = suggestionText
+                                                    performSearch(suggestionText)
+                                                }
+                                                .padding(vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = CustomSearchIcon,
+                                                contentDescription = null,
+                                                tint = Color(0xFF8E8E93),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Text(
+                                                text = suggestionText,
+                                                color = Color.White,
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                }
+                            }
+                        }
+
+                        // 3. Search Results or Empty State
+                        if (searchResults.isNotEmpty()) {
+                            item(span = { GridItemSpan(3) }) {
+                                Text(
+                                    text = if (query.isNotEmpty()) "Top Results" else "Recommended Shows & Movies",
+                                    color = Color.White,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+                                )
+                            }
+
+                            items(searchResults) { anime ->
+                                SearchPosterCard(
+                                    anime = anime,
+                                    onClick = {
+                                        val intent = Intent(this@AnimeBoxSearchActivity, AnimeBoxDetailActivity::class.java).apply {
+                                            putExtra("anilistId", anime.id)
+                                        }
+                                        startActivity(intent)
+                                    }
+                                )
+                            }
+                        } else if (query.isNotEmpty() && !isLoading) {
+                            item(span = { GridItemSpan(3) }) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 40.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "No anime results found for \"$query\"",
+                                        color = Color.Gray,
+                                        fontSize = 14.sp
+                                    )
+                                }
                             }
                         }
                     }
@@ -173,7 +433,10 @@ class AnimeBoxSearchActivity : ComponentActivity() {
     }
 
     @Composable
-    fun SearchPosterCard(anime: SearchAnimeBrief, onClick: () -> Unit) {
+    fun SearchPosterCard(
+        anime: SearchAnimeBrief,
+        onClick: () -> Unit
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -182,8 +445,9 @@ class AnimeBoxSearchActivity : ComponentActivity() {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(160.dp)
+                    .aspectRatio(0.68f)
                     .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF1E1E22))
             ) {
                 Image(
                     painter = rememberAsyncImagePainter(model = anime.coverUrl),
@@ -191,32 +455,34 @@ class AnimeBoxSearchActivity : ComponentActivity() {
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
-                if (anime.rating.isNotEmpty() && anime.rating != "null") {
+
+                if (anime.rating.isNotEmpty()) {
                     Box(
                         modifier = Modifier
-                            .padding(4.dp)
                             .align(Alignment.TopEnd)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xE68E24AA))
-                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                            .padding(6.dp)
+                            .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = "${anime.rating}%",
-                            color = Color.White,
+                            text = anime.rating,
+                            color = Color(0xFFFFB300),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
             Text(
                 text = anime.title,
+                color = Color.White,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
-                color = Color.White,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 4.dp)
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -254,3 +520,21 @@ class AnimeBoxSearchActivity : ComponentActivity() {
         return list
     }
 }
+
+val CustomBackChevronIcon: androidx.compose.ui.graphics.vector.ImageVector
+    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "CustomBackChevron",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).path(
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 2.4f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
+        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round
+    ) {
+        moveTo(15f, 18f)
+        lineTo(9f, 12f)
+        lineTo(15f, 6f)
+    }.build()

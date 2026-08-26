@@ -30,7 +30,7 @@
     <string name="new_update_format" formatted="true">Neues Update gefunden! \n%1$s -&gt; %2$s</string>
     <string name="filler" formatted="true">Füller</string>
     <string name="duration_format" formatted="true">%d Min</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="play_with_app_name">Mit CloudStream abspielen</string>
     <string name="title_home">Startseite</string>
     <string name="title_search">Suche</string>

@@ -88,7 +88,7 @@
     <string name="swipe_to_change_settings_des">Проведіть угору або вниз із лівого або правого боку, щоби змінити яскравість або гучність</string>
     <string name="autoplay_next_settings_des">Відтворювати наступний епізод після закінчення поточного</string>
     <string name="title_home">Головна</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="filler" formatted="true">Філлер</string>
     <string name="play_with_app_name">Відтворити в CloudStream</string>
     <string name="stream">Мережева трансляція</string>

@@ -12,9 +12,11 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import com.lagradost.cloudstream3.ui.animebox.profiles.ProfileManager
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -26,6 +28,19 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
@@ -42,9 +57,13 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -52,8 +71,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.animation.core.*
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import androidx.media3.ui.AspectRatioFrameLayout
 import coil3.compose.rememberAsyncImagePainter
 import com.lagradost.cloudstream3.ui.animebox.api.AniListClient
 import com.lagradost.cloudstream3.ui.animebox.api.AniZipClient
@@ -65,6 +91,7 @@ import okhttp3.Request
 import com.lagradost.cloudstream3.ui.animebox.history.WatchHistoryManager
 import com.lagradost.cloudstream3.ui.animebox.library.LibraryManager
 import com.lagradost.cloudstream3.ui.animebox.AnimeBrief
+import com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper
 
 data class AnimeCharacter(
     val name: String,
@@ -104,7 +131,11 @@ data class AnimeDetail(
     val episodesCount: Int,
     val score: Int,
     val genres: List<String>,
+    val status: String = "",
+    val format: String = "",
+    val releaseYear: Int = 0,
     val isAdult: Boolean = false,
+    val idMal: Int = 0,
     val trailerId: String = "",
     val characters: List<AnimeCharacter> = emptyList(),
     val relations: List<AnimeRelation> = emptyList(),
@@ -124,9 +155,10 @@ class AnimeBoxDetailActivity : ComponentActivity() {
         }
 
         setContent {
+            val primaryColor = AnimeBoxThemeHelper.getPrimaryColor(this@AnimeBoxDetailActivity)
             MaterialTheme(
                 colorScheme = darkColorScheme(
-                    primary = Color(0xFFD0BCFF),
+                    primary = primaryColor,
                     background = Color(0xFF121212),
                     surface = Color(0xFF1E1E1E)
                 )
@@ -158,6 +190,8 @@ class AnimeBoxDetailActivity : ComponentActivity() {
         }
     }
 
+
+
     // Helper function to resolve TMDB cover images for AniList IDs 21 and 235
     private suspend fun getResolvedEpisodeCover(anilistId: Int, episodeNum: Int, defaultUrl: String, meta: EpisodeMeta?): String {
         return meta?.imageUrl ?: defaultUrl
@@ -166,105 +200,179 @@ class AnimeBoxDetailActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     fun DetailScreen(anilistId: Int) {
+        val primaryColor = MaterialTheme.colorScheme.primary
         val coroutineScope = rememberCoroutineScope()
         val historyManager = remember { WatchHistoryManager(this@AnimeBoxDetailActivity) }
         val libraryManager = remember { LibraryManager(this@AnimeBoxDetailActivity) }
         
-        var detail by remember { mutableStateOf<AnimeDetail?>(null) }
-        var episodeMetaMap by remember { mutableStateOf<Map<Int, EpisodeMeta>>(emptyMap()) }
-        var resolvedBackdropUrl by remember { mutableStateOf("") }
-        var isMuted by remember { mutableStateOf(true) }
-        
-        var isLoading by remember { mutableStateOf(true) }
-        var isStreamLoading by remember { mutableStateOf(false) }
+        val initialTitle = intent.getStringExtra("initialTitle") ?: ""
+        val initialCover = intent.getStringExtra("initialCoverUrl") ?: ""
+        val initialBanner = intent.getStringExtra("initialBannerUrl") ?: ""
+        val initialDesc = intent.getStringExtra("initialDescription") ?: ""
+        val initialGenres = intent.getStringArrayListExtra("initialGenres") ?: arrayListOf()
+        val initialScore = intent.getIntExtra("initialScore", 0)
+        val initialEpCount = intent.getIntExtra("initialEpisodesCount", 0)
+
+        var detail by remember(anilistId) {
+            mutableStateOf(
+                if (initialTitle.isNotEmpty()) {
+                    AnimeDetail(
+                        id = anilistId,
+                        title = initialTitle,
+                        description = initialDesc,
+                        coverUrl = initialCover,
+                        bannerUrl = initialBanner,
+                        episodesCount = initialEpCount,
+                        score = initialScore,
+                        genres = initialGenres
+                    )
+                } else null
+            )
+        }
+        var episodeMetaMap by remember(anilistId) { mutableStateOf<Map<Int, EpisodeMeta>>(emptyMap()) }
+        var resolvedBackdropUrl by remember(anilistId) { mutableStateOf("") }
+        var isBackdropResolving by remember(anilistId) { mutableStateOf(true) }
+        var animeLogoUrl by remember(anilistId) { mutableStateOf("") }
+        var isInLibrary by remember(anilistId) { mutableStateOf(false) }
+        var isLoading by remember(anilistId) { mutableStateOf(true) }
+        var isStreamLoading by remember(anilistId) { mutableStateOf(false) }
+        var isTrailerPlaying by remember(anilistId) { mutableStateOf(false) }
+        var trailerStreamUrl by remember(anilistId) { mutableStateOf<String?>(null) }
+        var isCastExpanded by remember(anilistId) { mutableStateOf(true) } // Turned on / expanded by default
+        var showTrailerConfirmDialog by remember(anilistId) { mutableStateOf(false) }
+        var isMuted by remember(anilistId) { mutableStateOf(true) }
         
         val prefs = remember { getSharedPreferences("AnimeBoxPlayer", android.content.Context.MODE_PRIVATE) }
-        val savedAudio = remember { prefs.getString("selectedAudio", "Japanese (Original)") }
-        val streamType by remember { mutableStateOf(if (savedAudio == "Hindi") "hindi" else if (savedAudio == "English") "dub" else "sub") }
-
-        var isInLibrary by remember { mutableStateOf(false) }
+        fun getPreferredStreamType(): String {
+            return if (com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isRememberPlaybackPrefsEnabled(this@AnimeBoxDetailActivity)) {
+                val lastAud = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getLastUsedAudio(this@AnimeBoxDetailActivity)
+                val lastSub = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getLastUsedSubMode(this@AnimeBoxDetailActivity)
+                if (lastSub == "Hard Sub") "hardsub"
+                else if (lastAud == "English") "dub"
+                else if (lastAud == "Hindi") "hindi"
+                else "sub"
+            } else {
+                val sAud = prefs.getString("selectedAudio", "Japanese (Original)")
+                if (sAud == "English") "dub" else if (sAud == "Hindi") "hindi" else "sub"
+            }
+        }
 
         // Search, Tabs, View, and Sorting states
-        var episodeSearchQuery by remember { mutableStateOf("") }
-        var selectedSectionTab by remember { mutableStateOf(0) } // 0: Episodes, 1: More Like This, 2: Related
+        var episodeSearchQuery by remember(anilistId) { mutableStateOf("") }
+        var selectedSectionTab by remember(anilistId) { mutableStateOf(0) } // 0: Episodes, 1: More Like This, 2: Related
         val defaultEpMode = remember { com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getDefaultEpisodeViewMode(this@AnimeBoxDetailActivity) }
-        var episodeViewMode by remember { mutableStateOf(defaultEpMode) } // "image" or "number"
-        var visibleEpisodesCount by remember { mutableStateOf(50) }
-        var episodeSortOrder by remember { mutableStateOf("asc") } // "asc" or "desc"
+        var episodeViewMode by remember(anilistId) { mutableStateOf(defaultEpMode) } // "image" or "number"
+        var visibleEpisodesCount by remember(anilistId) { mutableStateOf(50) }
+        var episodeSortOrder by remember(anilistId) { mutableStateOf("asc") } // "asc" or "desc"
+        var isDescriptionExpanded by remember(anilistId) { mutableStateOf(false) }
+        var showAddToListDialog by remember(anilistId) { mutableStateOf(false) }
+        var showDownloadSeasonDialog by remember(anilistId) { mutableStateOf(false) }
+        var episodeToDownload by remember(anilistId) { mutableStateOf<Pair<Int, String>?>(null) }
+        val downloadManager = remember { com.lagradost.cloudstream3.ui.animebox.download.AnimeDownloadManager.getInstance(this@AnimeBoxDetailActivity) }
+        val allEpisodeStates by com.lagradost.cloudstream3.ui.animebox.download.AnimeDownloadManager.episodesState.collectAsState()
+        var showKitsuMyListRestrictionDialog by remember(anilistId) { mutableStateOf(false) }
+        val openReportExtra = remember { intent.getBooleanExtra("openReportDialog", false) }
+        val reportEpisodeExtra = remember { intent.getIntExtra("reportEpisode", 1) }
+        val reportAnimeTitleExtra = remember { intent.getStringExtra("reportAnimeTitle") ?: (initialTitle.ifEmpty { "Anime Episode" }) }
+        var showReportDialog by remember { mutableStateOf(openReportExtra) }
 
         LaunchedEffect(anilistId) {
-            coroutineScope.launch {
-                val detailsDeferred = async(Dispatchers.IO) { AniListClient.getAnimeDetails(anilistId) }
-                val episodeMetaDeferred = async(Dispatchers.IO) {
-                    if (anilistId == 21 || anilistId == 235) {
-                        val tmdbId = if (anilistId == 21) 37854 else 30983
-                        AniZipClient.getTmdbAllEpisodes(tmdbId)
-                    } else {
-                        AniZipClient.getEpisodeMetadata(anilistId)
-                    }
+            // Reset resolving state so no old backdrop or logo flashes
+            resolvedBackdropUrl = ""
+            isBackdropResolving = true
+            animeLogoUrl = ""
+            isTrailerPlaying = false
+            trailerStreamUrl = null
+            isLoading = true
+
+            // Check library status
+            isInLibrary = libraryManager.isInLibrary(anilistId)
+
+            // Background pre-fetch starting episode for 0ms play/resume response
+            val startEp = historyManager.getWatchHistory().find { it.anilistId == anilistId }?.episodeNumber ?: 1
+            launch(Dispatchers.IO) {
+                com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.prefetchStreamInfo(
+                    this@AnimeBoxDetailActivity,
+                    anilistId,
+                    startEp,
+                    "sub"
+                )
+            }
+
+            // Fetch AniList details (or fallback to Kitsu) & AniZip backdrop in parallel
+            launch(Dispatchers.IO) {
+                val detailsDeferred = async { AniListClient.getAnimeDetails(anilistId) }
+                val tmdbId = AniZipClient.getLongRunningTmdbId(anilistId)
+                val metaDeferred = async {
+                    if (tmdbId != null) AniZipClient.getTmdbAllEpisodes(tmdbId)
+                    else AniZipClient.getEpisodeMetadata(anilistId)
                 }
-                val aniZipBackdropDeferred = async(Dispatchers.IO) { AniZipClient.getAniZipBackdropUrl(anilistId) }
-                val tmdbBackdropDeferred = async(Dispatchers.IO) { AniZipClient.getTmdbBackdropUrl(anilistId) }
 
                 val detailsResponse = detailsDeferred.await()
-                if (detailsResponse != null) {
-                    val parsed = parseDetails(detailsResponse)
-                    if (parsed != null && parsed.isAdult) {
+                var parsed = if (detailsResponse != null) parseDetails(detailsResponse) else null
+                if (parsed == null || com.lagradost.cloudstream3.ui.animebox.api.KitsuClient.isKitsuModeActive) {
+                    val kitsuDetail = com.lagradost.cloudstream3.ui.animebox.api.KitsuClient.getAnimeDetail(anilistId, initialTitle)
+                    if (kitsuDetail != null) {
+                        parsed = kitsuDetail
+                    }
+                }
+
+                if (parsed != null && parsed.isAdult) {
+                    withContext(Dispatchers.Main) {
                         Toast.makeText(this@AnimeBoxDetailActivity, "This content is blocked.", Toast.LENGTH_SHORT).show()
                         finish()
-                        return@launch
                     }
-                    detail = parsed
+                    return@launch
                 }
-                
-                episodeMetaMap = episodeMetaDeferred.await()
-                val aniZipBackdrop = aniZipBackdropDeferred.await()
-                val tmdbBackdrop = tmdbBackdropDeferred.await()
-                
-                var backdrop = aniZipBackdrop
-                if (backdrop.isEmpty()) {
-                    backdrop = tmdbBackdrop
+
+                if (parsed != null && parsed.trailerId.isEmpty()) {
+                    val fallbackTrailer = resolveFallbackTrailer(anilistId, parsed.idMal, parsed.title)
+                    if (fallbackTrailer.isNotEmpty()) {
+                        parsed = parsed.copy(trailerId = fallbackTrailer)
+                    }
                 }
-                if (backdrop.isEmpty()) {
-                    backdrop = detail?.bannerUrl ?: ""
+
+                val isMovie = (parsed?.format?.uppercase() == "MOVIE") || (parsed?.episodesCount == 1) || (intent.getIntExtra("episodes", 0) == 1)
+                val bestBackdrop = AniZipClient.getBestBackdropUrl(anilistId, parsed?.bannerUrl ?: initialBanner, isMovie = isMovie)
+                val meta = metaDeferred.await()
+                val logo = AniZipClient.getAnimeLogoUrl(anilistId)
+
+                withContext(Dispatchers.Main) {
+                    if (parsed != null) {
+                        val effectiveCover = when {
+                            parsed.coverUrl.isNotBlank() -> parsed.coverUrl
+                            initialCover.isNotBlank() -> initialCover
+                            else -> ""
+                        }
+                        detail = parsed.copy(coverUrl = effectiveCover)
+                        isInLibrary = libraryManager.isInLibrary(parsed.id)
+                    }
+                    episodeMetaMap = meta
+                    resolvedBackdropUrl = bestBackdrop.ifEmpty { detail?.bannerUrl?.ifEmpty { "" } ?: initialBanner.ifEmpty { "" } }
+                    if (logo.isNotEmpty()) {
+                        animeLogoUrl = logo
+                    }
+                    isBackdropResolving = false
+                    isLoading = false
+
+                    // Autoplay trailer automatically on loading anime detail ONLY if BOTH trailer mode and autoplay previews are enabled
+                    val isTrailerOn = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isTrailerEnabled(this@AnimeBoxDetailActivity)
+                    val isAutoplayPreviewsOn = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAutoplayPreviewsEnabled(this@AnimeBoxDetailActivity)
+                    val shouldAutoplayTrailer = isTrailerOn && isAutoplayPreviewsOn
+                    if (shouldAutoplayTrailer && parsed != null && parsed.trailerId.isNotEmpty()) {
+                        isTrailerPlaying = true
+                    }
                 }
-                if (backdrop.isEmpty()) {
-                    backdrop = detail?.coverUrl ?: ""
-                }
-                resolvedBackdropUrl = backdrop
-                
-                // Check library status
-                if (detail != null) {
-                    isInLibrary = libraryManager.isInLibrary(detail!!.id)
-                }
-                
-                isLoading = false
             }
         }
 
         Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("") },
-                    navigationIcon = {
-                        IconButton(
-                            onClick = { finish() },
-                            modifier = Modifier
-                                .padding(start = 12.dp) // Shift back button to the right
-                                .background(Color.Black.copy(alpha = 0.5f), shape = CircleShape)
-                        ) {
-                            Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                )
-            },
             bottomBar = {
                 NetflixBottomNav(
                     onTabSelected = { tabIndex ->
                         val intent = Intent(this@AnimeBoxDetailActivity, AnimeBoxMainActivity::class.java).apply {
                             putExtra("selectTab", tabIndex)
-                            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                            flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
                         }
                         startActivity(intent)
                         finish()
@@ -274,501 +382,768 @@ class AnimeBoxDetailActivity : ComponentActivity() {
             containerColor = Color(0xFF000000) // Pitch Black
         ) { paddingValues ->
             if (isLoading) {
-                Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = Color(0xFFD0BCFF))
-                }
+                AnimeBoxDetailSkeletonLoading(modifier = Modifier.padding(paddingValues))
             } else {
                 detail?.let { d ->
                     val watchHistory = remember { historyManager.getWatchHistory() }
                     val lastWatched = watchHistory.find { it.anilistId == anilistId }
                     
-                    val episodesList = episodeMetaMap.keys.sorted().filter { epNum ->
-                        val meta = episodeMetaMap[epNum]
-                        if (meta != null) {
-                            if (meta.airdate.isNotEmpty()) {
-                                !isFutureDate(meta.airdate)
+                    val isMovie = (d.format.uppercase() == "MOVIE") || (d.episodesCount == 1)
+                    val rawEpisodesList = if (isMovie && d.episodesCount <= 1) {
+                        listOf(1)
+                    } else if (episodeMetaMap.isNotEmpty()) {
+                        episodeMetaMap.keys.sorted().filter { epNum ->
+                            if (d.episodesCount > 0 && epNum > d.episodesCount) {
+                                false
                             } else {
-                                true
+                                val meta = episodeMetaMap[epNum]
+                                if (meta != null) {
+                                    if (meta.airdate.isNotEmpty()) {
+                                        !isFutureDate(meta.airdate)
+                                    } else {
+                                        true
+                                    }
+                                } else {
+                                    false
+                                }
                             }
-                        } else {
-                            false
                         }
+                    } else {
+                        (1..(if (d.episodesCount > 0) d.episodesCount else 1)).toList()
                     }
 
-                    Column(
+                    val episodesList = if (isMovie && d.episodesCount <= 1) {
+                        listOf(1)
+                    } else if (rawEpisodesList.isEmpty()) {
+                        (1..(if (d.episodesCount > 0) d.episodesCount else 1)).toList()
+                    } else {
+                        rawEpisodesList
+                    }
+
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(bottom = paddingValues.calculateBottomPadding())
-                            .verticalScroll(rememberScrollState())
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color(0xFF16181D),
+                                        Color(0xFF0F1014),
+                                        Color(0xFF07080A),
+                                        Color(0xFF000000)
+                                    )
+                                )
+                            )
                     ) {
-                        // 1. YouTube Trailer or Backdrop Image
-                        Box(
+                        Column(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .height(280.dp)
+                                .fillMaxSize()
+                                .padding(bottom = paddingValues.calculateBottomPadding())
+                                .verticalScroll(rememberScrollState())
                         ) {
-                            val isTrailerSettingOn = remember { com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isTrailerEnabled(this@AnimeBoxDetailActivity) }
-                            if (d.trailerId.isNotEmpty() && isTrailerSettingOn) {
-                                var webViewRef by remember { mutableStateOf<WebView?>(null) }
-                                var showBlurOverlay by remember { mutableStateOf(true) }
-                                var timerJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-                                
-                                // Box to clip the zoomed WebView child
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clipToBounds() // Clips scaled margins
-                                ) {
-                                    AndroidView(
-                                        factory = { context ->
-                                            WebView(context).apply {
-                                                layoutParams = android.view.ViewGroup.LayoutParams(
-                                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT
-                                                )
-                                                settings.javaScriptEnabled = true
-                                                settings.domStorageEnabled = true
-                                                settings.databaseEnabled = true
-                                                settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                                settings.mediaPlaybackRequiresUserGesture = false
-                                                
-                                                isFocusable = true
-                                                isFocusableInTouchMode = true
-                                                requestFocus()
-                                                
-                                                webChromeClient = object : WebChromeClient() {
-                                                    override fun onPermissionRequest(request: android.webkit.PermissionRequest?) {
-                                                        request?.grant(request.resources)
-                                                    }
-                                                }
-                                                
-                                                // Javascript interface to report player state changes
-                                                addJavascriptInterface(object {
-                                                    @android.webkit.JavascriptInterface
-                                                    fun onPlayerStateChange(state: Int) {
-                                                        coroutineScope.launch(Dispatchers.Main) {
-                                                            if (state == 1) { // PLAYING
-                                                                timerJob?.cancel()
-                                                                timerJob = launch {
-                                                                    showBlurOverlay = true
-                                                                    kotlinx.coroutines.delay(6500)
-                                                                    showBlurOverlay = false
-                                                                }
-                                                            } else if (state == 0 || state == -1 || state == 3) { // ENDED, UNSTARTED, BUFFERING
-                                                                timerJob?.cancel()
-                                                                showBlurOverlay = true
-                                                            }
-                                                        }
-                                                    }
-                                                }, "AndroidInterface")
+                            // 1. Hero Backdrop / YouTube Trailer (Powered by NewPipe + ExoPlayer)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(250.dp)
+                            ) {
+                                if (isTrailerPlaying && d.trailerId.isNotEmpty()) {
+                                    val context = LocalContext.current
+                                    val coroutineScope = rememberCoroutineScope()
+                                    var isTrailerStreamLoading by remember(d.trailerId) { mutableStateOf(trailerStreamUrl == null) }
 
-                                                webViewClient = object : WebViewClient() {
-                                                    override fun onPageFinished(view: WebView?, url: String?) {
-                                                        super.onPageFinished(view, url)
-                                                    }
-                                                }
-                                                
-                                                val html = """
-                                                    <!DOCTYPE html>
-                                                    <html>
-                                                    <head>
-                                                      <style>
-                                                        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #000; }
-                                                        #player { width: 100%; height: 100%; }
-                                                      </style>
-                                                    </head>
-                                                    <body>
-                                                      <div id="player"></div>
-                                                      <script>
-                                                        var tag = document.createElement('script');
-                                                        tag.src = "https://www.youtube.com/iframe_api";
-                                                        var firstScriptTag = document.getElementsByTagName('script')[0];
-                                                        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-
-                                                        var player;
-                                                        function onYouTubeIframeAPIReady() {
-                                                          player = new YT.Player('player', {
-                                                            height: '100%',
-                                                            width: '100%',
-                                                            videoId: '${d.trailerId}',
-                                                            playerVars: {
-                                                              'autoplay': 1,
-                                                              'mute': 1,
-                                                              'controls': 0,
-                                                              'modestbranding': 1,
-                                                              'rel': 0,
-                                                              'fs': 0,
-                                                              'iv_load_policy': 3,
-                                                              'cc_load_policy': 0,
-                                                              'disablekb': 0,
-                                                              'playsinline': 1,
-                                                              'showinfo': 0
-                                                            },
-                                                            events: {
-                                                              'onReady': onPlayerReady,
-                                                              'onStateChange': onPlayerStateChange
-                                                            }
-                                                          });
-                                                        }
-
-                                                        function onPlayerReady(event) {
-                                                          event.target.playVideo();
-                                                          event.target.mute();
-                                                        }
-
-                                                        function onPlayerStateChange(event) {
-                                                          if (window.AndroidInterface) {
-                                                            window.AndroidInterface.onPlayerStateChange(event.data);
-                                                          }
-                                                          if (event.data === 0) { // ENDED
-                                                            player.playVideo();
-                                                          }
-                                                        }
-                                                        
-                                                        window.addEventListener('message', function(e) {
-                                                          try {
-                                                            var data = JSON.parse(e.data);
-                                                            if (data.event === 'command') {
-                                                              if (data.func === 'mute') {
-                                                                player.mute();
-                                                              } else if (data.func === 'unMute') {
-                                                                player.unMute();
-                                                              }
-                                                            }
-                                                          } catch (err) {}
-                                                        });
-                                                      </script>
-                                                    </body>
-                                                    </html>
-                                                """.trimIndent()
-                                                
-                                                loadDataWithBaseURL("https://www.youtube-nocookie.com", html, "text/html", "UTF-8", null)
-                                                webViewRef = this
-                                            }
-                                        },
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .scale(1.35f) // Zoom by 35%
-                                    )
-                                }
-
-                                LaunchedEffect(isMuted) {
-                                    val action = if (isMuted) "mute" else "unMute"
-                                    webViewRef?.evaluateJavascript(
-                                        "window.postMessage('{\"event\":\"command\",\"func\":\"$action\",\"args\":\"\"}', '*');",
-                                        null
-                                    )
-                                }
-
-                                val lifecycleOwner = LocalLifecycleOwner.current
-                                DisposableEffect(lifecycleOwner) {
-                                    val observer = LifecycleEventObserver { _, event ->
-                                        when (event) {
-                                            Lifecycle.Event.ON_PAUSE -> {
-                                                webViewRef?.onPause()
-                                            }
-                                            Lifecycle.Event.ON_RESUME -> {
-                                                webViewRef?.onResume()
-                                            }
-                                            Lifecycle.Event.ON_DESTROY -> {
-                                                webViewRef?.destroy()
-                                                timerJob?.cancel()
-                                            }
-                                            else -> {}
+                                    LaunchedEffect(isTrailerPlaying, d.trailerId) {
+                                        if (isTrailerPlaying && trailerStreamUrl == null) {
+                                            isTrailerStreamLoading = true
+                                            val extracted = extractTrailerWithNewPipe(d.trailerId)
+                                            trailerStreamUrl = extracted
+                                            isTrailerStreamLoading = false
                                         }
                                     }
-                                    lifecycleOwner.lifecycle.addObserver(observer)
-                                    onDispose {
-                                        lifecycleOwner.lifecycle.removeObserver(observer)
-                                        webViewRef?.destroy()
-                                        timerJob?.cancel()
-                                    }
-                                }
 
-                                // Interactive blocker overlay (Placed on top in Compose to block all user interactions)
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(
-                                            Brush.verticalGradient(
-                                                colors = listOf(
-                                                    Color.Transparent,
-                                                    Color(0x30000000),
-                                                    Color(0xFF000000)
-                                                )
-                                            )
+                                    if (trailerStreamUrl != null) {
+                                        val exoPlayer = remember(trailerStreamUrl) {
+                                            ExoPlayer.Builder(context).build().apply {
+                                                val mediaItem = MediaItem.fromUri(trailerStreamUrl!!)
+                                                setMediaItem(mediaItem)
+                                                repeatMode = Player.REPEAT_MODE_ONE
+                                                volume = if (isMuted) 0f else 1f
+                                                playWhenReady = true
+                                                prepare()
+                                            }
+                                        }
+
+                                        LaunchedEffect(isMuted) {
+                                            exoPlayer.volume = if (isMuted) 0f else 1f
+                                        }
+
+                                        DisposableEffect(exoPlayer) {
+                                            onDispose {
+                                                exoPlayer.release()
+                                            }
+                                        }
+
+                                        AndroidView(
+                                            factory = { ctx ->
+                                                PlayerView(ctx).apply {
+                                                    player = exoPlayer
+                                                    useController = false
+                                                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                                    layoutParams = android.view.ViewGroup.LayoutParams(
+                                                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                                                    )
+                                                }
+                                            },
+                                            modifier = Modifier.fillMaxSize()
                                         )
-                                        .clickable(enabled = false) {} // Consumes touch gestures
-                                )
+                                    } else if (isTrailerStreamLoading) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(Color.Black),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            CircularProgressIndicator(
+                                                color = primaryColor,
+                                                modifier = Modifier.size(36.dp)
+                                            )
+                                        }
+                                    } else {
+                                        // Fallback to webview if direct stream extraction fails
+                                        AndroidView(
+                                            factory = { ctx ->
+                                                WebView(ctx).apply {
+                                                    layoutParams = android.view.ViewGroup.LayoutParams(
+                                                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                                                    )
+                                                    setBackgroundColor(android.graphics.Color.BLACK)
+                                                    settings.apply {
+                                                        javaScriptEnabled = true
+                                                        domStorageEnabled = true
+                                                        mediaPlaybackRequiresUserGesture = false
+                                                        allowFileAccess = true
+                                                        loadWithOverviewMode = true
+                                                        useWideViewPort = true
+                                                        mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                                        userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                                                    }
+                                                    webChromeClient = WebChromeClient()
+                                                    webViewClient = WebViewClient()
+                                                    val embedHtml = """
+                                                        <!DOCTYPE html>
+                                                        <html>
+                                                        <head>
+                                                        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                                                        <style>
+                                                        * { margin: 0; padding: 0; box-sizing: border-box; }
+                                                        html, body { width: 100%; height: 100%; background-color: #000000; overflow: hidden; }
+                                                        .video-container { position: relative; width: 100vw; height: 100vh; }
+                                                        iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }
+                                                        </style>
+                                                        </head>
+                                                        <body>
+                                                        <div class="video-container">
+                                                        <iframe src="https://www.youtube.com/embed/${d.trailerId}?autoplay=1&playsinline=1&controls=1&fs=0&rel=0&enablejsapi=1" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                                                        </div>
+                                                        </body>
+                                                        </html>
+                                                    """.trimIndent()
+                                                    loadDataWithBaseURL("https://www.youtube.com", embedHtml, "text/html", "UTF-8", null)
+                                                }
+                                            },
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
 
-                                // Blur loading overlay on top
-                                if (showBlurOverlay) {
+                                    // Bottom curved shadow fade for trailer
                                     Box(
                                         modifier = Modifier
-                                            .fillMaxSize()
-                                            .background(Color.Black.copy(alpha = 0.95f)) // heavy dim
-                                            .clickable(enabled = false) {}, // Intercept clicks
+                                            .fillMaxWidth()
+                                            .height(70.dp)
+                                            .align(Alignment.BottomCenter)
+                                            .background(
+                                                Brush.verticalGradient(
+                                                    colors = listOf(
+                                                        Color.Transparent,
+                                                        Color(0x7016181D),
+                                                        Color(0xFF16181D)
+                                                    )
+                                                )
+                                            )
+                                    )
+
+                                    // Audio Toggle button placed at bottom-right of trailer (above poster line)
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .padding(end = 16.dp, bottom = 48.dp)
+                                            .size(36.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.Black.copy(alpha = 0.75f))
+                                            .clickable { isMuted = !isMuted },
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Column(
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            verticalArrangement = Arrangement.Center
-                                        ) {
-                                            CircularProgressIndicator(color = Color(0xFFD0BCFF))
-                                            Spacer(modifier = Modifier.height(12.dp))
-                                            Text(
-                                                text = "loading...",
-                                                color = Color.White,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Medium
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // Mute overlay button
-                                IconButton(
-                                    onClick = { isMuted = !isMuted },
-                                    modifier = Modifier
-                                        .align(Alignment.BottomEnd)
-                                        .padding(16.dp)
-                                        .background(Color.Black.copy(alpha = 0.6f), shape = CircleShape)
-                                ) {
-                                    Icon(
-                                        imageVector = if (isMuted) VolumeOffIcon else VolumeUpIcon,
-                                        contentDescription = "Toggle Mute",
-                                        tint = Color.White
-                                    )
-                                }
-                            } else {
-                                Image(
-                                    painter = rememberAsyncImagePainter(model = resolvedBackdropUrl),
-                                    contentDescription = d.title,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(
-                                            Brush.verticalGradient(
-                                                colors = listOf(
-                                                    Color.Transparent,
-                                                    Color(0x30000000),
-                                                    Color(0xFF000000)
-                                                )
-                                            )
-                                        )
-                                )
-                            }
-                        }
-
-                        // 2. Poster, Title and Metadata row (Fix clipping by removing negative offset)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 12.dp)
-                        ) {
-                            Image(
-                                painter = rememberAsyncImagePainter(model = d.coverUrl),
-                                contentDescription = d.title,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(110.dp, 160.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                            )
-                            Column(
-                                modifier = Modifier
-                                    .padding(start = 16.dp)
-                                    .weight(1f)
-                            ) {
-                                Text(
-                                    text = d.title,
-                                    fontSize = 22.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = "${d.score}% Match",
-                                        fontSize = 13.sp,
-                                        color = Color(0xFFD0BCFF), // Light purple
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(
-                                        text = "${episodesList.size} Episodes",
-                                        fontSize = 13.sp,
-                                        color = Color.LightGray
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = d.genres.joinToString(", "),
-                                    fontSize = 12.sp,
-                                    color = Color.White, // Genres white color
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-
-                                if (d.nextAiring != null) {
-                                    val na = d.nextAiring
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    val days = na.timeUntilAiring / 86400
-                                    val hours = (na.timeUntilAiring % 86400) / 3600
-                                    val timeStr = if (days > 0) "${days}d ${hours}h" else "${hours}h"
-                                    
-                                    Box(
-                                        modifier = Modifier
-                                            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(6.dp))
-                                            .border(1.dp, Color(0xFFD0BCFF).copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-                                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                                    ) {
-                                        Text(
-                                            text = "Next Episode: Ep ${na.episode} airs in $timeStr",
-                                            color = Color(0xFFD0BCFF), // Light purple
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold
+                                        Icon(
+                                            imageVector = if (isMuted) VolumeOffIcon else VolumeUpIcon,
+                                            contentDescription = if (isMuted) "Unmute" else "Mute",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(20.dp)
                                         )
                                     }
                                 } else {
-                                    Spacer(modifier = Modifier.height(8.dp))
+                                    if (isBackdropResolving && resolvedBackdropUrl.isEmpty()) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(Color(0xFF101115)),
+                                            contentAlignment = Alignment.BottomCenter
+                                        ) {
+                                            val fallbackPoster = d.coverUrl.ifEmpty { initialCover }
+                                            if (fallbackPoster.isNotEmpty()) {
+                                                Image(
+                                                    painter = rememberAsyncImagePainter(model = fallbackPoster),
+                                                    contentDescription = d.title,
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .blur(22.dp)
+                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .background(Color.Black.copy(alpha = 0.65f))
+                                                )
+                                            }
+                                            // Sleek loading progress bar at the bottom of backdrop while verifying
+                                            LinearProgressIndicator(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(3.dp),
+                                                color = primaryColor,
+                                                trackColor = Color(0xFF23242E)
+                                            )
+                                        }
+                                    } else {
+                                        val finalBackdrop = resolvedBackdropUrl.ifEmpty { d.coverUrl.ifEmpty { initialCover } }
+                                        val isUsingCoverBlur = resolvedBackdropUrl.isEmpty()
+                                        if (finalBackdrop.isNotEmpty()) {
+                                            Image(
+                                                painter = rememberAsyncImagePainter(model = finalBackdrop),
+                                                contentDescription = d.title,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .then(if (isUsingCoverBlur) Modifier.blur(22.dp) else Modifier)
+                                            )
+                                            if (isUsingCoverBlur) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .background(Color.Black.copy(alpha = 0.45f))
+                                                )
+                                            }
+                                        }
+                                    }
+                                    // Smooth bottom gradient
                                     Box(
                                         modifier = Modifier
-                                            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(6.dp))
-                                            .border(1.dp, Color(0xFFD0BCFF).copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-                                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                                            .fillMaxSize()
+                                            .background(
+                                                Brush.verticalGradient(
+                                                    colors = listOf(
+                                                        Color.Transparent,
+                                                        Color(0x30000000),
+                                                        Color(0xFF16181D)
+                                                    )
+                                                )
+                                            )
+                                    )
+                                }
+                            }
+
+                            // 1.5. Overlapping Poster & Title/Logo Row
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp)
+                                    .offset(y = (-45).dp),
+                                verticalAlignment = Alignment.Bottom
+                            ) {
+                                // Vertical Anime Poster Card
+                                Box(
+                                    modifier = Modifier
+                                        .width(105.dp)
+                                        .height(155.dp)
+                                        .shadow(elevation = 12.dp, shape = RoundedCornerShape(8.dp), spotColor = Color.Black)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFF161616))
+                                ) {
+                                    Image(
+                                        painter = rememberAsyncImagePainter(model = d.coverUrl.ifEmpty { initialCover }),
+                                        contentDescription = d.title,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(14.dp))
+
+                                // Right Column: Logo or Title & Metadata & Beautiful Genre tags
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.Bottom
+                                ) {
+                                    if (animeLogoUrl.isNotEmpty()) {
+                                        Image(
+                                            painter = rememberAsyncImagePainter(model = animeLogoUrl),
+                                            contentDescription = d.title,
+                                            contentScale = ContentScale.Fit,
+                                            alignment = Alignment.BottomStart,
+                                            modifier = Modifier
+                                                .heightIn(min = 45.dp, max = 75.dp)
+                                                .fillMaxWidth()
+                                        )
+                                    } else if (!isBackdropResolving) {
+                                        Text(
+                                            text = d.title,
+                                            fontSize = 19.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = Color.White,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(4.dp))
+
+                                    // Metadata tags row: Year • Format • Status • [ U/A 16+ ]
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        val yearStr = if (d.releaseYear > 0) "${d.releaseYear}" else "2024"
+                                        val formatStr = when (d.format.uppercase()) {
+                                            "MOVIE" -> "Movie"
+                                            "OVA" -> "OVA"
+                                            "ONA" -> "ONA"
+                                            "SPECIAL" -> "Special"
+                                            else -> if (d.episodesCount == 1) "Movie" else "TV Series"
+                                        }
+                                        val statusStr = when (d.status.uppercase()) {
+                                            "FINISHED" -> "Completed"
+                                            "RELEASING" -> "Ongoing"
+                                            "NOT_YET_RELEASED" -> "Upcoming"
+                                            else -> ""
+                                        }
+
+                                        Text(text = yearStr, color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(text = "•", color = Color(0xFF6B7280), fontSize = 11.5.sp)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(text = formatStr, color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                        
+                                        if (statusStr.isNotEmpty()) {
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(text = "•", color = Color(0xFF6B7280), fontSize = 11.5.sp)
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(text = statusStr, color = primaryColor, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                        }
+
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(text = "•", color = Color(0xFF6B7280), fontSize = 11.5.sp)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .background(Color.Black.copy(alpha = 0.85f), RoundedCornerShape(2.dp))
+                                                .padding(horizontal = 4.dp, vertical = 0.5.dp)
+                                        ) {
+                                            Text(
+                                                 text = if (d.isAdult) "18+" else "U/A 16+",
+                                                 color = Color.White,
+                                                 fontSize = 8.5.sp,
+                                                 fontWeight = FontWeight.Bold,
+                                                 lineHeight = 10.sp
+                                             )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height((-38).dp))
+
+                            // 2. Play / Resume and My List Action Buttons Row (Image 2)
+                            val playEpNum = lastWatched?.episodeNumber ?: 1
+                            val buttonText = if (lastWatched != null) "Resume Episode $playEpNum" else "Watch Now"
+                            
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Button(
+                                    onClick = {
+                                        isStreamLoading = true
+                                        coroutineScope.launch {
+                                            val targetEpMeta = episodeMetaMap[playEpNum]
+                                            val resolvedEpCover = getResolvedEpisodeCover(d.id, playEpNum, d.coverUrl, targetEpMeta)
+                                            fetchAndPlayStream(d.id, playEpNum, d.title, resolvedEpCover, getPreferredStreamType(), d.coverUrl, d.episodesCount)
+                                            isStreamLoading = false
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color.White,
+                                        contentColor = Color.Black
+                                    ),
+                                    shape = RoundedCornerShape(3.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.PlayArrow,
+                                        contentDescription = "Play",
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = buttonText,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp,
+                                        color = Color.Black
+                                    )
+                                }
+
+                                // Secondary My List Button (Image 2)
+                                Box(
+                                    modifier = Modifier
+                                        .width(52.dp)
+                                        .height(44.dp)
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(Color(0xFF2B2E38))
+                                        .clickable {
+                                            if (com.lagradost.cloudstream3.ui.animebox.api.KitsuClient.isKitsuModeActive || AniListClient.lastErrorMessage != null) {
+                                                showKitsuMyListRestrictionDialog = true
+                                            } else {
+                                                showAddToListDialog = true
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (isInLibrary) Icons.Default.Check else Icons.Default.Add,
+                                        contentDescription = "My List",
+                                        tint = if (isInLibrary) primaryColor else Color.White,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+
+                            // 4. Description with Centered Read More / Read Less (Image 1)
+                            if (!isDescriptionExpanded) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = d.description,
+                                        fontSize = 13.5.sp,
+                                        color = Color(0xFFBDC7D5),
+                                        lineHeight = 20.sp,
+                                        maxLines = 3,
+                                        overflow = TextOverflow.Clip
+                                    )
+                                    // Bottom fade gradient with centered Read More
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .align(Alignment.BottomCenter)
+                                            .background(
+                                                Brush.verticalGradient(
+                                                    colors = listOf(
+                                                        Color.Transparent,
+                                                        Color(0xCC000000),
+                                                        Color(0xFF000000)
+                                                    )
+                                                )
+                                            )
+                                            .clickable { isDescriptionExpanded = true }
+                                            .padding(top = 18.dp, bottom = 2.dp),
+                                        contentAlignment = Alignment.Center
                                     ) {
                                         Text(
-                                            text = "Completed",
-                                            color = Color(0xFFD0BCFF), // Light purple
-                                            fontSize = 12.sp,
+                                            text = "Read More",
+                                            color = Color.White,
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            } else {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = d.description,
+                                        fontSize = 13.5.sp,
+                                        color = Color(0xFFBDC7D5),
+                                        lineHeight = 20.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { isDescriptionExpanded = false }
+                                            .padding(vertical = 4.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "Read Less",
+                                            color = Color.White,
+                                            fontSize = 13.5.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
                             }
-                        }
 
-                        // 3. Play / Resume and My List Action Buttons
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                        ) {
-                            val playEpNum = lastWatched?.episodeNumber ?: 1
-                            val buttonText = if (lastWatched != null) "Resume Episode $playEpNum" else "Play Episode 1"
-                            
-                            Button(
-                                onClick = {
-                                    isStreamLoading = true
-                                    coroutineScope.launch {
-                                        val targetEpMeta = episodeMetaMap[playEpNum]
-                                        val resolvedEpCover = getResolvedEpisodeCover(d.id, playEpNum, d.coverUrl, targetEpMeta)
-                                        fetchAndPlayStream(d.id, playEpNum, d.title, resolvedEpCover, streamType, d.coverUrl, d.episodesCount)
-                                        isStreamLoading = false
-                                    }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(48.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color.White,
-                                    contentColor = Color.Black
-                                ),
-                                shape = RoundedCornerShape(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.PlayArrow,
-                                    contentDescription = "Play",
-                                    tint = Color.Black,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = buttonText,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 15.sp
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            // My List Action
+                            // 4.5. 3 Action Buttons Row (Share, User Score, Trailer)
+                            val actContext = LocalContext.current
                             Row(
                                 modifier = Modifier
-                                    .clickable {
-                                        val animeBrief = AnimeBrief(
-                                            id = d.id,
-                                            title = d.title,
-                                            coverUrl = d.coverUrl,
-                                            bannerUrl = d.bannerUrl,
-                                            description = d.description,
-                                            genres = d.genres,
-                                            averageScore = d.score,
-                                            logoUrl = "",
-                                            episodes = d.episodesCount,
-                                            status = ""
-                                        )
-                                        val isNowInLibrary = libraryManager.toggleLibraryItem(animeBrief)
-                                        isInLibrary = isNowInLibrary
-                                        val toastText = if (isNowInLibrary) "Added to My List" else "Removed from My List"
-                                        Toast.makeText(this@AnimeBoxDetailActivity, toastText, Toast.LENGTH_SHORT).show()
-                                    }
-                                    .padding(vertical = 8.dp),
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 20.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = if (isInLibrary) Icons.Default.Check else Icons.Default.Add,
-                                    contentDescription = "My List Status",
-                                    tint = Color(0xFFD0BCFF) // Light purple
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "My List",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp
-                                )
-                            }
-                        }
+                                // 1. Share (Box with upward arrow icon matching user screenshot 2)
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            val sendIntent = Intent().apply {
+                                                action = Intent.ACTION_SEND
+                                                putExtra(Intent.EXTRA_TEXT, "Check out ${d.title} on FireFly!\nhttps://anilist.co/anime/${d.id}")
+                                                type = "text/plain"
+                                            }
+                                            actContext.startActivity(Intent.createChooser(sendIntent, "Share ${d.title}"))
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = ShareBoxArrowIcon,
+                                        contentDescription = "Share",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Share",
+                                        color = Color(0xFFBDC7D5),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
 
-                        // 4. Description
-                        Text(
-                            text = d.description,
-                            fontSize = 14.sp,
-                            color = Color.LightGray,
-                            lineHeight = 20.sp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                        )
+                                // 2. User Score (Lavender Purple Community Score Badge)
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            val scoreDisplay = if (d.score > 0) "${d.score}% Community Score" else "No Score Yet"
+                                            Toast.makeText(actContext, "${d.title}: $scoreDisplay", Toast.LENGTH_SHORT).show()
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                                ) {
+                                    UserScoreCircularProgress(
+                                        scorePercentage = d.score,
+                                        size = 32.dp,
+                                        strokeWidth = 2.8.dp,
+                                        accentColor = primaryColor
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "User Score",
+                                        color = Color(0xFFBDC7D5),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                                // 3. Download Whole Season Button
+                                val activeAnimeDownloads = allEpisodeStates.filter {
+                                    it.anilistId == anilistId &&
+                                    (it.status == com.lagradost.cloudstream3.ui.animebox.download.DownloadStatus.DOWNLOADING ||
+                                     it.status == com.lagradost.cloudstream3.ui.animebox.download.DownloadStatus.PENDING)
+                                }
+                                val isAnyDownloading = activeAnimeDownloads.isNotEmpty()
+                                val overallProgress = if (isAnyDownloading) {
+                                    (activeAnimeDownloads.map { it.downloadProgress }.average()).toInt()
+                                } else 0
 
-                        // 5. Cast and Characters List
-                        if (d.characters.isNotEmpty()) {
-                            Text(
-                                text = "Cast & Characters",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                            )
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                items(d.characters) { char ->
-                                    CharacterCastCard(char)
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            showDownloadSeasonDialog = true
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                                ) {
+                                    if (isAnyDownloading) {
+                                        Box(
+                                            modifier = Modifier.size(24.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            CircularProgressIndicator(
+                                                progress = (overallProgress / 100f).coerceIn(0f, 1f),
+                                                color = Color.White,
+                                                trackColor = Color(0xFF2E2E34),
+                                                strokeWidth = 2.dp,
+                                                modifier = Modifier.size(22.dp)
+                                            )
+                                            Text(
+                                                text = "$overallProgress%",
+                                                color = Color.White,
+                                                fontSize = 7.5.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "Downloading",
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = CloudDownloadIcon,
+                                            contentDescription = "Download",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "Download",
+                                            color = Color(0xFFBDC7D5),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+
+                                // 4. Trailer (Play Button -> Animated Audio Waves when Playing)
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            if (isTrailerPlaying) {
+                                                isTrailerPlaying = false
+                                                trailerStreamUrl = null
+                                            } else {
+                                                val targetTrailer = d.trailerId
+                                                val isTrailerActive = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isTrailerEnabled(this@AnimeBoxDetailActivity)
+                                                if (targetTrailer.isNotEmpty()) {
+                                                    if (isTrailerActive) {
+                                                        isTrailerPlaying = true
+                                                    } else {
+                                                        showTrailerConfirmDialog = true
+                                                    }
+                                                } else {
+                                                    coroutineScope.launch {
+                                                        Toast.makeText(actContext, "Finding trailer...", Toast.LENGTH_SHORT).show()
+                                                        val resolved = resolveFallbackTrailer(anilistId, d.idMal, d.title)
+                                                        if (resolved.isNotEmpty()) {
+                                                            detail = d.copy(trailerId = resolved)
+                                                            if (isTrailerActive) {
+                                                                isTrailerPlaying = true
+                                                            } else {
+                                                                showTrailerConfirmDialog = true
+                                                            }
+                                                        } else {
+                                                            Toast.makeText(actContext, "Trailer not available for this anime", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                                ) {
+                                    if (isTrailerPlaying) {
+                                        PlayingAudioWaveIndicator(
+                                            waveColor = primaryColor,
+                                            barWidth = 2.5.dp,
+                                            spacing = 1.5.dp,
+                                            modifier = Modifier.size(width = 20.dp, height = 18.dp)
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = CustomSegmentedPlayIcon,
+                                            contentDescription = "Trailer",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = if (isTrailerPlaying) "Playing" else "Trailer",
+                                        color = if (isTrailerPlaying) primaryColor else Color(0xFFBDC7D5),
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isTrailerPlaying) FontWeight.Bold else FontWeight.Medium
+                                    )
                                 }
                             }
-                            Spacer(modifier = Modifier.height(24.dp))
-                        }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // 5. Cast and Characters List (Collapsible with ^ / v, closed by default)
+                            if (d.characters.isNotEmpty()) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { isCastExpanded = !isCastExpanded }
+                                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Cast & Characters",
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                    Icon(
+                                        imageVector = if (isCastExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                        contentDescription = if (isCastExpanded) "Collapse" else "Expand",
+                                        tint = Color(0xFFBDC7D5),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                if (isCastExpanded) {
+                                    LazyRow(
+                                        contentPadding = PaddingValues(horizontal = 16.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        modifier = Modifier.padding(bottom = 12.dp)
+                                    ) {
+                                        items(d.characters) { char ->
+                                            CharacterCastCard(char)
+                                        }
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
 
                         // 6. Section Tabs (Episodes | More Like This | Related)
                         TabRow(
@@ -805,64 +1180,93 @@ class AnimeBoxDetailActivity : ComponentActivity() {
                         // 7. Render Active Tab Content
                         when (selectedSectionTab) {
                             0 -> {
-                                // EPISODES TAB
-                                // View mode and Sorting selectors (Shift View Toggles to Left, Sort Toggle to Right)
-                                Row(
+                                // EPISODES TAB: Modern Search Bar with Sort icon at the end
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                                        .height(44.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFF1E1E24))
+                                        .padding(horizontal = 12.dp),
+                                    contentAlignment = Alignment.CenterStart
                                 ) {
-                                    // Left side: In-Place View Mode Toggle
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(text = "View: ", color = Color.Gray, fontSize = 12.sp)
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = if (episodeViewMode == "image") "Image View" else "Number View",
-                                            color = Color(0xFFD0BCFF),
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.clickable {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(
+                                            imageVector = CustomSearchIcon,
+                                            contentDescription = "Search",
+                                            tint = Color.Gray,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        androidx.compose.foundation.text.BasicTextField(
+                                            value = episodeSearchQuery,
+                                            onValueChange = { episodeSearchQuery = it },
+                                            singleLine = true,
+                                            cursorBrush = SolidColor(Color.White),
+                                            textStyle = androidx.compose.ui.text.TextStyle(
+                                                color = Color.White,
+                                                fontSize = 13.5.sp,
+                                                fontWeight = FontWeight.Medium
+                                            ),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .fillMaxHeight(),
+                                            decorationBox = { innerTextField ->
+                                                Box(
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    contentAlignment = Alignment.CenterStart
+                                                ) {
+                                                    if (episodeSearchQuery.isEmpty()) {
+                                                        Text("Search episode...", color = Color.Gray, fontSize = 13.5.sp)
+                                                    }
+                                                    innerTextField()
+                                                }
+                                            }
+                                        )
+                                        if (episodeSearchQuery.isNotEmpty()) {
+                                            IconButton(
+                                                onClick = { episodeSearchQuery = "" },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(imageVector = Icons.Default.Check, contentDescription = "Clear", tint = Color.LightGray, modifier = Modifier.size(14.dp))
+                                            }
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                        }
+                                        // View Mode Toggle button (Image vs Box) to left of sort
+                                        IconButton(
+                                            onClick = { 
                                                 episodeViewMode = if (episodeViewMode == "image") "number" else "image"
-                                            }
-                                        )
-                                    }
+                                                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setDefaultEpisodeViewMode(this@AnimeBoxDetailActivity, episodeViewMode)
+                                            },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (episodeViewMode == "image") GridViewIcon else ListViewIcon,
+                                                contentDescription = "Change View Mode",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(19.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(2.dp))
 
-                                    // Right side: Sorting Toggle Order
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(text = "Sort: ", color = Color.Gray, fontSize = 12.sp)
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = if (episodeSortOrder == "asc") "Oldest First" else "Newest First",
-                                            color = Color(0xFFD0BCFF), // Light purple
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.clickable {
-                                                episodeSortOrder = if (episodeSortOrder == "asc") "desc" else "asc"
-                                            }
-                                        )
+                                        // Sort toggle button on right end
+                                        IconButton(
+                                            onClick = { episodeSortOrder = if (episodeSortOrder == "asc") "desc" else "asc" },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = SortIconVector,
+                                                contentDescription = "Sort",
+                                                tint = if (episodeSortOrder == "desc") primaryColor else Color.White,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
                                     }
                                 }
-
-                                // Search bar
-                                OutlinedTextField(
-                                    value = episodeSearchQuery,
-                                    onValueChange = { episodeSearchQuery = it },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                                    placeholder = { Text("Search episode name or number...", color = Color.Gray) },
-                                    singleLine = true,
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedTextColor = Color.White,
-                                        unfocusedTextColor = Color.White,
-                                        focusedBorderColor = Color(0xFFD0BCFF),
-                                        unfocusedBorderColor = Color.DarkGray,
-                                        focusedPlaceholderColor = Color.Gray,
-                                        unfocusedPlaceholderColor = Color.Gray
-                                    )
-                                )
 
                                 val sortedEpisodes = if (episodeSortOrder == "desc") {
                                     episodesList.reversed()
@@ -887,7 +1291,7 @@ class AnimeBoxDetailActivity : ComponentActivity() {
                                             .height(120.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        CircularProgressIndicator(color = Color(0xFFD0BCFF))
+                                        CircularProgressIndicator(color = primaryColor)
                                     }
                                 } else {
                                     Column(
@@ -906,71 +1310,86 @@ class AnimeBoxDetailActivity : ComponentActivity() {
                                         } else {
                                             if (episodeViewMode == "image") {
                                                 // IMAGE THUMBNAIL VIEW
+                                                val isMovie = (d.format.uppercase() == "MOVIE") || (d.episodesCount == 1)
                                                 filteredEpisodes.forEach { epNum ->
                                                     val meta = episodeMetaMap[epNum]
+                                                    val epTitle = meta?.title ?: "Episode $epNum"
                                                     EpisodeRowCard(
                                                         anilistId = d.id,
                                                         episodeNum = epNum,
-                                                        title = meta?.title ?: "Episode $epNum",
+                                                        title = epTitle,
                                                         defaultImageUrl = meta?.imageUrl ?: d.coverUrl,
                                                         meta = meta,
                                                         isLastWatched = (lastWatched != null && lastWatched.episodeNumber == epNum),
+                                                        isMovie = isMovie,
+                                                        movieBackdropUrl = resolvedBackdropUrl,
                                                         onClick = {
                                                             isStreamLoading = true
                                                             coroutineScope.launch {
                                                                 val resolvedEpCover = getResolvedEpisodeCover(d.id, epNum, d.coverUrl, meta)
-                                                                fetchAndPlayStream(d.id, epNum, d.title, resolvedEpCover, streamType, d.coverUrl, d.episodesCount)
+                                                                fetchAndPlayStream(d.id, epNum, d.title, resolvedEpCover, getPreferredStreamType(), d.coverUrl, d.episodesCount)
                                                                 isStreamLoading = false
                                                             }
+                                                        },
+                                                        onDownloadClick = {
+                                                            episodeToDownload = Pair(epNum, epTitle)
                                                         }
                                                     )
                                                 }
                                             } else {
-                                                // COMPACT NUMBER GRID VIEW (4 columns)
-                                                val chunkedNumbers = filteredEpisodes.chunked(4)
+                                                // DITTO BOX NUMBER GRID VIEW (6 columns, sleek rounded boxes with wave on active episode)
+                                                val chunkedNumbers = filteredEpisodes.chunked(6)
                                                 Column(
                                                     modifier = Modifier.fillMaxWidth(),
                                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                                 ) {
-                                                    chunkedNumbers.forEach { rowPair ->
+                                                    chunkedNumbers.forEach { rowSix ->
                                                         Row(
                                                             modifier = Modifier.fillMaxWidth(),
                                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                                         ) {
-                                                            rowPair.forEach { epNum ->
+                                                            rowSix.forEach { epNum ->
                                                                 val meta = episodeMetaMap[epNum]
                                                                 val isLast = (lastWatched != null && lastWatched.episodeNumber == epNum)
                                                                 Box(
                                                                     modifier = Modifier
                                                                         .weight(1f)
-                                                                        .aspectRatio(1.2f)
-                                                                        .clip(RoundedCornerShape(12.dp))
-                                                                        .background(if (isLast) Color(0xFFD0BCFF).copy(alpha = 0.15f) else Color(0xFF161616))
-                                                                        .border(
-                                                                            width = if (isLast) 1.5.dp else 1.dp,
-                                                                            color = if (isLast) Color(0xFFD0BCFF) else Color.White.copy(alpha = 0.05f),
-                                                                            shape = RoundedCornerShape(12.dp)
-                                                                        )
+                                                                        .aspectRatio(1f)
+                                                                        .clip(RoundedCornerShape(10.dp))
+                                                                        .background(if (isLast) primaryColor else Color(0xFF2C2D35))
                                                                         .clickable {
                                                                             isStreamLoading = true
                                                                             coroutineScope.launch {
                                                                                 val resolvedEpCover = getResolvedEpisodeCover(d.id, epNum, d.coverUrl, meta)
-                                                                                fetchAndPlayStream(d.id, epNum, d.title, resolvedEpCover, streamType, d.coverUrl, d.episodesCount)
+                                                                                fetchAndPlayStream(d.id, epNum, d.title, resolvedEpCover, getPreferredStreamType(), d.coverUrl, d.episodesCount)
                                                                                 isStreamLoading = false
                                                                             }
                                                                         },
                                                                     contentAlignment = Alignment.Center
                                                                 ) {
+                                                                    // Playing Audio Wave Indicator in Top-Right with generous spacing & clean compact proportions
+                                                                    if (isLast) {
+                                                                        PlayingAudioWaveIndicator(
+                                                                            modifier = Modifier
+                                                                                .align(Alignment.TopEnd)
+                                                                                .padding(top = 6.dp, end = 6.dp)
+                                                                                .height(8.dp),
+                                                                            waveColor = Color.Black,
+                                                                            barWidth = 1.6.dp,
+                                                                            spacing = 1.2.dp
+                                                                        )
+                                                                    }
+
                                                                     Text(
                                                                         text = "$epNum",
-                                                                        color = if (isLast) Color(0xFFD0BCFF) else Color.White,
-                                                                        fontSize = 15.sp,
-                                                                        fontWeight = FontWeight.Bold
+                                                                        color = if (isLast) Color.Black else Color(0xFFE2E2EA),
+                                                                        fontSize = 14.sp,
+                                                                        fontWeight = if (isLast) FontWeight.Bold else FontWeight.SemiBold
                                                                     )
                                                                 }
                                                             }
-                                                            if (rowPair.size < 4) {
-                                                                repeat(4 - rowPair.size) {
+                                                            if (rowSix.size < 6) {
+                                                                repeat(6 - rowSix.size) {
                                                                     Spacer(modifier = Modifier.weight(1f))
                                                                 }
                                                             }
@@ -988,7 +1407,7 @@ class AnimeBoxDetailActivity : ComponentActivity() {
                                                         .fillMaxWidth()
                                                         .height(44.dp),
                                                     colors = ButtonDefaults.buttonColors(
-                                                        containerColor = Color(0xFFD0BCFF), // Light purple
+                                                        containerColor = primaryColor, // Light purple
                                                         contentColor = Color.Black // Dark text
                                                     ),
                                                     shape = RoundedCornerShape(4.dp)
@@ -1125,6 +1544,867 @@ class AnimeBoxDetailActivity : ComponentActivity() {
                     }
                 }
             }
+
+            // Trailer Mode Settings Confirmation Dialog
+            if (showTrailerConfirmDialog) {
+                AlertDialog(
+                    onDismissRequest = { showTrailerConfirmDialog = false },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setTrailerEnabled(this@AnimeBoxDetailActivity, true)
+                            showTrailerConfirmDialog = false
+                            trailerStreamUrl = null
+                            isTrailerPlaying = true
+                        }) {
+                            Text("Enable & Play", color = primaryColor, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showTrailerConfirmDialog = false }) {
+                            Text("Cancel", color = Color.Gray)
+                        }
+                    },
+                    title = {
+                        Text(
+                            text = "Enable Trailer Mode",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = "Trailer playback is currently disabled in Settings. Would you like to enable it now to play trailers?",
+                            color = Color.LightGray,
+                            fontSize = 14.sp
+                        )
+                    },
+                    containerColor = Color(0xFF1E1E1E),
+                    titleContentColor = Color.White,
+                    textContentColor = Color.LightGray
+                )
+            }
+
+            // Add to My List / Watch Status Category Selector Dialog (Matching Screenshot 2)
+            if (showAddToListDialog && detail != null) {
+                val d = detail!!
+                val animeBrief = AnimeBrief(
+                    id = d.id,
+                    title = d.title,
+                    coverUrl = d.coverUrl,
+                    bannerUrl = d.bannerUrl,
+                    description = d.description,
+                    genres = d.genres,
+                    averageScore = d.score,
+                    logoUrl = animeLogoUrl,
+                    episodes = d.episodesCount,
+                    status = ""
+                )
+                val currentCat = if (isInLibrary) libraryManager.getAnimeCategory(d.id) else "Plan to Watch"
+
+                com.lagradost.cloudstream3.ui.animebox.library.SelectWatchStatusDialog(
+                    isInLibrary = isInLibrary,
+                    currentCategory = currentCat,
+                    onSelectStatus = { selectedStatus ->
+                        libraryManager.addOrUpdateLibraryItem(animeBrief, selectedStatus)
+                        isInLibrary = true
+                        showAddToListDialog = false
+                        Toast.makeText(this@AnimeBoxDetailActivity, "Added to \"$selectedStatus\"", Toast.LENGTH_SHORT).show()
+                    },
+                    onRemoveFromLibrary = {
+                        libraryManager.removeLibraryItem(d.id)
+                        isInLibrary = false
+                        showAddToListDialog = false
+                        Toast.makeText(this@AnimeBoxDetailActivity, "Removed from Library", Toast.LENGTH_SHORT).show()
+                    },
+                    onDismiss = {
+                        showAddToListDialog = false
+                    }
+                )
+            }
+
+            // 1. Single Episode Download Selection Dialog (Netflix Style)
+            if (episodeToDownload != null && detail != null) {
+                    val (epNum, epTitle) = episodeToDownload!!
+                    val d = detail!!
+                    val preferredLang = getPreferredStreamType()
+                    var selectedAudioLang by remember { mutableStateOf(preferredLang) }
+                    var isStartingDownload by remember { mutableStateOf(false) }
+
+                    // 1. Single Episode Download Selection Dialog (Watch Status UI style without icons)
+                    Dialog(
+                        onDismissRequest = { if (!isStartingDownload) episodeToDownload = null },
+                        properties = DialogProperties(
+                            usePlatformDefaultWidth = false,
+                            decorFitsSystemWindows = false
+                        )
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Transparent)
+                                .clickable { if (!isStartingDownload) episodeToDownload = null },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.9f)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(Color(0xFF121318))
+                                    .clickable(enabled = false) {}
+                                    .padding(horizontal = 18.dp, vertical = 22.dp)
+                                    .verticalScroll(rememberScrollState()),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                // Header Title & Subtitle (Centered)
+                                Text(
+                                    text = "Download Episode $epNum",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 19.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = d.title,
+                                    color = Color(0xFF8E8E9B),
+                                    fontSize = 13.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+
+                                Spacer(modifier = Modifier.height(18.dp))
+
+                                // Options list (matching Watch Status options without left icons)
+                                val audioOptions = listOf(
+                                    Triple("sub", "Japanese (Original)", "Original Japanese Audio • English Subtitles"),
+                                    Triple("dub", "English Dubbed", "English Voice Audio"),
+                                    Triple("hindi", "Hindi Dubbed", "Hindi Voice Audio (If Available)")
+                                )
+
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    audioOptions.forEach { (type, label, desc) ->
+                                        val isSelected = selectedAudioLang == type
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(52.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(if (isSelected) Color.White else Color(0xFF1D1E26))
+                                                .clickable { selectedAudioLang = type }
+                                                .padding(horizontal = 16.dp),
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = label,
+                                                    color = if (isSelected) Color.Black else Color.White,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                                    fontSize = 15.sp,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+
+                                                if (isSelected) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = "Selected",
+                                                        tint = Color.Black,
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(18.dp))
+
+                                // Download Action Button
+                                Button(
+                                    onClick = {
+                                        isStartingDownload = true
+                                        val langChoice = selectedAudioLang
+                                        val targetLang = if (langChoice == "sub") "hardsub" else langChoice
+                                        coroutineScope.launch {
+                                            Toast.makeText(this@AnimeBoxDetailActivity, "Starting download for Episode $epNum...", Toast.LENGTH_SHORT).show()
+                                            var streamInfo = withContext(Dispatchers.IO) {
+                                                com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(this@AnimeBoxDetailActivity, d.id, epNum, targetLang)
+                                            }
+                                            var directHls = (streamInfo?.get("hls") as? String) ?: ""
+                                            var actualStreamType = targetLang
+                                            if (directHls.isEmpty() && targetLang == "hardsub") {
+                                                streamInfo = withContext(Dispatchers.IO) {
+                                                    com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(this@AnimeBoxDetailActivity, d.id, epNum, "sub")
+                                                }
+                                                directHls = (streamInfo?.get("hls") as? String) ?: ""
+                                                actualStreamType = "sub"
+                                            }
+
+                                            val directRef = (streamInfo?.get("referer") as? String) ?: ""
+                                            val directSub = (streamInfo?.get("subtitle") as? String) ?: ""
+                                            val subsJson = (streamInfo?.get("subtitlesJson") as? String) ?: "[]"
+                                            val iStart = (streamInfo?.get("introStart") as? Long) ?: 0L
+                                            val iEnd = (streamInfo?.get("introEnd") as? Long) ?: 0L
+                                            val oStart = (streamInfo?.get("outroStart") as? Long) ?: 0L
+                                            val oEnd = (streamInfo?.get("outroEnd") as? Long) ?: 0L
+
+                                            if (directHls.isNotEmpty()) {
+                                                val epMeta = episodeMetaMap[epNum]
+                                                val epCover = epMeta?.imageUrl?.ifEmpty { d.coverUrl } ?: d.coverUrl
+                                                val showPoster = d.coverUrl.ifEmpty { initialCover }
+                                                val langTag = if (actualStreamType == "hindi") "Hindi Dub" else if (actualStreamType == "dub") "English Dub" else if (actualStreamType == "hardsub") "HSub" else "Sub"
+
+                                                downloadManager.enqueueDownload(
+                                                    anilistId = d.id,
+                                                    animeTitle = d.title,
+                                                    episodeNum = epNum,
+                                                    episodeTitle = epTitle,
+                                                    coverUrl = epCover,
+                                                    showCoverUrl = showPoster,
+                                                    quality = "1080p $langTag",
+                                                    resolvedUrl = directHls,
+                                                    referer = directRef,
+                                                    subtitleUrl = directSub,
+                                                    subtitlesJson = subsJson,
+                                                    introStart = iStart,
+                                                    introEnd = iEnd,
+                                                    outroStart = oStart,
+                                                    outroEnd = oEnd,
+                                                    streamType = actualStreamType,
+                                                    providedBackdrop = resolvedBackdropUrl.ifEmpty { d.bannerUrl },
+                                                    providedLogo = animeLogoUrl
+                                                )
+                                                Toast.makeText(this@AnimeBoxDetailActivity, "Episode $epNum queued for download", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                Toast.makeText(this@AnimeBoxDetailActivity, "Audio track unavailable for Episode $epNum", Toast.LENGTH_SHORT).show()
+                                            }
+                                            episodeToDownload = null
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
+                                    shape = RoundedCornerShape(12.dp),
+                                    enabled = !isStartingDownload
+                                ) {
+                                    if (isStartingDownload) {
+                                        CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                    } else {
+                                        Text("Download", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                TextButton(
+                                    onClick = { episodeToDownload = null },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(40.dp)
+                                ) {
+                                    Text(
+                                        text = "Cancel",
+                                        color = Color(0xFF8E8E9B),
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = 14.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 2. Download Whole Season Confirmation Dialog (Watch Status UI style without icons)
+                if (showDownloadSeasonDialog && detail != null) {
+                    val d = detail!!
+                    val totalSeasonEps = if (d.episodesCount > 0) d.episodesCount else if (episodeMetaMap.isNotEmpty()) episodeMetaMap.size else 12
+                    var selectedAudioLang by remember { mutableStateOf("sub") }
+                    var isStartingSeasonDownload by remember { mutableStateOf(false) }
+
+                    Dialog(
+                        onDismissRequest = { if (!isStartingSeasonDownload) showDownloadSeasonDialog = false },
+                        properties = DialogProperties(
+                            usePlatformDefaultWidth = false,
+                            decorFitsSystemWindows = false
+                        )
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Transparent)
+                                .clickable { if (!isStartingSeasonDownload) showDownloadSeasonDialog = false },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.9f)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(Color(0xFF121318))
+                                    .clickable(enabled = false) {}
+                                    .padding(horizontal = 18.dp, vertical = 22.dp)
+                                    .verticalScroll(rememberScrollState()),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                // Header Title & Subtitle (Centered)
+                                Text(
+                                    text = "Download Whole Season",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 19.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "$totalSeasonEps Episodes • ${d.title}",
+                                    color = Color(0xFF8E8E9B),
+                                    fontSize = 13.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+
+                                Spacer(modifier = Modifier.height(18.dp))
+
+                                val audioOptions = listOf(
+                                    Triple("sub", "Japanese (Original)", "Original Japanese Audio • English Subtitles"),
+                                    Triple("dub", "English Dubbed", "English Voice Audio"),
+                                    Triple("hindi", "Hindi Dubbed", "Hindi Voice Audio (If Available)")
+                                )
+
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    audioOptions.forEach { (type, label, desc) ->
+                                        val isSelected = selectedAudioLang == type
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(52.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(if (isSelected) Color.White else Color(0xFF1D1E26))
+                                                .clickable { selectedAudioLang = type }
+                                                .padding(horizontal = 16.dp),
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = label,
+                                                    color = if (isSelected) Color.Black else Color.White,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                                    fontSize = 15.sp,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+
+                                                if (isSelected) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = "Selected",
+                                                        tint = Color.Black,
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(18.dp))
+
+                                Button(
+                                    onClick = {
+                                        isStartingSeasonDownload = true
+                                        val langChoice = selectedAudioLang
+                                        val targetLang = if (langChoice == "sub") "hardsub" else langChoice
+                                        coroutineScope.launch {
+                                            Toast.makeText(this@AnimeBoxDetailActivity, "Starting downloads for all $totalSeasonEps episodes...", Toast.LENGTH_LONG).show()
+                                            val showPoster = d.coverUrl.ifEmpty { initialCover }
+
+                                            for (epNum in 1..totalSeasonEps) {
+                                                val epMeta = episodeMetaMap[epNum]
+                                                val epTitle = epMeta?.title ?: "Episode $epNum"
+                                                val epCover = epMeta?.imageUrl?.ifEmpty { d.coverUrl } ?: d.coverUrl
+
+                                                var streamInfo = withContext(Dispatchers.IO) {
+                                                    com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(this@AnimeBoxDetailActivity, d.id, epNum, targetLang)
+                                                }
+                                                var directHls = (streamInfo?.get("hls") as? String) ?: ""
+                                                var actualStreamType = targetLang
+                                                if (directHls.isEmpty() && targetLang == "hardsub") {
+                                                    streamInfo = withContext(Dispatchers.IO) {
+                                                        com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(this@AnimeBoxDetailActivity, d.id, epNum, "sub")
+                                                    }
+                                                    directHls = (streamInfo?.get("hls") as? String) ?: ""
+                                                    actualStreamType = "sub"
+                                                }
+
+                                                val directRef = (streamInfo?.get("referer") as? String) ?: ""
+                                                val directSub = (streamInfo?.get("subtitle") as? String) ?: ""
+                                                val subsJson = (streamInfo?.get("subtitlesJson") as? String) ?: "[]"
+                                                val iStart = (streamInfo?.get("introStart") as? Long) ?: 0L
+                                                val iEnd = (streamInfo?.get("introEnd") as? Long) ?: 0L
+                                                val oStart = (streamInfo?.get("outroStart") as? Long) ?: 0L
+                                                val oEnd = (streamInfo?.get("outroEnd") as? Long) ?: 0L
+
+                                                if (directHls.isNotEmpty()) {
+                                                    val langTag = if (actualStreamType == "hindi") "Hindi Dub" else if (actualStreamType == "dub") "English Dub" else if (actualStreamType == "hardsub") "HSub" else "Sub"
+                                                    downloadManager.enqueueDownload(
+                                                        anilistId = d.id,
+                                                        animeTitle = d.title,
+                                                        episodeNum = epNum,
+                                                        episodeTitle = epTitle,
+                                                        coverUrl = epCover,
+                                                        showCoverUrl = showPoster,
+                                                        quality = "1080p $langTag",
+                                                        resolvedUrl = directHls,
+                                                        referer = directRef,
+                                                        subtitleUrl = directSub,
+                                                        subtitlesJson = subsJson,
+                                                        introStart = iStart,
+                                                        introEnd = iEnd,
+                                                        outroStart = oStart,
+                                                        outroEnd = oEnd,
+                                                        streamType = actualStreamType,
+                                                        providedBackdrop = resolvedBackdropUrl.ifEmpty { d.bannerUrl },
+                                                        providedLogo = animeLogoUrl
+                                                    )
+                                                }
+                                            }
+                                            Toast.makeText(this@AnimeBoxDetailActivity, "All $totalSeasonEps episodes queued for download", Toast.LENGTH_SHORT).show()
+                                            showDownloadSeasonDialog = false
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
+                                    shape = RoundedCornerShape(12.dp),
+                                    enabled = !isStartingSeasonDownload
+                                ) {
+                                    if (isStartingSeasonDownload) {
+                                        CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                    } else {
+                                        Text("Download Season ($totalSeasonEps Episodes)", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                TextButton(
+                                    onClick = { showDownloadSeasonDialog = false },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(40.dp)
+                                ) {
+                                    Text(
+                                        text = "Cancel",
+                                        color = Color(0xFF8E8E9B),
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = 14.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+            // Kitsu Mode My List Restriction Alert Dialog
+            if (showKitsuMyListRestrictionDialog) {
+                AlertDialog(
+                    onDismissRequest = { showKitsuMyListRestrictionDialog = false },
+                    confirmButton = {
+                        TextButton(onClick = { showKitsuMyListRestrictionDialog = false }) {
+                            Text("OK", color = primaryColor, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    title = {
+                        Text(
+                            text = "My List Unavailable in Fallback Mode",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = "Adding anime to My List is only supported when connected to AniList. Please try again once AniList servers are back online.",
+                            color = Color.LightGray,
+                            fontSize = 13.5.sp,
+                            lineHeight = 19.sp
+                        )
+                    },
+                    containerColor = Color(0xFF1E1E1E),
+                    titleContentColor = Color.White,
+                    textContentColor = Color.LightGray
+                )
+            }
+
+            if (showTrailerConfirmDialog) {
+                AlertDialog(
+                    onDismissRequest = { showTrailerConfirmDialog = false },
+                    title = {
+                        Text(
+                            text = "Autoplay Previews & Trailers",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = "To stream official anime trailers and previews directly on the detail page, enable Autoplay Previews & Trailers.",
+                            color = Color.LightGray,
+                            fontSize = 13.5.sp,
+                            lineHeight = 19.sp
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setAutoplayPreviewsEnabled(this@AnimeBoxDetailActivity, true)
+                                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setTrailerEnabled(this@AnimeBoxDetailActivity, true)
+                                showTrailerConfirmDialog = false
+                                isTrailerPlaying = true
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = "Turn On & Play",
+                                color = Color.Black,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.5.sp
+                            )
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showTrailerConfirmDialog = false }) {
+                            Text("Cancel", color = Color.Gray, fontSize = 13.5.sp)
+                        }
+                    },
+                    containerColor = Color(0xFF1E1E24),
+                    titleContentColor = Color.White,
+                    textContentColor = Color.LightGray
+                )
+            }
+
+            if (showReportDialog) {
+                val coroutineScope = rememberCoroutineScope()
+                IssueReportDialog(
+                    animeTitle = reportAnimeTitleExtra,
+                    episodeNum = reportEpisodeExtra,
+                    onDismiss = { showReportDialog = false },
+                    onSubmit = { userName, email, issueType, description ->
+                        showReportDialog = false
+                        Toast.makeText(this@AnimeBoxDetailActivity, "Submitting report...", Toast.LENGTH_SHORT).show()
+                        coroutineScope.launch {
+                            val success = com.lagradost.cloudstream3.ui.animebox.notifications.SupabaseReportManager.submitReport(
+                                userName = userName,
+                                email = email,
+                                animeTitle = reportAnimeTitleExtra,
+                                anilistId = anilistId,
+                                episodeNumber = reportEpisodeExtra,
+                                issueType = issueType,
+                                description = description
+                            )
+                            if (success) {
+                                Toast.makeText(this@AnimeBoxDetailActivity, "Report received for Ep $reportEpisodeExtra! Our team is on it.", Toast.LENGTH_LONG).show()
+                            } else {
+                                Toast.makeText(this@AnimeBoxDetailActivity, "Report saved. Thank you for your feedback!", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
+
+    @Composable
+    private fun IssueReportDialog(
+        animeTitle: String,
+        episodeNum: Int,
+        onDismiss: () -> Unit,
+        onSubmit: (userName: String, email: String, issueType: String, description: String) -> Unit
+    ) {
+        val primaryColor = MaterialTheme.colorScheme.primary
+        var userName by remember { mutableStateOf("FireFly User") }
+        var email by remember { mutableStateOf("") }
+        var selectedIssueType by remember { mutableStateOf("Stream Not Loading") }
+        var description by remember { mutableStateOf("") }
+
+        val issueTypes = listOf(
+            "Stream Not Loading",
+            "Audio Desync / Missing",
+            "Subtitle Missing / Broken",
+            "Frequent Buffering",
+            "Wrong Episode / Video",
+            "Other Issue"
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.75f))
+                .clickable { onDismiss() },
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .widthIn(min = 320.dp, max = 420.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFF282828))
+                    .clickable(enabled = false) {}
+                    .padding(22.dp)
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.Start
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Report Playback Issue",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp
+                        )
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                            Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.Gray, modifier = Modifier.size(18.dp))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Episode badge
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF1E1E24))
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                    ) {
+                        Text(
+                            text = animeTitle,
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        Text(
+                            text = " · Episode $episodeNum",
+                            color = primaryColor,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.5.sp,
+                            maxLines = 1
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(text = "Your Name", color = Color(0xFFBBBBBB), fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    BasicTextField(
+                        value = userName,
+                        onValueChange = { userName = it },
+                        textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF1C1C20))
+                            .padding(horizontal = 12.dp, vertical = 10.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(text = "Email (Optional)", color = Color(0xFFBBBBBB), fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    BasicTextField(
+                        value = email,
+                        onValueChange = { email = it },
+                        textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+                        decorationBox = { innerTextField ->
+                            if (email.isEmpty()) {
+                                Text("For updates regarding this fix", color = Color(0xFF666666), fontSize = 13.sp)
+                            }
+                            innerTextField()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF1C1C20))
+                            .padding(horizontal = 12.dp, vertical = 10.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(text = "Issue Category", color = Color(0xFFBBBBBB), fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(issueTypes) { type ->
+                            val isSel = type == selectedIssueType
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isSel) primaryColor else Color(0xFF1E1E24))
+                                    .clickable { selectedIssueType = type }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = type,
+                                    color = if (isSel) Color.Black else Color(0xFFCCCCCC),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(text = "Description", color = Color(0xFFBBBBBB), fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    BasicTextField(
+                        value = description,
+                        onValueChange = { description = it },
+                        textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
+                        decorationBox = { innerTextField ->
+                            if (description.isEmpty()) {
+                                Text("Describe what happened...", color = Color(0xFF666666), fontSize = 12.5.sp)
+                            }
+                            innerTextField()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(72.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF1C1C20))
+                            .padding(10.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(onClick = onDismiss) {
+                            Text("Cancel", color = Color(0xFFAAAAAA), fontSize = 13.sp)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                onSubmit(userName, email, selectedIssueType, description)
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
+                        ) {
+                            Text("Submit Report", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Circular User Score Progress (Matching User Screenshot 1 with Lavender Purple progress and clear visibility)
+    @Composable
+    fun UserScoreCircularProgress(
+        scorePercentage: Int,
+        modifier: Modifier = Modifier,
+        size: Dp = 32.dp,
+        strokeWidth: Dp = 2.8.dp,
+        accentColor: Color = AnimeBoxThemeHelper.COLOR_LIGHT_RED
+    ) {
+        val progress = (scorePercentage.coerceIn(0, 100)) / 100f
+        Box(
+            modifier = modifier
+                .size(size)
+                .background(Color(0xFF08080C), CircleShape)
+                .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape)
+                .padding(2.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                // Background Track Ring
+                drawArc(
+                    color = Color.White.copy(alpha = 0.2f),
+                    startAngle = 0f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    style = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round)
+                )
+                // Active Progress Arc (Lavender Purple)
+                drawArc(
+                    color = accentColor,
+                    startAngle = -90f,
+                    sweepAngle = progress * 360f,
+                    useCenter = false,
+                    style = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round)
+                )
+            }
+            if (scorePercentage > 0) {
+                Row(
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(horizontal = 1.dp)
+                ) {
+                    Text(
+                        text = "$scorePercentage",
+                        color = Color.White,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Black,
+                        lineHeight = 10.sp
+                    )
+                    Text(
+                        text = "%",
+                        color = Color.White.copy(alpha = 0.9f),
+                        fontSize = 5.sp,
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 6.sp,
+                        modifier = Modifier.padding(top = 0.5.dp)
+                    )
+                }
+            } else {
+                Row(
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(horizontal = 1.dp)
+                ) {
+                    Text(
+                        text = "0",
+                        color = Color.White,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Black,
+                        lineHeight = 10.sp
+                    )
+                    Text(
+                        text = "%",
+                        color = Color.White.copy(alpha = 0.9f),
+                        fontSize = 5.sp,
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 6.sp,
+                        modifier = Modifier.padding(top = 0.5.dp)
+                    )
+                }
+            }
         }
     }
 
@@ -1135,8 +2415,10 @@ class AnimeBoxDetailActivity : ComponentActivity() {
         coverUrl: String,
         badgeText: String = "",
         epCount: Int = 12,
+        onShowKitsuRestriction: (() -> Unit)? = null,
         onClick: () -> Unit
     ) {
+        val primaryColor = MaterialTheme.colorScheme.primary
         val libraryManager = remember { LibraryManager(this@AnimeBoxDetailActivity) }
         var inLibrary by remember(id) { mutableStateOf(libraryManager.isInLibrary(id)) }
         val context = LocalContext.current
@@ -1166,14 +2448,18 @@ class AnimeBoxDetailActivity : ComponentActivity() {
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(6.dp)
-                            .background(Color(0xFFD0BCFF), shape = RoundedCornerShape(4.dp)) // Light purple badge
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .shadow(elevation = 6.dp, shape = RoundedCornerShape(6.dp), spotColor = Color.Black)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xE60D0D14))
+                            .border(1.2.dp, primaryColor, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 7.dp, vertical = 3.dp)
                     ) {
                         Text(
-                            text = badgeText,
-                            color = Color.Black,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
+                            text = badgeText.uppercase(),
+                            color = primaryColor,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.6.sp
                         )
                     }
                 }
@@ -1187,22 +2473,30 @@ class AnimeBoxDetailActivity : ComponentActivity() {
                         .clip(CircleShape)
                         .background(Color.Black.copy(alpha = 0.65f))
                         .clickable {
-                            val animeBrief = AnimeBrief(
-                                id = id,
-                                title = title,
-                                coverUrl = coverUrl,
-                                bannerUrl = "",
-                                description = "",
-                                genres = emptyList(),
-                                averageScore = 0,
-                                logoUrl = "",
-                                episodes = epCount,
-                                status = ""
-                            )
-                            val isNowInLibrary = libraryManager.toggleLibraryItem(animeBrief)
-                            inLibrary = isNowInLibrary
-                            val toastText = if (isNowInLibrary) "Added to My List" else "Removed from My List"
-                            android.widget.Toast.makeText(context, toastText, android.widget.Toast.LENGTH_SHORT).show()
+                            if (com.lagradost.cloudstream3.ui.animebox.api.KitsuClient.isKitsuModeActive || AniListClient.lastErrorMessage != null) {
+                                if (onShowKitsuRestriction != null) {
+                                    onShowKitsuRestriction()
+                                } else {
+                                    android.widget.Toast.makeText(context, "Adding anime to My List is only supported when connected to AniList.", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            } else {
+                                val animeBrief = AnimeBrief(
+                                    id = id,
+                                    title = title,
+                                    coverUrl = coverUrl,
+                                    bannerUrl = "",
+                                    description = "",
+                                    genres = emptyList(),
+                                    averageScore = 0,
+                                    logoUrl = "",
+                                    episodes = epCount,
+                                    status = ""
+                                )
+                                val isNowInLibrary = libraryManager.toggleLibraryItem(animeBrief)
+                                inLibrary = isNowInLibrary
+                                val toastText = if (isNowInLibrary) "Added to My List" else "Removed from My List"
+                                android.widget.Toast.makeText(context, toastText, android.widget.Toast.LENGTH_SHORT).show()
+                            }
                         },
                     contentAlignment = Alignment.Center
                 ) {
@@ -1219,8 +2513,8 @@ class AnimeBoxDetailActivity : ComponentActivity() {
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .height(26.dp)
-                        .background(Color.Black.copy(alpha = 0.7f)),
+                        .height(24.dp)
+                        .background(Color.Black.copy(alpha = 0.75f)),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -1230,23 +2524,26 @@ class AnimeBoxDetailActivity : ComponentActivity() {
                             .padding(horizontal = 3.dp, vertical = 1.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("CC", color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.Black)
+                        Text("CC", color = Color.White, fontSize = 7.5.sp, fontWeight = FontWeight.Black, lineHeight = 8.sp)
                     }
                     Spacer(modifier = Modifier.width(3.dp))
                     Text(
                         text = "$epCount",
-                        color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold
+                        color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold
                     )
 
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("|", color = Color.Gray.copy(alpha = 0.5f), fontSize = 11.sp)
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(7.dp))
+                    Text("|", color = Color.Gray.copy(alpha = 0.5f), fontSize = 10.sp)
+                    Spacer(modifier = Modifier.width(7.dp))
 
-                    CustomMicIcon(color = Color.White)
+                    CustomMicIcon(
+                        color = Color.White,
+                        modifier = Modifier.size(11.dp)
+                    )
                     Spacer(modifier = Modifier.width(3.dp))
                     Text(
                         text = "$epCount",
-                        color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold
+                        color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold
                     )
                 }
             }
@@ -1265,143 +2562,239 @@ class AnimeBoxDetailActivity : ComponentActivity() {
 
     @Composable
     fun CustomMicIcon(color: Color, modifier: Modifier = Modifier) {
+        Icon(
+            imageVector = CustomMicVector,
+            contentDescription = "Mic Icon",
+            tint = color,
+            modifier = modifier
+        )
+    }
+
+    @Composable
+    fun NetflixBottomNav(selectedTab: Int = -1, onTabSelected: (Int) -> Unit) {
         val context = androidx.compose.ui.platform.LocalContext.current
-        val resId = remember(context) {
-            context.resources.getIdentifier("ic_mic_custom", "drawable", context.packageName)
+        val activeProfId = ProfileManager.getActiveProfile(context)
+        val activeProfileObj = ProfileManager.getProfiles(context)
+            .find { it.id == activeProfId }
+        val activeName = activeProfileObj?.name ?: "Guest"
+        val avatarUrl = activeProfileObj?.avatarUrl ?: ""
+        val profilePainter = remember(avatarUrl) {
+            if (avatarUrl.startsWith("android.resource://")) {
+                val resName = avatarUrl.substringAfterLast("/")
+                val resId = context.resources.getIdentifier(resName, "drawable", context.packageName)
+                if (resId != 0) resId else avatarUrl
+            } else {
+                avatarUrl
+            }
         }
-        if (resId != 0) {
-            Icon(
-                painter = rememberAsyncImagePainter(model = resId),
-                contentDescription = "Mic Icon",
-                tint = color,
-                modifier = modifier.size(18.dp)
-            )
-        } else {
-            Box(
-                modifier = modifier
-                    .size(18.dp)
-                    .background(color.copy(alpha = 0.2f), CircleShape),
-                contentAlignment = Alignment.Center
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF121212))
+                .navigationBarsPadding()
+                .padding(vertical = 6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceAround,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
+                // Tab 0: Home
+                val isHomeSelected = selectedTab == 0
+                val homeColor = if (isHomeSelected) Color.White else Color(0xFF8E8E93)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
                     modifier = Modifier
-                        .size(5.dp, 8.dp)
-                        .background(color, RoundedCornerShape(1.dp))
-                )
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onTabSelected(0) }
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Icon(
+                        imageVector = CustomHomeIcon,
+                        contentDescription = "Home",
+                        tint = homeColor,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Home",
+                        color = homeColor,
+                        fontSize = 11.sp,
+                        fontWeight = if (isHomeSelected) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                }
+
+                // Tab 1: Search
+                val isSearchSelected = selectedTab == 1
+                val searchColor = if (isSearchSelected) Color.White else Color(0xFF8E8E93)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onTabSelected(1) }
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Icon(
+                        imageVector = CustomSearchIcon,
+                        contentDescription = "Search",
+                        tint = searchColor,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Search",
+                        color = searchColor,
+                        fontSize = 11.sp,
+                        fontWeight = if (isSearchSelected) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                }
+
+                // Tab 2: Downloads
+                val isDownloadsSelected = selectedTab == 2
+                val downloadsColor = if (isDownloadsSelected) Color.White else Color(0xFF8E8E93)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onTabSelected(2) }
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Icon(
+                        imageVector = CustomDownloadsNavbarIcon,
+                        contentDescription = "Downloads",
+                        tint = downloadsColor,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Downloads",
+                        color = downloadsColor,
+                        fontSize = 11.sp,
+                        fontWeight = if (isDownloadsSelected) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                }
+
+                // Tab 3: My Lists
+                val isListSelected = selectedTab == 3
+                val listColor = if (isListSelected) Color.White else Color(0xFF8E8E93)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onTabSelected(3) }
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Icon(
+                        imageVector = CustomMyListIcon,
+                        contentDescription = "My Lists",
+                        tint = listColor,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "My Lists",
+                        color = listColor,
+                        fontSize = 11.sp,
+                        fontWeight = if (isListSelected) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                }
+
+                // Tab 4: My Space
+                val isSpaceSelected = selectedTab == 4
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onTabSelected(4) }
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF222228)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (avatarUrl.isNotEmpty()) {
+                            Image(
+                                painter = rememberAsyncImagePainter(model = profilePainter),
+                                contentDescription = activeName,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Text(
+                                text = activeName.take(1).uppercase(),
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "My Space",
+                        color = if (isSpaceSelected) Color.White else Color(0xFF8E8E93),
+                        fontSize = 11.sp,
+                        fontWeight = if (isSpaceSelected) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                }
             }
         }
     }
 
     @Composable
-    fun NetflixBottomNav(onTabSelected: (Int) -> Unit) {
-        NavigationBar(
-            containerColor = Color.Black,
-            tonalElevation = 0.dp,
-            modifier = Modifier.border(0.5.dp, Color(0xFF1E1E1E), RoundedCornerShape(topStart = 0.dp, topEnd = 0.dp))
-        ) {
-            NavigationBarItem(
-                selected = false,
-                onClick = { onTabSelected(0) },
-                icon = { Icon(imageVector = Icons.Default.Home, contentDescription = "Home") },
-                label = { Text("Home", fontSize = 11.sp) },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = Color(0xFFD0BCFF),
-                    unselectedIconColor = Color.Gray,
-                    selectedTextColor = Color(0xFFD0BCFF),
-                    unselectedTextColor = Color.Gray,
-                    indicatorColor = Color.Transparent
-                )
-            )
-            NavigationBarItem(
-                selected = false,
-                onClick = { onTabSelected(1) },
-                icon = { Icon(imageVector = Icons.Default.Search, contentDescription = "Search") },
-                label = { Text("Search", fontSize = 11.sp) },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = Color(0xFFD0BCFF),
-                    unselectedIconColor = Color.Gray,
-                    selectedTextColor = Color(0xFFD0BCFF),
-                    unselectedTextColor = Color.Gray,
-                    indicatorColor = Color.Transparent
-                )
-            )
-            NavigationBarItem(
-                selected = false,
-                onClick = { onTabSelected(2) },
-                icon = { Icon(imageVector = Icons.Default.List, contentDescription = "My List") },
-                label = { Text("My List", fontSize = 11.sp) },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = Color(0xFFD0BCFF),
-                    unselectedIconColor = Color.Gray,
-                    selectedTextColor = Color(0xFFD0BCFF),
-                    unselectedTextColor = Color.Gray,
-                    indicatorColor = Color.Transparent
-                )
-            )
-        }
-    }
-
-    @Composable
     fun CharacterCastCard(character: AnimeCharacter) {
-        Card(
-            modifier = Modifier
-                .width(130.dp)
-                .padding(vertical = 4.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF161616)),
-            shape = RoundedCornerShape(6.dp)
+        Column(
+            modifier = Modifier.width(96.dp)
         ) {
-            Column {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(140.dp)
-                ) {
-                    Image(
-                        painter = rememberAsyncImagePainter(model = character.imageUrl),
-                        contentDescription = character.name,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                    if (character.role.isNotEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .padding(4.dp)
-                                .background(
-                                    if (character.role.equals("MAIN", ignoreCase = true)) Color(0xFFD0BCFF) else Color.DarkGray, // Light purple
-                                    shape = RoundedCornerShape(4.dp)
-                                )
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = character.role,
-                                color = if (character.role.equals("MAIN", ignoreCase = true)) Color.Black else Color.White,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-                Column(modifier = Modifier.padding(6.dp)) {
-                    Text(
-                        text = character.name,
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (character.actorName.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = character.actorName,
-                            color = Color.Gray,
-                            fontSize = 10.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(105.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF1C1C24))
+            ) {
+                Image(
+                    painter = rememberAsyncImagePainter(model = character.imageUrl),
+                    contentDescription = character.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = character.name,
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (character.actorName.isNotEmpty()) {
+                Text(
+                    text = character.actorName,
+                    color = Color(0xFF8E8E9B),
+                    fontSize = 10.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }
@@ -1414,13 +2807,23 @@ class AnimeBoxDetailActivity : ComponentActivity() {
         defaultImageUrl: String,
         meta: EpisodeMeta?,
         isLastWatched: Boolean = false,
-        onClick: () -> Unit
+        isMovie: Boolean = false,
+        movieBackdropUrl: String = "",
+        onClick: () -> Unit,
+        onDownloadClick: () -> Unit
     ) {
-        var imageUrl by remember(episodeNum, defaultImageUrl) { mutableStateOf(defaultImageUrl) }
+        var imageUrl by remember(episodeNum, defaultImageUrl, movieBackdropUrl, isMovie) {
+            val initial = if (isMovie && movieBackdropUrl.isNotEmpty()) {
+                movieBackdropUrl
+            } else {
+                defaultImageUrl
+            }
+            mutableStateOf(initial)
+        }
 
-        if (anilistId == 21 || anilistId == 235) {
+        val tmdbId = AniZipClient.getLongRunningTmdbId(anilistId)
+        if (tmdbId != null && !isMovie) {
             LaunchedEffect(episodeNum) {
-                val tmdbId = if (anilistId == 21) 37854 else 30983
                 if (meta != null) {
                     val tmdbImg = AniZipClient.getTmdbEpisodeImage(tmdbId, meta.seasonNumber, meta.episodeNumber)
                     if (tmdbImg.isNotEmpty()) {
@@ -1430,86 +2833,173 @@ class AnimeBoxDetailActivity : ComponentActivity() {
             }
         }
 
+        val isMovieUsingBlurredPoster = isMovie && (movieBackdropUrl.isEmpty() || imageUrl == defaultImageUrl)
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onClick)
-                .background(Color.Transparent)
-                .padding(vertical = 8.dp, horizontal = 4.dp),
+                .padding(vertical = 10.dp, horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // 1. Episode Preview Thumbnail on Left
             Box(
                 modifier = Modifier
-                    .size(152.dp, 84.dp)
-                    .clip(RoundedCornerShape(6.dp))
+                    .width(135.dp)
+                    .height(78.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF1C1C24))
             ) {
                 Image(
                     painter = rememberAsyncImagePainter(model = imageUrl),
                     contentDescription = title,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (isMovieUsingBlurredPoster) Modifier.blur(16.dp) else Modifier)
                 )
-                // Compact bottom-left translucent Play capsule badge
+
+                if (isMovieUsingBlurredPoster) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.45f))
+                    )
+                }
+
+                // Top-right FILLER badge (Screenshot 2)
+                if (meta?.isFiller == true) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(4.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFFFFC107))
+                            .padding(horizontal = 6.dp, vertical = 1.5.dp)
+                    ) {
+                        Text(
+                            text = "Filler",
+                            color = Color.Black,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+                
+                // Duration badge on bottom-left, e.g. "24m"
+                val runtimeMin = if (meta?.runtime != null && meta.runtime > 0) meta.runtime else 24
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
                         .padding(4.dp)
-                        .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                        .background(Color.Black.copy(alpha = 0.85f), RoundedCornerShape(2.dp))
+                        .padding(horizontal = 4.dp, vertical = 0.5.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(9.dp)
-                        )
-                        Spacer(modifier = Modifier.width(2.dp))
-                        Text(
-                            text = "Play",
-                            color = Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                    Text(
+                        text = "${runtimeMin}m",
+                        color = Color.White,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 10.sp
+                    )
                 }
             }
-            Column(
-                modifier = Modifier
-                    .padding(start = 10.dp)
-                    .weight(1f)
-            ) {
-                val seasonStr = "S${meta?.seasonNumber ?: 1}"
-                val displayTitle = if (title.startsWith("Episode ", ignoreCase = true)) "" else title
-                val fullHeader = if (displayTitle.isNotEmpty()) "$seasonStr E$episodeNum - $displayTitle" else "$seasonStr E$episodeNum"
 
+            Spacer(modifier = Modifier.width(14.dp))
+
+            // 2. Info Column on Right
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                val epTitle = if (!title.isBlank() && !title.equals("null", ignoreCase = true) && !title.startsWith("Episode ", ignoreCase = true)) title else (meta?.title ?: "Episode $episodeNum")
+                
+                // Title: "3. What's My Name?"
                 Text(
-                    text = fullHeader,
-                    fontSize = 13.sp,
+                    text = "$episodeNum. $epTitle",
+                    fontSize = 14.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                
+                Spacer(modifier = Modifier.height(3.dp))
 
-                val dateStr = if (!meta?.airdate.isNullOrEmpty()) "${meta!!.airdate}  " else ""
-                val durationStr = if (meta?.runtime != null && meta.runtime > 0) "${meta.runtime} min" else "24 min"
-                Text(
-                    text = "$dateStr$durationStr",
-                    color = Color.Gray,
-                    fontSize = 11.sp,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-
-                val overviewText = if (!meta?.overview.isNullOrEmpty()) meta!!.overview else "Episode $episodeNum of $title"
+                // Overview text
+                val overviewText = if (!meta?.overview.isNullOrEmpty() && !meta!!.overview.equals("null", ignoreCase = true)) meta!!.overview else "Episode $episodeNum"
                 Text(
                     text = overviewText,
-                    color = Color.Gray,
-                    fontSize = 11.sp,
+                    color = Color(0xFF8E8E9B),
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 3.dp)
+                    overflow = TextOverflow.Ellipsis
                 )
+            }
+
+            // 3. Download Button in place of mic and CC icon
+            val actCtx = LocalContext.current
+            val epStateList by com.lagradost.cloudstream3.ui.animebox.download.AnimeDownloadManager.episodesState.collectAsState()
+            val currentEpStatus = epStateList.find { it.anilistId == anilistId && it.episodeNumber == episodeNum }
+            val isCompleted = currentEpStatus?.status == com.lagradost.cloudstream3.ui.animebox.download.DownloadStatus.COMPLETED
+            val isDownloading = currentEpStatus?.status == com.lagradost.cloudstream3.ui.animebox.download.DownloadStatus.DOWNLOADING ||
+                                currentEpStatus?.status == com.lagradost.cloudstream3.ui.animebox.download.DownloadStatus.PENDING
+
+            Box(
+                modifier = Modifier
+                    .padding(start = 8.dp)
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable {
+                        if (!isCompleted && !isDownloading) {
+                            onDownloadClick()
+                        } else if (isCompleted) {
+                            Toast.makeText(actCtx, "Episode $episodeNum is already downloaded", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                when {
+                    isDownloading -> {
+                        val prog = currentEpStatus?.downloadProgress ?: 0
+                        Box(
+                            modifier = Modifier.size(28.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                progress = (prog / 100f).coerceIn(0f, 1f),
+                                color = Color.White,
+                                trackColor = Color(0xFF2E2E34),
+                                strokeWidth = 2.2.dp,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            if (prog > 0) {
+                                Text(
+                                    text = "$prog%",
+                                    color = Color.White,
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                    isCompleted -> {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "Downloaded",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    else -> {
+                        Icon(
+                            imageVector = CustomDownloadsNavbarIcon,
+                            contentDescription = "Download Episode",
+                            tint = Color(0xFFBDC7D5),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -1534,471 +3024,47 @@ class AnimeBoxDetailActivity : ComponentActivity() {
 
 
     private suspend fun fetchAndPlayStream(anilistId: Int, episodeNum: Int, animeTitle: String, episodeCoverUrl: String, type: String, showCoverUrl: String, totalEpisodes: Int) {
-        var streamInfo = withContext(Dispatchers.IO) {
-            if (type == "hindi") {
-                // 1. Try anidrive API first
-                try {
-                    val aniDriveUrl = "${com.lagradost.cloudstream3.BuildConfig.LOVABLE_ANIDRIVE_API}/api/public/stream?anilist=$anilistId&ep=$episodeNum"
-                    val req = Request.Builder().url(aniDriveUrl).build()
-                    OkHttpClient().newCall(req).execute().use { resp ->
-                        if (resp.isSuccessful) {
-                            val jsonStr = resp.body?.string() ?: ""
-                            if (jsonStr.isNotEmpty()) {
-                                val json = JSONObject(jsonStr)
-                                if (json.optBoolean("success", false) && json.has("data")) {
-                                    val data = json.getJSONObject("data")
-                                    val rawUrl = data.optString("url", "")
-                                    val qualitiesList = mutableListOf<Map<String, String>>()
-                                    if (data.has("qualities") && !data.isNull("qualities")) {
-                                        val qArr = data.getJSONArray("qualities")
-                                        for (i in 0 until qArr.length()) {
-                                            val q = qArr.getJSONObject(i)
-                                            val label = q.optString("label", "")
-                                            val qUrl = q.optString("url", "")
-                                            if (label.isNotEmpty() && qUrl.isNotEmpty()) {
-                                                qualitiesList.add(mapOf("label" to label, "url" to qUrl, "hls" to qUrl, "referer" to ""))
-                                            }
-                                        }
-                                    }
-
-                                    fun getQualityRank(lbl: String): Int {
-                                        val l = lbl.lowercase()
-                                        return when {
-                                            l.contains("1080") -> 1080
-                                            l.contains("720") -> 720
-                                            l.contains("480") -> 480
-                                            l.contains("360") -> 360
-                                            l.contains("240") -> 240
-                                            else -> 0
-                                        }
-                                    }
-                                    qualitiesList.sortByDescending { getQualityRank(it["label"] ?: "") }
-
-                                    val mainUrl = if (qualitiesList.isNotEmpty()) qualitiesList.first()["url"] ?: rawUrl else rawUrl
-                                    if (mainUrl.isNotEmpty()) {
-                                        var subtitleUrl = ""
-                                        var introStart = 0L; var introEnd = 0L
-                                        var outroStart = 0L; var outroEnd = 0L
-                                        try {
-                                            val subUrl = "${com.lagradost.cloudstream3.BuildConfig.VERCEL_MULTIMOVIE_API}/api/anime?anilistId=$anilistId&episode=$episodeNum&type=sub"
-                                            val subReq = Request.Builder().url(subUrl).build()
-                                            OkHttpClient().newCall(subReq).execute().use { subRes ->
-                                                if (subRes.isSuccessful) {
-                                                    val subJson = JSONObject(subRes.body?.string() ?: "")
-                                                    if (subJson.has("response")) {
-                                                        val respObj = subJson.getJSONObject("response")
-                                                        val containerKey = if (respObj.has("ssub")) "ssub" else if (respObj.has("sdub")) "sdub" else respObj.keys().asSequence().firstOrNull()
-                                                        if (containerKey != null) {
-                                                            val subObj = respObj.getJSONObject(containerKey)
-                                                            if (subObj.has("subtitles") && !subObj.isNull("subtitles")) {
-                                                                val subtitles = subObj.getJSONArray("subtitles")
-                                                                for (i in 0 until subtitles.length()) {
-                                                                    val sub = subtitles.getJSONObject(i)
-                                                                    val label = sub.optString("label", sub.optString("language", "")).lowercase()
-                                                                    val file = sub.optString("file", sub.optString("url", ""))
-                                                                    if ((label.contains("english") || label.contains("en") || subtitleUrl.isEmpty()) && file.isNotEmpty()) {
-                                                                        subtitleUrl = file
-                                                                        if (label.contains("english")) break
-                                                                    }
-                                                                }
-                                                            }
-                                                            if (subObj.has("intro") && !subObj.isNull("intro")) {
-                                                                val intro = subObj.getJSONObject("intro")
-                                                                introStart = intro.optLong("start", 0L)
-                                                                introEnd = intro.optLong("end", 0L)
-                                                            }
-                                                            if (subObj.has("outro") && !subObj.isNull("outro")) {
-                                                                val outro = subObj.getJSONObject("outro")
-                                                                outroStart = outro.optLong("start", 0L)
-                                                                outroEnd = outro.optLong("end", 0L)
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        } catch (e: Exception) {}
-
-                                        val hindiListJson = if (qualitiesList.isNotEmpty()) {
-                                            org.json.JSONArray().apply {
-                                                qualitiesList.forEach { put(JSONObject(it)) }
-                                            }.toString()
-                                        } else ""
-
-                                        return@withContext mapOf(
-                                            "hls" to mainUrl,
-                                            "referer" to "",
-                                            "subtitle" to subtitleUrl,
-                                            "introStart" to introStart,
-                                            "introEnd" to introEnd,
-                                            "outroStart" to outroStart,
-                                            "outroEnd" to outroEnd,
-                                            "hindiStreamsJson" to hindiListJson
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (e: Exception) { e.printStackTrace() }
-
-                // 2. Fallback to multimovieapi Hindi endpoint if anidrive fails
-                val hindiUrl = "${com.lagradost.cloudstream3.BuildConfig.VERCEL_MULTIMOVIE_API}/api/hindi?anilistId=$anilistId&episode=$episodeNum"
-                val hindiReq = Request.Builder().url(hindiUrl).build()
-                val hindiList = mutableListOf<Map<String, String>>()
-                try {
-                    OkHttpClient().newCall(hindiReq).execute().use { response ->
-                        if (response.isSuccessful) {
-                            val json = JSONObject(response.body?.string() ?: "")
-                            if (json.has("streams")) {
-                                val streams = json.getJSONArray("streams")
-                                for (i in 0 until streams.length()) {
-                                    val s = streams.getJSONObject(i)
-                                    if (s.has("hls") && !s.isNull("hls")) {
-                                        val hls = s.getString("hls")
-                                        val headers = s.optJSONObject("headers")
-                                        val referer = headers?.optString("Referer", "") ?: ""
-                                        hindiList.add(mapOf("hls" to hls, "referer" to referer))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (e: Exception) { e.printStackTrace() }
-
-                var subtitleUrl = ""
-                var introStart = 0L; var introEnd = 0L
-                var outroStart = 0L; var outroEnd = 0L
-                try {
-                    val subUrl = "${com.lagradost.cloudstream3.BuildConfig.VERCEL_MULTIMOVIE_API}/api/anime?anilistId=$anilistId&episode=$episodeNum&type=sub"
-                    val subReq = Request.Builder().url(subUrl).build()
-                    OkHttpClient().newCall(subReq).execute().use { subRes ->
-                        if (subRes.isSuccessful) {
-                            val subJson = JSONObject(subRes.body?.string() ?: "")
-                            if (subJson.has("response")) {
-                                val respObj = subJson.getJSONObject("response")
-                                val containerKey = if (respObj.has("ssub")) "ssub" else if (respObj.has("sdub")) "sdub" else respObj.keys().asSequence().firstOrNull()
-                                if (containerKey != null) {
-                                    val subObj = respObj.getJSONObject(containerKey)
-                                    if (subObj.has("subtitles") && !subObj.isNull("subtitles")) {
-                                        val subtitles = subObj.getJSONArray("subtitles")
-                                        for (i in 0 until subtitles.length()) {
-                                            val sub = subtitles.getJSONObject(i)
-                                            val label = sub.optString("label", sub.optString("language", "")).lowercase()
-                                            val file = sub.optString("file", sub.optString("url", ""))
-                                            if ((label.contains("english") || label.contains("en") || subtitleUrl.isEmpty()) && file.isNotEmpty()) {
-                                                subtitleUrl = file
-                                                if (label.contains("english")) break
-                                            }
-                                        }
-                                    }
-                                    if (subObj.has("intro") && !subObj.isNull("intro")) {
-                                        val intro = subObj.getJSONObject("intro")
-                                        introStart = intro.optLong("start", 0L)
-                                        introEnd = intro.optLong("end", 0L)
-                                    }
-                                    if (subObj.has("outro") && !subObj.isNull("outro")) {
-                                        val outro = subObj.getJSONObject("outro")
-                                        outroStart = outro.optLong("start", 0L)
-                                        outroEnd = outro.optLong("end", 0L)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (e: Exception) {}
-
-                if (hindiList.isNotEmpty()) {
-                    val first = hindiList.first()
-                    val hindiListJson = org.json.JSONArray().apply {
-                        hindiList.forEach { put(JSONObject(it)) }
-                    }.toString()
-                    
-                    mapOf(
-                        "hls" to first["hls"],
-                        "referer" to first["referer"],
-                        "subtitle" to subtitleUrl,
-                        "introStart" to introStart,
-                        "introEnd" to introEnd,
-                        "outroStart" to outroStart,
-                        "outroEnd" to outroEnd,
-                        "hindiStreamsJson" to hindiListJson
-                    )
-                } else null
-            } else {
-                val url = "${com.lagradost.cloudstream3.BuildConfig.VERCEL_MULTIMOVIE_API}/api/anime?anilistId=$anilistId&episode=$episodeNum&type=$type"
-                val request = Request.Builder().url(url).build()
-                try {
-                    OkHttpClient().newCall(request).execute().use { response ->
-                        if (response.isSuccessful) {
-                            val json = JSONObject(response.body?.string() ?: "")
-                            if (json.has("primary")) {
-                                val primary = json.getJSONObject("primary")
-                                val hls = primary.getString("hls")
-                                val headers = primary.getJSONObject("headers")
-                                val referer = if (headers.has("Referer")) headers.getString("Referer") else ""
-
-                                var subtitleUrl = ""
-                                if (primary.has("tracks") && !primary.isNull("tracks")) {
-                                    val tracks = primary.getJSONArray("tracks")
-                                    for (i in 0 until tracks.length()) {
-                                        val track = tracks.getJSONObject(i)
-                                        val lang = track.optString("lang", "").lowercase()
-                                        val urlTrack = track.optString("url", "")
-                                        if (lang.contains("english") || lang.contains("en") || subtitleUrl.isEmpty()) {
-                                            subtitleUrl = urlTrack
-                                            if (lang.contains("english")) break
-                                        }
-                                    }
-                                }
-
-                                // Parse chapters array for intro/outro timestamps
-                                var introStart = 0L; var introEnd = 0L
-                                var outroStart = 0L; var outroEnd = 0L
-                                if (primary.has("chapters") && !primary.isNull("chapters")) {
-                                    val chapters = primary.getJSONArray("chapters")
-                                    for (i in 0 until chapters.length()) {
-                                        val ch = chapters.getJSONObject(i)
-                                        when (ch.optString("title", "").lowercase()) {
-                                            "intro" -> { introStart = ch.optLong("start", 0L); introEnd = ch.optLong("end", 0L) }
-                                            "outro" -> { outroStart = ch.optLong("start", 0L); outroEnd = ch.optLong("end", 0L) }
-                                        }
-                                    }
-                                }
-
-                                 var backupHls = ""
-                                 var backupProvider = ""
-                                 if (json.has("backup") && !json.isNull("backup")) {
-                                     val backup = json.getJSONObject("backup")
-                                     backupHls = backup.optString("hls", "")
-                                     backupProvider = backup.optString("provider", "")
-                                 }
-
-                                 // If type is dub and no subtitle found, fetch sub to get subtitles
-                                 if (type == "dub" && subtitleUrl.isEmpty()) {
-                                     val subUrl = "${com.lagradost.cloudstream3.BuildConfig.VERCEL_MULTIMOVIE_API}/api/anime?anilistId=$anilistId&episode=$episodeNum&type=sub"
-                                     val subReq = Request.Builder().url(subUrl).build()
-                                     try {
-                                         OkHttpClient().newCall(subReq).execute().use { subRes ->
-                                             if (subRes.isSuccessful) {
-                                                 val subJson = JSONObject(subRes.body?.string() ?: "")
-                                                 if (subJson.has("primary")) {
-                                                     val subPrim = subJson.getJSONObject("primary")
-                                                     if (subPrim.has("tracks") && !subPrim.isNull("tracks")) {
-                                                         val subTracks = subPrim.getJSONArray("tracks")
-                                                         for (k in 0 until subTracks.length()) {
-                                                             val t = subTracks.getJSONObject(k)
-                                                             val lang = t.optString("lang", "").lowercase()
-                                                             val urlTrack = t.optString("url", "")
-                                                             if (lang.contains("english") || lang.contains("en") || subtitleUrl.isEmpty()) {
-                                                                 subtitleUrl = urlTrack
-                                                                 if (lang.contains("english")) break
-                                                             }
-                                                         }
-                                                     }
-                                                 }
-                                             }
-                                         }
-                                     } catch (e: Exception) {}
-                                 }
-
-                                  if (hls.isNotEmpty()) {
-                                      mapOf(
-                                          "hls" to hls,
-                                          "referer" to referer,
-                                          "subtitle" to subtitleUrl,
-                                          "introStart" to introStart,
-                                          "introEnd" to introEnd,
-                                          "outroStart" to outroStart,
-                                          "outroEnd" to outroEnd,
-                                          "backupHls" to backupHls,
-                                          "backupProvider" to backupProvider
-                                      )
-                                  } else null
-                             } else null
-                        } else null
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    null
-                }
-            }
+        if (AnimeBoxPlayerActivity.isCurrentlyInPip) {
+            Toast.makeText(this, "Please close Picture-in-Picture mode first to play another episode", Toast.LENGTH_SHORT).show()
+            return
         }
 
-        if (streamInfo == null || (streamInfo["hls"] as? String).isNullOrEmpty()) {
-            streamInfo = withContext(Dispatchers.IO) {
-                try {
-                    val sType = if (type == "dub") "dub" else "sub"
-                    val url = "${com.lagradost.cloudstream3.BuildConfig.VERCEL_SCRAPER_API}/default/$anilistId/$sType/$episodeNum"
-                    val req = Request.Builder().url(url).build()
-                    OkHttpClient().newCall(req).execute().use { resp ->
-                        if (resp.isSuccessful) {
-                            val jsonStr = resp.body?.string() ?: ""
-                            if (jsonStr.isNotEmpty()) {
-                                val json = JSONObject(jsonStr)
-                                val streamContainers = mutableListOf<JSONObject>()
+        val histManager = WatchHistoryManager(this)
+        val savedProgress = histManager.getSavedProgress(anilistId, episodeNum)
 
-                                if (json.has("response") && !json.isNull("response")) {
-                                    val respObj = json.optJSONObject("response")
-                                    if (respObj != null) {
-                                        if (sType == "dub" && respObj.has("sdub") && respObj.optJSONObject("sdub") != null) {
-                                            streamContainers.add(respObj.getJSONObject("sdub"))
-                                        }
-                                        if (respObj.has("ssub") && respObj.optJSONObject("ssub") != null) {
-                                            streamContainers.add(respObj.getJSONObject("ssub"))
-                                        }
-                                        if (respObj.has("sdub") && respObj.optJSONObject("sdub") != null && !streamContainers.contains(respObj.optJSONObject("sdub"))) {
-                                            streamContainers.add(respObj.getJSONObject("sdub"))
-                                        }
-                                        respObj.keys().forEach { k ->
-                                            val obj = respObj.optJSONObject(k)
-                                            if (obj != null && !streamContainers.contains(obj)) {
-                                                streamContainers.add(obj)
-                                            }
-                                        }
-                                    }
-                                }
+        // 1. Direct offline playback if episode is already downloaded
+        val downloadedEp = com.lagradost.cloudstream3.ui.animebox.download.AnimeDownloadManager.getInstance(this).getDownloadedEpisode(anilistId, episodeNum)
+        if (downloadedEp != null && downloadedEp.localFilePath.isNotEmpty() && java.io.File(downloadedEp.localFilePath).exists()) {
+            val intent = Intent(this, AnimeBoxPlayerActivity::class.java).apply {
+                putExtra("localFilePath", downloadedEp.localFilePath)
+                putExtra("isOffline", true)
+                putExtra("animeTitle", animeTitle)
+                putExtra("anilistId", anilistId)
+                putExtra("episode", episodeNum)
+                putExtra("showCoverUrl", showCoverUrl)
+                putExtra("coverUrl", episodeCoverUrl)
+                putExtra("subtitleUrl", downloadedEp.localSubtitlePath)
+                putExtra("subtitlesJson", downloadedEp.subtitlesJson)
+                putExtra("introStart", downloadedEp.introStart)
+                putExtra("introEnd", downloadedEp.introEnd)
+                putExtra("outroStart", downloadedEp.outroStart)
+                putExtra("outroEnd", downloadedEp.outroEnd)
+                putExtra("streamType", downloadedEp.streamType)
+                putExtra("fromContinueWatching", savedProgress > 0L)
+            }
+            startActivity(intent)
+            return
+        }
 
-                                if (json.has("streams") && !json.isNull("streams")) {
-                                    streamContainers.add(json)
-                                }
-                                val rootKeys = listOf("primary", "data", "result", "fallback")
-                                for (rk in rootKeys) {
-                                    if (json.has(rk) && !json.isNull(rk)) {
-                                        val obj = json.optJSONObject(rk)
-                                        if (obj != null && !streamContainers.contains(obj)) {
-                                            streamContainers.add(obj)
-                                        }
-                                    }
-                                }
-                                if (streamContainers.isEmpty()) {
-                                    streamContainers.add(json)
-                                }
-
-                                var megapHlsUrl = ""
-                                var megapReferer = ""
-                                var defaultHlsUrl = ""
-                                var defaultReferer = ""
-                                var fallbackHlsUrl = ""
-                                var fallbackReferer = ""
-                                var embeddedSubUrl = ""
-                                var subtitleUrl = ""
-                                var introStart = 0L; var introEnd = 0L
-                                var outroStart = 0L; var outroEnd = 0L
-                                val hlsList = mutableListOf<Map<String, String>>()
-
-                                for (container in streamContainers) {
-                                    if (container.has("streams") && !container.isNull("streams")) {
-                                        val streams = container.getJSONArray("streams")
-                                        for (i in 0 until streams.length()) {
-                                            val s = streams.optJSONObject(i) ?: continue
-                                            val t = s.optString("type", "").lowercase()
-                                            val u = s.optString("url", s.optString("m3u8", s.optString("file", s.optString("stream", ""))))
-                                            val isHls = t == "hls" || t == "stream" || t == "mp4" || u.contains(".m3u8") || u.contains("/stream/") || u.contains("master") || u.contains("index") || u.contains(".mp4") || u.startsWith("http")
-                                            if (u.isNotEmpty() && isHls) {
-                                                val embed = s.optString("embed", "")
-                                                val rawRef = s.optString("referer", if (embed.isNotEmpty()) embed else "")
-                                                val cleanRef = if (rawRef.contains("?")) rawRef.substring(0, rawRef.indexOf("?")) else rawRef
-                                                val ref = if (cleanRef.isNotEmpty()) cleanRef else try {
-                                                    val uri = android.net.Uri.parse(u)
-                                                    "${uri.scheme}://${uri.host}/"
-                                                } catch (e: Exception) { "" }
-                                                val server = s.optString("server", s.optString("name", s.optString("provider", ""))).lowercase()
-                                                val isDefault = s.optBoolean("default", false)
-
-                                                fun extractSub(link: String): String {
-                                                    if (link.contains("sub=")) {
-                                                        val idx = link.indexOf("sub=")
-                                                        val raw = link.substring(idx + 4).let { val e = it.indexOf("&"); if (e != -1) it.substring(0, e) else it }
-                                                        return try { java.net.URLDecoder.decode(raw, "UTF-8") } catch (ex: Exception) { raw }
-                                                    }
-                                                    return ""
-                                                }
-
-                                                val subCandidate = extractSub(embed).ifEmpty { extractSub(rawRef) }
-                                                if (subCandidate.isNotEmpty() && embeddedSubUrl.isEmpty()) {
-                                                    embeddedSubUrl = subCandidate
-                                                }
-
-                                                val item = mapOf("hls" to u, "referer" to ref, "server" to server)
-                                                if (!hlsList.any { it["hls"] == u }) {
-                                                    hlsList.add(item)
-                                                }
-
-                                                val refLower = rawRef.lowercase()
-                                                if ((refLower.contains("megaplay") || refLower.contains("megap") || server.contains("megaplay") || server.contains("megap")) && megapHlsUrl.isEmpty()) {
-                                                    megapHlsUrl = u
-                                                    megapReferer = ref
-                                                } else if (isDefault && defaultHlsUrl.isEmpty()) {
-                                                    defaultHlsUrl = u
-                                                    defaultReferer = ref
-                                                } else if (fallbackHlsUrl.isEmpty()) {
-                                                    fallbackHlsUrl = u
-                                                    fallbackReferer = ref
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    if (subtitleUrl.isEmpty() && container.has("subtitles") && !container.isNull("subtitles")) {
-                                        val subtitles = container.getJSONArray("subtitles")
-                                        for (i in 0 until subtitles.length()) {
-                                            val sub = subtitles.getJSONObject(i)
-                                            val label = sub.optString("label", sub.optString("language", "")).lowercase()
-                                            val file = sub.optString("file", sub.optString("url", ""))
-                                            if ((label.contains("english") || label.contains("en") || subtitleUrl.isEmpty()) && file.isNotEmpty()) {
-                                                subtitleUrl = file
-                                                if (label.contains("english")) break
-                                            }
-                                        }
-                                    }
-
-                                    if (introEnd == 0L && container.has("intro") && !container.isNull("intro")) {
-                                        val intro = container.getJSONObject("intro")
-                                        introStart = intro.optLong("start", 0L)
-                                        introEnd = intro.optLong("end", 0L)
-                                    }
-
-                                    if (outroEnd == 0L && container.has("outro") && !container.isNull("outro")) {
-                                        val outro = container.getJSONObject("outro")
-                                        outroStart = outro.optLong("start", 0L)
-                                        outroEnd = outro.optLong("end", 0L)
-                                    }
-                                }
-
-                                var hlsUrl = when {
-                                    megapHlsUrl.isNotEmpty() -> megapHlsUrl
-                                    defaultHlsUrl.isNotEmpty() -> defaultHlsUrl
-                                    fallbackHlsUrl.isNotEmpty() -> fallbackHlsUrl
-                                    hlsList.isNotEmpty() -> hlsList.first()["hls"] ?: ""
-                                    else -> json.optString("m3u8", json.optString("url", json.optString("hls", "")))
-                                }
-                                var referer = when {
-                                    megapHlsUrl.isNotEmpty() -> megapReferer
-                                    defaultHlsUrl.isNotEmpty() -> defaultReferer
-                                    fallbackHlsUrl.isNotEmpty() -> fallbackReferer
-                                    hlsList.isNotEmpty() -> hlsList.first()["referer"] ?: ""
-                                    else -> ""
-                                }
-
-                                if (subtitleUrl.isEmpty() && embeddedSubUrl.isNotEmpty()) {
-                                    subtitleUrl = embeddedSubUrl
-                                }
-
-                                if (hlsUrl.isNotEmpty()) {
-                                    mapOf(
-                                        "hls" to hlsUrl,
-                                        "referer" to referer,
-                                        "subtitle" to subtitleUrl,
-                                        "introStart" to introStart,
-                                        "introEnd" to introEnd,
-                                        "outroStart" to outroStart,
-                                        "outroEnd" to outroEnd
-                                    )
-                                } else null
-                            } else null
-                        } else null
-                    }
-                } catch (e: Exception) { null }
+        var actualType = type
+        var showFallbackDialogInPlayer = false
+        var streamInfo = com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(this, anilistId, episodeNum, type)
+        if (streamInfo == null && type != "sub") {
+            val subInfo = com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(this, anilistId, episodeNum, "sub")
+            if (subInfo != null) {
+                streamInfo = subInfo
+                actualType = "sub"
+                showFallbackDialogInPlayer = true
             }
         }
 
@@ -2011,13 +3077,13 @@ class AnimeBoxDetailActivity : ComponentActivity() {
             val histManager = WatchHistoryManager(this)
             val savedProgress = histManager.getSavedProgress(anilistId, episodeNum)
             val intent = Intent(this, AnimeBoxPlayerActivity::class.java).apply {
-                putExtra("hlsUrl", streamInfo["hls"] as String)
-                putExtra("referer", streamInfo["referer"] as String)
+                putExtra("hlsUrl", (streamInfo["hls"] as? String) ?: "")
+                putExtra("referer", (streamInfo["referer"] as? String) ?: "https://megaplay.buzz/")
                 putExtra("subtitleUrl", (streamInfo["subtitle"] as? String) ?: "")
-                putExtra("introStart", streamInfo["introStart"] as Long)
-                putExtra("introEnd", streamInfo["introEnd"] as Long)
-                putExtra("outroStart", streamInfo["outroStart"] as Long)
-                putExtra("outroEnd", streamInfo["outroEnd"] as Long)
+                putExtra("introStart", (streamInfo["introStart"] as? Number)?.toLong() ?: 0L)
+                putExtra("introEnd", (streamInfo["introEnd"] as? Number)?.toLong() ?: 0L)
+                putExtra("outroStart", (streamInfo["outroStart"] as? Number)?.toLong() ?: 0L)
+                putExtra("outroEnd", (streamInfo["outroEnd"] as? Number)?.toLong() ?: 0L)
                 putExtra("anilistId", anilistId)
                 putExtra("episode", episodeNum)
                 putExtra("animeTitle", animeTitle)
@@ -2027,11 +3093,15 @@ class AnimeBoxDetailActivity : ComponentActivity() {
                 putExtra("backupHls", (streamInfo["backupHls"] as? String) ?: "")
                 putExtra("backupProvider", (streamInfo["backupProvider"] as? String) ?: "")
                 putExtra("hindiStreamsJson", (streamInfo["hindiStreamsJson"] as? String) ?: "")
-                putExtra("streamType", type)
+                putExtra("streamType", actualType)
+                putExtra("showAudioFallbackWarning", showFallbackDialogInPlayer)
+                putExtra("requestedAudioType", type)
                 // fromContinueWatching=true triggers resume dialog if savedProgress > 0
                 putExtra("fromContinueWatching", savedProgress > 0L)
             }
             startActivity(intent)
+        } else {
+            Toast.makeText(this, "No source available for this anime episode", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -2040,9 +3110,10 @@ class AnimeBoxDetailActivity : ComponentActivity() {
             val obj = JSONObject(jsonString).getJSONObject("data").getJSONObject("Media")
             val id = obj.getInt("id")
             val titleObj = if (obj.has("title") && !obj.isNull("title")) obj.getJSONObject("title") else JSONObject()
-            val eng = titleObj.optString("english", "")
-            val rom = titleObj.optString("romaji", "")
-            val title = if (eng.isNotEmpty()) eng else if (rom.isNotEmpty()) rom else "Anime"
+            val eng = titleObj.optString("english", "").let { if (it.equals("null", ignoreCase = true)) "" else it }
+            val rom = titleObj.optString("romaji", "").let { if (it.equals("null", ignoreCase = true)) "" else it }
+            val nativeTitle = titleObj.optString("native", "").let { if (it.equals("null", ignoreCase = true)) "" else it }
+            val title = if (eng.isNotEmpty()) eng else if (rom.isNotEmpty()) rom else if (nativeTitle.isNotEmpty()) nativeTitle else "Anime"
 
             val coverUrl = if (obj.has("coverImage") && !obj.isNull("coverImage")) {
                 val cov = obj.getJSONObject("coverImage")
@@ -2080,12 +3151,15 @@ class AnimeBoxDetailActivity : ComponentActivity() {
                 obj.getBoolean("isAdult")
             } else false
 
+            val idMal = if (obj.has("idMal") && !obj.isNull("idMal")) obj.getInt("idMal") else 0
+
             var trailerId = ""
             if (obj.has("trailer") && !obj.isNull("trailer")) {
-                val trailerObj = obj.getJSONObject("trailer")
-                val site = trailerObj.optString("site", "").lowercase()
-                if (site == "youtube") {
-                    trailerId = trailerObj.optString("id", "")
+                val trailerObj = obj.optJSONObject("trailer")
+                val site = trailerObj?.optString("site", "")?.lowercase() ?: ""
+                val tid = trailerObj?.optString("id", "") ?: ""
+                if (site == "youtube" || site.isEmpty()) {
+                    trailerId = tid
                 }
             }
 
@@ -2117,7 +3191,7 @@ class AnimeBoxDetailActivity : ComponentActivity() {
                                     actorImage = actorImageObj?.optString("large", "") ?: ""
                                 }
                             }
-                            if (charName.isNotEmpty()) {
+                            if (charName.isNotEmpty() && charactersList.none { it.name.equals(charName, ignoreCase = true) }) {
                                 charactersList.add(AnimeCharacter(charName, charImage, role, actorName, actorImage))
                             }
                         }
@@ -2184,6 +3258,12 @@ class AnimeBoxDetailActivity : ComponentActivity() {
                 val epNum = naObj.getInt("episode")
                 nextAiring = NextAiringEpisode(airingAt, timeUntil, epNum)
             }
+            val status = if (obj.has("status") && !obj.isNull("status")) obj.getString("status") else ""
+            val format = if (obj.has("format") && !obj.isNull("format")) obj.getString("format") else ""
+            val releaseYear = if (obj.has("startDate") && !obj.isNull("startDate")) {
+                val sd = obj.getJSONObject("startDate")
+                if (sd.has("year") && !sd.isNull("year")) sd.getInt("year") else 0
+            } else 0
 
             AnimeDetail(
                 id = id,
@@ -2194,7 +3274,11 @@ class AnimeBoxDetailActivity : ComponentActivity() {
                 episodesCount = episodes,
                 score = score,
                 genres = genresList,
+                status = status,
+                format = format,
+                releaseYear = releaseYear,
                 isAdult = isAdult,
+                idMal = idMal,
                 trailerId = trailerId,
                 characters = charactersList,
                 relations = relationsList,
@@ -2204,6 +3288,88 @@ class AnimeBoxDetailActivity : ComponentActivity() {
         } catch (e: Exception) {
             e.printStackTrace()
             null
+        }
+    }
+
+    private suspend fun resolveFallbackTrailer(anilistId: Int, malId: Int, title: String): String = withContext(Dispatchers.IO) {
+        // 1. Try Jikan API via MAL ID
+        if (malId > 0) {
+            try {
+                val client = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                val req = okhttp3.Request.Builder().url("https://api.jikan.moe/v4/anime/$malId").build()
+                val resp = client.newCall(req).execute().use { it.body?.string() }
+                if (!resp.isNullOrEmpty()) {
+                    val jData = org.json.JSONObject(resp).optJSONObject("data")
+                    val jTrailer = jData?.optJSONObject("trailer")
+                    val ytId = jTrailer?.optString("youtube_id", "") ?: ""
+                    if (ytId.isNotEmpty()) return@withContext ytId
+                }
+            } catch (_: Exception) {}
+        }
+        // 2. Try AniZip mappings for MAL ID
+        try {
+            val aniZip = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getAniZipJson(anilistId)
+            val mappingsMalId = aniZip?.optJSONObject("mappings")?.optInt("mal_id", 0) ?: 0
+            if (mappingsMalId > 0 && mappingsMalId != malId) {
+                val client = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                val req = okhttp3.Request.Builder().url("https://api.jikan.moe/v4/anime/$mappingsMalId").build()
+                val resp = client.newCall(req).execute().use { it.body?.string() }
+                if (!resp.isNullOrEmpty()) {
+                    val jData = org.json.JSONObject(resp).optJSONObject("data")
+                    val jTrailer = jData?.optJSONObject("trailer")
+                    val ytId = jTrailer?.optString("youtube_id", "") ?: ""
+                    if (ytId.isNotEmpty()) return@withContext ytId
+                }
+            }
+        } catch (_: Exception) {}
+        ""
+    }
+
+    // Extract Direct MP4 / M3U8 video stream for YouTube trailer using NewPipe Extractor
+    private suspend fun extractTrailerWithNewPipe(videoId: String): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                // Ensure NewPipe is initialized
+                try {
+                    org.schabi.newpipe.extractor.NewPipe.init(com.lagradost.cloudstream3.DownloaderTestImpl.getInstance())
+                } catch (_: Exception) {}
+
+                val watchUrl = "https://www.youtube.com/watch?v=$videoId"
+                val streamInfo = org.schabi.newpipe.extractor.stream.StreamInfo.getInfo(watchUrl)
+
+                // 1. Prefer combined video+audio streams
+                val videoAudioStreams = streamInfo.videoStreams.orEmpty()
+                if (videoAudioStreams.isNotEmpty()) {
+                    val bestStream = videoAudioStreams.maxByOrNull { it.height }
+                    if (bestStream != null && !bestStream.content.isNullOrBlank()) {
+                        return@withContext bestStream.content
+                    }
+                }
+
+                // 2. Fallback to HLS stream if available
+                if (!streamInfo.hlsUrl.isNullOrBlank()) {
+                    return@withContext streamInfo.hlsUrl
+                }
+
+                // 3. Fallback to video-only streams
+                val videoOnlyStreams = streamInfo.videoOnlyStreams.orEmpty()
+                if (videoOnlyStreams.isNotEmpty()) {
+                    val bestVideo = videoOnlyStreams.maxByOrNull { it.height }
+                    if (bestVideo != null && !bestVideo.content.isNullOrBlank()) {
+                        return@withContext bestVideo.content
+                    }
+                }
+                null
+            } catch (e: Exception) {
+                e.printStackTrace()
+                null
+            }
         }
     }
 }
@@ -2285,3 +3451,476 @@ val VolumeOffIcon: ImageVector
         curveTo(18.33f, 14.19f, 19f, 13.17f, 19f, 12f)
         close()
     }.build()
+
+// Custom Sort icon built programmatically
+val SortIconVector: ImageVector
+    get() = ImageVector.Builder(
+        name = "SortIcon",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).path(
+        fill = SolidColor(Color.White),
+        pathFillType = PathFillType.NonZero
+    ) {
+        moveTo(3f, 18f)
+        horizontalLineTo(9f)
+        verticalLineTo(16f)
+        horizontalLineTo(3f)
+        verticalLineTo(18f)
+        close()
+        moveTo(3f, 6f)
+        verticalLineTo(8f)
+        horizontalLineTo(21f)
+        verticalLineTo(6f)
+        horizontalLineTo(3f)
+        close()
+        moveTo(3f, 13f)
+        horizontalLineTo(15f)
+        verticalLineTo(11f)
+        horizontalLineTo(3f)
+        verticalLineTo(13f)
+        close()
+    }.build()
+
+
+// Animated Audio Wave Indicator
+@Composable
+fun PlayingAudioWaveIndicator(
+    modifier: Modifier = Modifier,
+    waveColor: Color = AnimeBoxThemeHelper.COLOR_LIGHT_RED,
+    barWidth: Dp = 2.dp,
+    spacing: Dp = 1.5.dp
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "audio_waves")
+    val h1 by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(450, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "h1"
+    )
+    val h2 by infiniteTransition.animateFloat(
+        initialValue = 0.8f,
+        targetValue = 0.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(550, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "h2"
+    )
+    val h3 by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 0.95f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(400, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "h3"
+    )
+    val h4 by infiniteTransition.animateFloat(
+        initialValue = 0.9f,
+        targetValue = 0.35f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(500, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "h4"
+    )
+
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(spacing),
+        verticalAlignment = Alignment.Bottom
+    ) {
+        Box(modifier = Modifier.width(barWidth).fillMaxHeight(h1).clip(RoundedCornerShape(1.dp)).background(waveColor))
+        Box(modifier = Modifier.width(barWidth).fillMaxHeight(h2).clip(RoundedCornerShape(1.dp)).background(waveColor))
+        Box(modifier = Modifier.width(barWidth).fillMaxHeight(h3).clip(RoundedCornerShape(1.dp)).background(waveColor))
+        Box(modifier = Modifier.width(barWidth).fillMaxHeight(h4).clip(RoundedCornerShape(1.dp)).background(waveColor))
+    }
+}
+
+// Share Box with Upward Arrow Icon (Matching user image: arrow clearly lifted above open box)
+val ShareBoxArrowIcon: ImageVector
+    get() = ImageVector.Builder(
+        name = "ShareBoxArrow",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).path(
+        stroke = SolidColor(Color.White),
+        strokeLineWidth = 2.0f,
+        strokeLineCap = StrokeCap.Round,
+        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round,
+        pathFillType = PathFillType.NonZero
+    ) {
+        // Arrow shaft pointing up
+        moveTo(12f, 13.5f)
+        lineTo(12f, 2f)
+        // Arrow head chevron up
+        moveTo(7f, 6.5f)
+        lineTo(12f, 1.5f)
+        lineTo(17f, 6.5f)
+        // Open box outline placed lower down so there is a large clear gap
+        moveTo(7.5f, 10f)
+        horizontalLineTo(5f)
+        curveTo(4.45f, 10f, 4f, 10.45f, 4f, 11f)
+        verticalLineTo(20f)
+        curveTo(4f, 20.55f, 4.45f, 21f, 5f, 21f)
+        horizontalLineTo(19f)
+        curveTo(19.55f, 21f, 20f, 20.55f, 20f, 20f)
+        verticalLineTo(11f)
+        curveTo(20f, 10.45f, 19.55f, 10f, 19f, 10f)
+        horizontalLineTo(16.5f)
+    }.build()
+
+// Movie Film Reel / Clapboard Icon for Trailer
+val MovieReelIcon: ImageVector
+    get() = ImageVector.Builder(
+        name = "MovieReel",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).path(
+        fill = SolidColor(Color.White),
+        pathFillType = PathFillType.NonZero
+    ) {
+        moveTo(18f, 4f)
+        lineTo(20f, 8f)
+        horizontalLineTo(17f)
+        lineTo(15f, 4f)
+        horizontalLineTo(13f)
+        lineTo(15f, 8f)
+        horizontalLineTo(12f)
+        lineTo(10f, 4f)
+        horizontalLineTo(8f)
+        lineTo(10f, 8f)
+        horizontalLineTo(7f)
+        lineTo(5f, 4f)
+        horizontalLineTo(4f)
+        curveTo(2.9f, 4f, 2f, 4.9f, 2f, 6f)
+        verticalLineTo(18f)
+        curveTo(2f, 19.1f, 2.9f, 20f, 4f, 20f)
+        verticalLineTo(4f)
+        horizontalLineTo(18f)
+        close()
+        moveTo(10f, 15.5f)
+        verticalLineTo(10.5f)
+        lineTo(15f, 13f)
+        lineTo(10f, 15.5f)
+        close()
+    }.build()
+
+// Cloud Download Icon for Anime Detail Page (after User Score)
+val CloudDownloadIcon: ImageVector
+    get() = ImageVector.Builder(
+        name = "CloudDownload",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).path(
+        fill = SolidColor(Color.White),
+        pathFillType = PathFillType.NonZero
+    ) {
+        moveTo(19.35f, 10.04f)
+        curveTo(18.67f, 6.59f, 15.64f, 4f, 12f, 4f)
+        curveTo(9.11f, 4f, 6.6f, 5.64f, 5.35f, 8.04f)
+        curveTo(2.34f, 8.36f, 0f, 10.91f, 0f, 14f)
+        curveTo(0f, 17.31f, 2.69f, 20f, 6f, 20f)
+        horizontalLineTo(19f)
+        curveTo(21.76f, 20f, 24f, 17.76f, 24f, 15f)
+        curveTo(24f, 12.36f, 21.95f, 10.22f, 19.35f, 10.04f)
+        close()
+        moveTo(17f, 13f)
+        lineTo(12f, 18f)
+        lineTo(7f, 13f)
+        horizontalLineTo(10f)
+        verticalLineTo(9f)
+        horizontalLineTo(14f)
+        verticalLineTo(13f)
+        horizontalLineTo(17f)
+        close()
+    }.build()
+
+// Grid Box View Icon
+val GridViewIcon: ImageVector
+    get() = ImageVector.Builder(
+        name = "GridView",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).path(
+        fill = SolidColor(Color.White),
+        pathFillType = PathFillType.NonZero
+    ) {
+        moveTo(3f, 3f)
+        horizontalLineTo(10f)
+        verticalLineTo(10f)
+        horizontalLineTo(3f)
+        close()
+        moveTo(14f, 3f)
+        horizontalLineTo(21f)
+        verticalLineTo(10f)
+        horizontalLineTo(14f)
+        close()
+        moveTo(3f, 14f)
+        horizontalLineTo(10f)
+        verticalLineTo(21f)
+        horizontalLineTo(3f)
+        close()
+        moveTo(14f, 14f)
+        horizontalLineTo(21f)
+        verticalLineTo(21f)
+        horizontalLineTo(14f)
+        close()
+    }.build()
+
+// List / Image View Icon
+val ListViewIcon: ImageVector
+    get() = ImageVector.Builder(
+        name = "ListView",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).path(
+        fill = SolidColor(Color.White),
+        pathFillType = PathFillType.NonZero
+    ) {
+        moveTo(3f, 4f)
+        horizontalLineTo(21f)
+        verticalLineTo(8f)
+        horizontalLineTo(3f)
+        close()
+        moveTo(3f, 10f)
+        horizontalLineTo(21f)
+        verticalLineTo(14f)
+        horizontalLineTo(3f)
+        close()
+        moveTo(3f, 16f)
+        horizontalLineTo(21f)
+        verticalLineTo(20f)
+        horizontalLineTo(3f)
+        close()
+    }.build()
+
+@Composable
+fun AnimeBoxDetailSkeletonLoading(modifier: Modifier = Modifier) {
+    val infiniteTransition = rememberInfiniteTransition(label = "detail_skeleton")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.22f,
+        targetValue = 0.58f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 850, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
+    val shimmerColor = Color(0xFF23242B).copy(alpha = alpha)
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .verticalScroll(rememberScrollState())
+    ) {
+        // 1. Large Hero Backdrop Skeleton with bottom gradient
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(235.dp)
+                .background(shimmerColor)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color(0x60000000),
+                                Color(0xFF000000)
+                            )
+                        )
+                    )
+            )
+        }
+
+        // 2. Poster & Info Header Section
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            // Overlapping Poster card
+            Box(
+                modifier = Modifier
+                    .width(115.dp)
+                    .height(165.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(shimmerColor)
+            )
+
+            Spacer(modifier = Modifier.width(14.dp))
+
+            // Right Info Column (Title, Subtitle, Score / Year badges)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f)
+                        .height(20.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(shimmerColor)
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.65f)
+                        .height(14.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(shimmerColor)
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(top = 4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(42.dp)
+                            .height(18.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(shimmerColor)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .width(55.dp)
+                            .height(18.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(shimmerColor)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .width(40.dp)
+                            .height(18.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(shimmerColor)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // 3. Action Buttons Row (Play Button + Action Buttons)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(shimmerColor)
+            )
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(shimmerColor)
+            )
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(shimmerColor)
+            )
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(shimmerColor)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 4. Genre Pills Row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(modifier = Modifier.width(65.dp).height(26.dp).clip(RoundedCornerShape(4.dp)).background(shimmerColor))
+            Box(modifier = Modifier.width(85.dp).height(26.dp).clip(RoundedCornerShape(4.dp)).background(shimmerColor))
+            Box(modifier = Modifier.width(70.dp).height(26.dp).clip(RoundedCornerShape(4.dp)).background(shimmerColor))
+            Box(modifier = Modifier.width(90.dp).height(26.dp).clip(RoundedCornerShape(4.dp)).background(shimmerColor))
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 5. Synopsis Text Lines
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(3.dp)).background(shimmerColor))
+            Box(modifier = Modifier.fillMaxWidth(0.95f).height(12.dp).clip(RoundedCornerShape(3.dp)).background(shimmerColor))
+            Box(modifier = Modifier.fillMaxWidth(0.7f).height(12.dp).clip(RoundedCornerShape(3.dp)).background(shimmerColor))
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // 6. Episodes List Skeleton
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(modifier = Modifier.width(100.dp).height(18.dp).clip(RoundedCornerShape(4.dp)).background(shimmerColor))
+            
+            repeat(3) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(135.dp)
+                            .height(78.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(shimmerColor)
+                    )
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(modifier = Modifier.fillMaxWidth(0.85f).height(14.dp).clip(RoundedCornerShape(3.dp)).background(shimmerColor))
+                        Box(modifier = Modifier.fillMaxWidth(0.6f).height(11.dp).clip(RoundedCornerShape(3.dp)).background(shimmerColor))
+                    }
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+
+

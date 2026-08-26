@@ -3,7 +3,7 @@
     <string name="rated_format">Betygsatt: %.1f</string>
     <string name="player_speed_text_format">Hastighet (%.2fx)</string>
     <string name="new_update_format">Ny uppdatering hittad! \n%1$s -&gt; %2$s</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="title_home">Hem</string>
     <string name="title_search">Sök</string>
     <string name="title_downloads">Nerladdningar</string>

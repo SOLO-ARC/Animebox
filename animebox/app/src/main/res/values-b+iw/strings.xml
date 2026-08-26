@@ -9,7 +9,7 @@
     <string name="new_update_format" formatted="true">נמצא עדכון חדש! \n%1$s -&gt; %2$s</string>
     <string name="filler" formatted="true">סינון</string>
     <string name="duration_format" formatted="true">%d דקות</string>
-    <string name="app_name">קלאודסטרים</string>
+    <string name="app_name">FireFly</string>
     <string name="title_home">בית</string>
     <string name="title_search">חיפוש</string>
     <string name="title_downloads">הורדות</string>

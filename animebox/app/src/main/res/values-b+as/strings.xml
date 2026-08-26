@@ -111,7 +111,7 @@
     <string name="player_speed_text_format" formatted="true">গতি (%.2fx)</string>
     <string name="next_episode">পৰৱৰ্তী এপিচ\'ড</string>
     <string name="duration_format" formatted="true">%d মিনিট</string>
-    <string name="app_name">CloudStream</string>
+    <string name="app_name">FireFly</string>
     <string name="title_home">ঘৰ</string>
     <string name="no_data">তথ্য নাই</string>
     <string name="episode_more_options_des">অধিক বিকল্পসমূহ</string>

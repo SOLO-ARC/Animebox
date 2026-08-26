@@ -3,6 +3,6 @@
     <item>
         <color android:color="?attr/primaryBlackBackground"/>
     </item>
-    <item android:width="150dp" android:height="150dp" android:gravity="center" android:drawable="@mipmap/ic_launcher_foreground">
+    <item android:width="160dp" android:height="160dp" android:gravity="center" android:drawable="@drawable/firefly_cover_logo">
     </item>
 </layer-list>

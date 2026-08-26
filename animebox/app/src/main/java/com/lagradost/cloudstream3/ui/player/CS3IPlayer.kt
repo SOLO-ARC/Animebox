@@ -280,8 +280,12 @@ class CS3IPlayer : IPlayer {
         preview: Boolean,
     ) {
         Log.i(TAG, "loadPlayer")
+        subtitleHelper.setAllSubtitles(subtitles)
         if (sameEpisode) {
             saveData()
+            if (subtitle != null) {
+                currentSubtitles = subtitle
+            }
         } else {
             currentSubtitles = subtitle
             playbackPosition = 0
@@ -522,16 +526,18 @@ class CS3IPlayer : IPlayer {
 
             SubtitleStatus.IS_ACTIVE -> {
                 Log.i(TAG, "setPreferredSubtitles IS_ACTIVE")
-                exoPlayer?.currentTracks?.groups
-                    ?.filter { it.type == TRACK_TYPE_TEXT }
-                    ?.getTrack(subtitle.getId())
-                    ?.let { (trackGroup, trackIndex) ->
-                        trackSelector.setParameters(
-                            trackSelector.buildUponParameters()
-                                .setTrackTypeDisabled(TRACK_TYPE_TEXT, false)
-                                .setOverrideForType(TrackSelectionOverride(trackGroup, trackIndex))
-                        )
-                    }
+                val textGroups = exoPlayer?.currentTracks?.groups
+                    ?.filter { it.type == TRACK_TYPE_TEXT } ?: emptyList()
+                val targetTrack = textGroups.getTrack(subtitle.getId())
+                    ?: textGroups.firstOrNull { group -> group.mediaTrackGroup.length > 0 }?.let { it.mediaTrackGroup to 0 }
+
+                targetTrack?.let { (trackGroup, trackIndex) ->
+                    trackSelector.setParameters(
+                        trackSelector.buildUponParameters()
+                            .setTrackTypeDisabled(TRACK_TYPE_TEXT, false)
+                            .setOverrideForType(TrackSelectionOverride(trackGroup, trackIndex))
+                    )
+                }
                 return false
             }
         }
@@ -1485,6 +1491,14 @@ class CS3IPlayer : IPlayer {
                         event(EmbeddedSubtitlesFetchedEvent(tracks = exoPlayerReportedTracks))
                         event(TracksChangedEvent())
                         event(SubtitlesUpdatedEvent())
+
+                        // If a preferred subtitle was set on load (e.g. for offline playback or auto-select)
+                        // but no text track is currently active, apply it to the track selector
+                        if (playerSelectedSubtitleTracks.none { it.second }) {
+                            currentSubtitles?.let { sub ->
+                                setPreferredSubtitles(sub)
+                            }
+                        }
                     }
                 }
 

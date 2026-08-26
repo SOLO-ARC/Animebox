@@ -1957,19 +1957,38 @@ object VideoDownloadManager {
                     try {
                         val downloadList = SubtitlesFragment.getDownloadSubsLanguageTagIETF()
 
-                        subs?.filter { subtitle ->
+                        val matched = subs?.filter { subtitle ->
                             downloadList.any { langTagIETF ->
-                                subtitle.languageCode == langTagIETF ||
-                                        subtitle.originalName.contains(
-                                            fromTagToEnglishLanguageName(
-                                                langTagIETF
-                                            ) ?: langTagIETF
-                                        )
+                                subtitle.matchesLanguageCode(langTagIETF) ||
+                                        subtitle.languageCode.equals(langTagIETF, ignoreCase = true) ||
+                                        subtitle.getIETF_tag()?.equals(langTagIETF, ignoreCase = true) == true ||
+                                        fromTagToEnglishLanguageName(langTagIETF)?.let { eng ->
+                                            subtitle.originalName.contains(eng, ignoreCase = true) ||
+                                                    subtitle.name.contains(eng, ignoreCase = true)
+                                        } == true ||
+                                        subtitle.originalName.contains(langTagIETF, ignoreCase = true) ||
+                                        subtitle.name.contains(langTagIETF, ignoreCase = true)
                             }
                         }
-                            ?.map { ExtractorSubtitleLink(it.name, it.url, "", it.headers) }
-                            ?.take(3) // max subtitles download hardcoded (?_?)
-                            ?.forEach { link ->
+
+                        // Fallback to all available soft subtitles if none matched the strict language list
+                        val finalSubs = if (!matched.isNullOrEmpty()) {
+                            matched
+                        } else {
+                            subs ?: emptyList()
+                        }
+
+                        finalSubs
+                            .map {
+                                ExtractorSubtitleLink(
+                                    it.name,
+                                    it.url,
+                                    it.headers["referer"] ?: it.headers["Referer"] ?: "",
+                                    it.headers
+                                )
+                            }
+                            .take(10)
+                            .forEach { link ->
                                 val fileName = getFileName(context, meta)
                                 downloadSubtitle(context, link, fileName, folder)
                             }

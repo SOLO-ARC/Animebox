@@ -1748,18 +1748,36 @@ class GeneratorPlayer : FullScreenPlayer() {
     private fun getAutoSelectSubtitle(
         subtitles: Set<SubtitleData>, settings: Boolean, downloads: Boolean
     ): SubtitleData? {
-        val langCode = preferredAutoSelectSubtitles ?: return null
+        val langCode = preferredAutoSelectSubtitles
         if (downloads) {
-            sortSubs(subtitles).firstOrNull {
-                it.origin == SubtitleOrigin.DOWNLOADED_FILE && it.matchesLanguageCode(
-                    langCode
-                )
-            }?.let { return it }
+            val downloadedSubs = sortSubs(subtitles).filter { it.origin == SubtitleOrigin.DOWNLOADED_FILE }
+            if (downloadedSubs.isNotEmpty()) {
+                if (!langCode.isNullOrEmpty()) {
+                    downloadedSubs.firstOrNull {
+                        it.matchesLanguageCode(langCode) ||
+                                it.getIETF_tag()?.equals(langCode, ignoreCase = true) == true ||
+                                it.languageCode.equals(langCode, ignoreCase = true) ||
+                                fromTagToEnglishLanguageName(langCode)?.let { eng ->
+                                    it.originalName.contains(eng, ignoreCase = true) || it.name.contains(eng, ignoreCase = true)
+                                } == true ||
+                                it.originalName.contains(langCode, ignoreCase = true) ||
+                                it.name.contains(langCode, ignoreCase = true)
+                    }?.let { return it }
+                }
+                return downloadedSubs.first()
+            }
         }
 
-        if (!settings) return null
+        if (!settings || langCode.isNullOrEmpty()) return null
 
-        return sortSubs(subtitles).firstOrNull { it.matchesLanguageCode(langCode) }
+        return sortSubs(subtitles).firstOrNull {
+            it.matchesLanguageCode(langCode) ||
+                    it.getIETF_tag()?.equals(langCode, ignoreCase = true) == true ||
+                    it.languageCode.equals(langCode, ignoreCase = true) ||
+                    fromTagToEnglishLanguageName(langCode)?.let { eng ->
+                        it.originalName.contains(eng, ignoreCase = true) || it.name.contains(eng, ignoreCase = true)
+                    } == true
+        }
     }
 
     private fun autoSelectFromSettings(): Boolean {
@@ -1793,9 +1811,13 @@ class GeneratorPlayer : FullScreenPlayer() {
     }
 
     private fun autoSelectFromDownloads() {
-        if (player.getCurrentPreferredSubtitle() != null) {
+        val currentSub = player.getCurrentPreferredSubtitle()
+        val downloadedSubs = viewModel.state.subtitles.filter { it.origin == SubtitleOrigin.DOWNLOADED_FILE }
+        // If we already have an active preferred sub that belongs to the current subtitle set, skip
+        if (currentSub != null && viewModel.state.subtitles.contains(currentSub)) {
             return
         }
+        if (downloadedSubs.isEmpty()) return
         val sub =
             getAutoSelectSubtitle(viewModel.state.subtitles, settings = false, downloads = true)
                 ?: return
@@ -2271,12 +2293,24 @@ class GeneratorPlayer : FullScreenPlayer() {
             if (instance != viewModel.state.instance) return@observe // Outdated observe
             player.setActiveSubtitles(subtitles)
 
-            // If the file is downloaded then do not select auto select the subtitles
-            // Downloaded subtitles cannot be selected immediately after loading since
-            // player.getCurrentPreferredSubtitle() cannot fetch data from non-loaded subtitles
-            // Resulting in unselecting the downloaded subtitle
-            if (subtitles.lastOrNull()?.origin != SubtitleOrigin.DOWNLOADED_FILE) {
+            val hasDownloadedSubs = subtitles.any { it.origin == SubtitleOrigin.DOWNLOADED_FILE }
+            if (!hasDownloadedSubs) {
+                // Online episode: auto-select by language preference
                 autoSelectSubtitles()
+            } else {
+                // Downloaded episode: select downloaded subtitle if not already selected
+                if (currentSelectedSubtitles == null ||
+                    !subtitles.contains(currentSelectedSubtitles)) {
+                    getAutoSelectSubtitle(subtitles, settings = true, downloads = true)?.let { sub ->
+                        if (setSubtitles(sub, false)) {
+                            context?.let { ctx ->
+                                player.saveData()
+                                player.reloadPlayer(ctx)
+                                player.handleEvent(CSPlayerEvent.Play)
+                            }
+                        }
+                    }
+                }
             }
         }
         observe(viewModel.loadingLinks) { (loading, instance) ->
