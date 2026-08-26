@@ -1,22 +1,28 @@
-# AnimeBox
+# FireFly (Formerly AnimeBox)
 
 <p align="center">
-  <img src="logo (1).png" width="160" alt="AnimeBox Logo" />
+  <img src="https://i.ibb.co/gnNZN1m/c4ddde9b878e66a9cc468061220e40a5.gif" width="48" alt="Hey!" />
+</p>
+
+<p align="center">
+  <img src="fireflytransparentlogo.png" width="180" alt="FireFly Logo" />
 </p>
 
 <p align="center">
   <a href="https://github.com/SOLO-ARC/Animebox/releases/latest"><b>Download Latest APK</b></a>
 </p>
 
-AnimeBox is an Android application built for exploring and tracking anime on mobile devices. It fetches anime metadata, ratings, and series information directly from AniList, providing a clean interface, customizable video player controls, and multi-profile support.
+> **Note**: **AnimeBox** has officially been rebranded to **FireFly**!
+
+FireFly is an Android application built for exploring and tracking anime on mobile devices. It fetches anime metadata, ratings, and series information directly from AniList, providing a clean interface, customizable video player controls, and multi-profile support.
 
 ---
 
-## Why AnimeBox Exists
+## Why FireFly Exists
 
 Many mainstream anime streaming services often fall short for dedicated fans. Platforms like Crunchyroll frequently remove anime titles from their catalog, offer dated user interfaces, and sometimes deliver lower video resolutions or basic subtitle options compared to modern media standards. On the other hand, platforms like Netflix offer a polished UI and high playback quality, but their anime collections are heavily region-locked, limited in size, or completely unavailable in many countries.
 
-AnimeBox was created to solve these interface and accessibility issues by providing a smooth, user-focused mobile experience.
+FireFly was created to solve these interface and accessibility issues by providing a smooth, user-focused mobile experience.
 
 > **Important**: This source code **does not contain or host any streaming sources or copyrighted video content**.
 > - **For Streaming Apps**: If you plan to build a video playback client, streaming API endpoints must be provided by you.
@@ -28,11 +34,11 @@ AnimeBox was created to solve these interface and accessibility issues by provid
 
 | Home | Details |
 | :---: | :---: |
-| <img src="app showcase screenshots/Screenshot_20260712-190055_Animexera~2.png" width="340" alt="Home" /> | <img src="app showcase screenshots/Screenshot_20260712-190233_Animexera~2.png" width="340" alt="Details" /> |
+| <img src="app showcase screenshots/Home.jpg" width="340" alt="Home" /> | <img src="app showcase screenshots/Detail.jpg" width="340" alt="Details" /> |
 
 | Search | Player |
 | :---: | :---: |
-| <img src="app showcase screenshots/Screenshot_20260712-190123_Animexera~2.png" width="340" alt="Search" /> | <img src="app showcase screenshots/photo_2026-07-29_03-09-17.jpg" width="340" alt="Player" /> |
+| <img src="app showcase screenshots/Search.jpg" width="340" alt="Search" /> | <img src="app showcase screenshots/Player.jpg" width="340" alt="Player" /> |
 
 ---
 
