@@ -16,6 +16,18 @@ object AnimeBoxThemeHelper {
     val COLOR_EMERALD = Color(0xFF57CC99)   // Emerald Green
     val COLOR_AMBER = Color(0xFFFFB703)     // Golden Amber
 
+    val themeRevisionFlow = kotlinx.coroutines.flow.MutableStateFlow(0L)
+
+    fun notifyThemeChanged() {
+        themeRevisionFlow.value = System.currentTimeMillis()
+    }
+
+    val MotoGoogleSansFontFamily = androidx.compose.ui.text.font.FontFamily(
+        androidx.compose.ui.text.font.Font(com.lagradost.cloudstream3.R.font.productsans_regular, androidx.compose.ui.text.font.FontWeight.Normal),
+        androidx.compose.ui.text.font.Font(com.lagradost.cloudstream3.R.font.productsans_medium, androidx.compose.ui.text.font.FontWeight.Medium),
+        androidx.compose.ui.text.font.Font(com.lagradost.cloudstream3.R.font.productsans_bold, androidx.compose.ui.text.font.FontWeight.Bold)
+    )
+
     fun getPrimaryColor(context: Context): Color {
         return when (AnimeBoxSettings.getAppTheme(context)) {
             "crimson" -> COLOR_CRIMSON
@@ -54,10 +66,19 @@ object AnimeBoxSettings {
     const val KEY_AUTOPLAY_PREVIEWS = "setting_autoplay_previews"
     const val KEY_MATURITY_RATING = "setting_maturity_rating"
     const val KEY_DISPLAY_LANGUAGE = "setting_display_language"
+    const val KEY_BLUR_EPISODE_SPOILERS = "setting_blur_episode_spoilers"
 
     private fun getPrefs(context: Context): SharedPreferences {
         val activeProfileId = ProfileManager.getActiveProfile(context)
         return context.getSharedPreferences("${PREFS_NAME}_$activeProfileId", Context.MODE_PRIVATE)
+    }
+
+    fun isBlurEpisodeSpoilersEnabled(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_BLUR_EPISODE_SPOILERS, false)
+    }
+
+    fun setBlurEpisodeSpoilersEnabled(context: Context, enabled: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_BLUR_EPISODE_SPOILERS, enabled).apply()
     }
 
     // --- Stream & Audio Fallback Dialogs ---
@@ -138,6 +159,7 @@ object AnimeBoxSettings {
         getPrefs(context).edit().putString(KEY_APP_THEME, theme).apply()
         // Automatically sync player timeline theme with the selected app theme
         setPlayerTimelineTheme(context, theme)
+        AnimeBoxThemeHelper.notifyThemeChanged()
     }
 
     // --- Player Timeline Accent Color Theme ---

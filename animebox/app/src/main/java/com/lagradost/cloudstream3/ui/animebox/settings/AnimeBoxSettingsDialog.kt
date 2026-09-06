@@ -1,5 +1,6 @@
 package com.lagradost.cloudstream3.ui.animebox.settings
 
+import android.app.Activity
 import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -12,6 +13,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -37,6 +39,8 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import com.lagradost.cloudstream3.R
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -62,27 +66,28 @@ import kotlinx.coroutines.withContext
 // ----------------------------------------------------------------------------
 
 enum class SettingsIconType(val pathData: String) {
-    CHEVRON_LEFT("M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"),
-    CHEVRON_RIGHT("M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"),
-    WIFI("M12 4C7.31 4 3.07 5.9 0 8.98L12 21 24 8.98C20.93 5.9 16.69 4 12 4z"),
-    SMART_DOWNLOADS("M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"),
+    CHEVRON_LEFT("M14.71 6.71a.996.996 0 0 0-1.41 0L8.71 11.3a.996.996 0 0 0 0 1.41l4.59 4.59c.39.39 1.02.39 1.41 0 .39-.39.39-1.02 0-1.41L10.83 12l3.88-3.88c.39-.39.38-1.03 0-1.41z"),
+    CHEVRON_RIGHT("M9.29 6.71c-.39.39-.39 1.02 0 1.41L13.17 12l-3.88 3.88c-.39.39-.39 1.02 0 1.41.39.39 1.02.39 1.41 0l4.59-4.59c.39-.39.39-1.02 0-1.41L10.7 6.7c-.38-.38-1.02-.38-1.41.01z"),
+    WIFI("M12 3c-4.21 0-8.03 1.71-10.78 4.46a.996.996 0 0 0 0 1.41c.39.39 1.02.39 1.41 0C5.1 6.4 8.39 5 12 5s6.9 1.4 9.37 3.87c.39.39 1.02.39 1.41 0a.996.996 0 0 0 0-1.41C20.03 4.71 16.21 3 12 3zm0 4.5c-3.04 0-5.8 1.23-7.78 3.22a.996.996 0 0 0 0 1.41c.39.39 1.02.39 1.41 0 1.63-1.63 3.89-2.63 6.37-2.63s4.74 1 6.37 2.63c.39.39 1.02.39 1.41 0a.996.996 0 0 0 0-1.41C17.8 8.73 15.04 7.5 12 7.5zm0 4.5c-1.8 0-3.43.73-4.6 1.9a.996.996 0 0 0 0 1.41c.39.39 1.02.39 1.41 0 .8-.8 1.9-1.31 3.19-1.31s2.39.51 3.19 1.31c.39.39 1.02.39 1.41 0a.996.996 0 0 0 0-1.41C15.43 12.73 13.8 12 12 12zm0 5c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"),
+    SMART_DOWNLOADS("M12 4V2.21c0-.45-.54-.67-.85-.35l-2.8 2.79c-.2.2-.2.51 0 .71l2.79 2.79c.32.31.86.09.86-.36V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v1.79c0 .45.54.67.85.35l2.79-2.79c.2-.2.2-.51 0-.71l-2.79-2.79c-.31-.31-.85-.09-.85.36V18z"),
     DOWNLOAD_QUALITY("M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"),
     STORAGE_LOCATION("M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"),
     DELETE_DOWNLOADS("M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"),
     APP_THEME("M12 2C6.49 2 2 6.49 2 12s4.49 10 10 10c1.38 0 2.5-1.12 2.5-2.5 0-.61-.23-1.2-.64-1.67-.08-.1-.13-.21-.13-.33 0-.28.22-.5.5-.5H16c3.31 0 6-2.69 6-6 0-4.96-4.49-9-10-9zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 8 6.5 8 8 8.67 8 9.5 7.33 11 6.5 11zm3-4C8.67 7 8 6.33 8 5.5S8.67 4 9.5 4s1.5.67 1.5 1.5S10.33 7 9.5 7zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 4 14.5 4s1.5.67 1.5 1.5S15.33 7 14.5 7zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 8 17.5 8s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"),
-    EPISODE_VIEW("M4 14h4v-4H4v4zm0 5h4v-4H4v4zM4 9h4V5H4v4zm5 5h12v-4H9v4zm0 5h12v-4H9v4zM9 5v4h12V5H9z"),
-    TRAILERS_TV("M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"),
+    EPISODE_VIEW("M4 10.5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5h16c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5H4zm0-6c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5h16c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5H4zm0 12c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5h16c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5H4z"),
+    TRAILERS_TV("M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v1c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-1h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm-1 14H4c-.55 0-1-.45-1-1V6c0-.55.45-1 1-1h16c.55 0 1 .45 1 1v10c0 .55-.45 1-1 1z"),
     LOW_PERF("M20.38 8.57l-1.23 1.85a8 8 0 0 1-.22 7.58H5.07A8 8 0 0 1 15.58 6.85l1.85-1.23A10 10 0 0 0 3.35 19a2 2 0 0 0 1.72 1h13.85a2 2 0 0 0 1.74-1 10 10 0 0 0-.28-10.43zM10.59 15.41a2 2 0 0 0 2.83 0l5.66-8.49-8.49 5.66a2 2 0 0 0 0 2.83z"),
-    TIMELINE_COLOR("M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"),
-    SKIP_INTRO("M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"),
+    TIMELINE_COLOR("M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13c0-.55-.45-1-1-1s-1 .45-1 1v5c0 .34.17.65.45.83l4 2.4c.47.28 1.08.13 1.37-.34.28-.47.13-1.08-.34-1.37L12.5 12.2V7z"),
+    SKIP_INTRO("M5.58 16.89l5.77-4.07c.56-.4.56-1.24 0-1.63L5.58 7.11C4.91 6.65 4 7.12 4 7.93v8.14c0 .81.91 1.28 1.58.82zM16 7c-.55 0-1 .45-1 1v8c0 .55.45 1 1 1s1-.45 1-1V8c0-.55-.45-1-1-1z"),
     BRIGHTNESS("M20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69zM12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6z"),
     VOLUME("M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"),
-    DOUBLE_TAP("M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"),
-    REMEMBER_PREFS("M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"),
-    EXPORT("M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"),
+    DOUBLE_TAP("M12 5V2.21c0-.45-.54-.67-.85-.35l-2.8 2.79c-.2.2-.2.51 0 .71l2.79 2.79c.32.31.86.09.86-.36V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6c0-.55-.45-1-1-1s-1 .45-1 1c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"),
+    REMEMBER_PREFS("M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1.29 14.29a.996.996 0 0 1-1.41 0L6.7 13.7a.996.996 0 1 1 1.41-1.41L10 14.17l5.88-5.88a.996.996 0 1 1 1.41 1.41l-6.58 6.59z"),
+    EXPORT("M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM13.65 14.35l-1.3-1.29V17c0 .55-.45 1-1 1s-1-.45-1-1v-3.94l-1.29 1.29a.996.996 0 1 1-1.41-1.41l3.05-3.05c.39-.39 1.02-.39 1.41 0l3.05 3.05a.996.996 0 0 1-1.41 1.41z"),
     IMPORT("M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM12 17l-5-5h3V8h4v4h3l-5 5z"),
     DNS_SERVER("M19 13H5c-1.1 0-2 .9-2 2v4c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-4c0-1.1-.9-2-2-2zM7 19c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM19 3H5c-1.1 0-2 .9-2 2v4c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM7 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"),
-    ABOUT_DEVICE("M16 1H8C6.34 1 5 2.34 5 4v16c0 1.66 1.34 3 3 3h8c1.66 0 3-1.34 3-3V4c0-1.66-1.34-3-3-3zm-2 20h-4v-1h4v1zm3.25-3H6.75V4h10.5v14z")
+    ABOUT_DEVICE("M16 1H8C6.34 1 5 2.34 5 4v16c0 1.66 1.34 3 3 3h8c1.66 0 3-1.34 3-3V4c0-1.66-1.34-3-3-3zm-2 20h-4c-.55 0-1-.45-1-1s.45-1 1-1h4c.55 0 1 .45 1 1s-.45 1-1 1zm3-3H7c-.55 0-1-.45-1-1V5c0-.55.45-1 1-1h10c.55 0 1 .45 1 1v12c0 .55-.45 1-1 1z"),
+    SUPPORT_TICKET("M20,2H4C2.9,2 2,2.9 2,4v18l4,-4h14c1.1,0 2,-0.9 2,-2V4C22,2.9 21.1,2 20,2zM17,13H7v-1.5h10V13zM17,10H7V8.5h10V10zM17,7H7V5.5h10V7z")
 }
 
 @Composable
@@ -168,7 +173,7 @@ fun AnimeBoxSettingsDialog(
     var rememberPlaybackPrefs by remember { mutableStateOf(try { AnimeBoxSettings.isRememberPlaybackPrefsEnabled(context) } catch (_: Exception) { true }) }
 
     // Storage & Download Manager states
-    val downloadManager = remember { AnimeDownloadManager(context) }
+    val downloadManager = remember { AnimeDownloadManager.getInstance(context) }
     var storageStats by remember { mutableStateOf(StorageStats(128.0, 45.0, 1.2, 81.8)) }
     val globalPrefs = remember { context.getSharedPreferences("AnimeBoxPrefs", android.content.Context.MODE_PRIVATE) }
     var wifiOnlyDownloads by remember { mutableStateOf(globalPrefs.getBoolean("wifi_only_downloads", false)) }
@@ -179,6 +184,7 @@ fun AnimeBoxSettingsDialog(
     var autoplayNextEpisode by remember { mutableStateOf(AnimeBoxSettings.isAutoplayNextEpisodeEnabled(context)) }
     var autoplayPreviews by remember { mutableStateOf(AnimeBoxSettings.isAutoplayPreviewsEnabled(context)) }
     var displayLanguage by remember { mutableStateOf(AnimeBoxSettings.getDisplayLanguage(context)) }
+    var blurEpisodeSpoilers by remember { mutableStateOf(AnimeBoxSettings.isBlurEpisodeSpoilersEnabled(context)) }
 
     // Load storage stats asynchronously
     LaunchedEffect(Unit) {
@@ -197,10 +203,14 @@ fun AnimeBoxSettingsDialog(
     var showCustomColorPicker by remember { mutableStateOf(false) }
     val customHex = AnimeBoxSettings.getCustomTimelineColor(context)
     var showAppThemePicker by remember { mutableStateOf(false) }
+    var showSyncModal by remember { mutableStateOf(false) }
+    var targetSyncProvider by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.sync.SyncProvider.ALL) }
     var alertTitle by remember { mutableStateOf("") }
     var alertMessage by remember { mutableStateOf("") }
     var showAlert by remember { mutableStateOf(false) }
     var showDnsModal by remember { mutableStateOf(false) }
+    var showTicketsModal by remember { mutableStateOf(false) }
+    var showAniListPromptForTickets by remember { mutableStateOf(false) }
 
     // Export Data SAF Launcher
     val exportLauncher = rememberLauncherForActivityResult(
@@ -686,6 +696,19 @@ fun AnimeBoxSettingsDialog(
                         )
                         PixelDivider()
 
+                        PixelSettingsSwitchRow(
+                            iconType = SettingsIconType.EPISODE_VIEW,
+                            title = "Blur Episode Spoilers",
+                            subtitle = "Blurs episode preview thumbnails in details and player to prevent spoiler scenes",
+                            checked = blurEpisodeSpoilers,
+                            onCheckedChange = { checked ->
+                                blurEpisodeSpoilers = checked
+                                AnimeBoxSettings.setBlurEpisodeSpoilersEnabled(context, checked)
+                                onSettingsChanged()
+                            }
+                        )
+                        PixelDivider()
+
                         PixelSettingsSelectorRow(
                             iconType = SettingsIconType.LOW_PERF,
                             title = "Maturity Rating",
@@ -933,8 +956,36 @@ fun AnimeBoxSettingsDialog(
                     // ---------------------------------------------------------
                     // SECTION 5: Data & Connectivity
                     // ---------------------------------------------------------
-                    if (query.isEmpty() || "export".contains(query) || "import".contains(query) || "backup".contains(query) || "dns".contains(query) || "doh".contains(query)) {
-                        PixelSectionHeader(title = "Data & Connectivity")
+                    if (query.isEmpty() || "export".contains(query) || "import".contains(query) || "backup".contains(query) || "dns".contains(query) || "doh".contains(query) || "sync".contains(query) || "anilist".contains(query) || "mal".contains(query)) {
+                        PixelSectionHeader(title = "Account & Cloud Sync")
+
+                        val actProfId = com.lagradost.cloudstream3.ui.animebox.profiles.ProfileManager.getActiveProfile(context)
+                        val anilistUser = com.lagradost.cloudstream3.ui.animebox.sync.AnimeBoxAccountSyncManager.getAniListUser(context, actProfId)
+
+                        PixelSettingsActionRow(
+                            iconRes = R.drawable.ic_anilist_official,
+                            title = "AniList Sync",
+                            subtitle = if (anilistUser != null) "Connected as @${anilistUser.username} • Watchlist synced" else "Connect AniList account for bidirectional watchlist & progress sync",
+                            onClick = {
+                                targetSyncProvider = com.lagradost.cloudstream3.ui.animebox.sync.SyncProvider.ANILIST
+                                showSyncModal = true
+                            }
+                        )
+                        PixelDivider()
+
+                        PixelSettingsActionRow(
+                            iconType = SettingsIconType.SUPPORT_TICKET,
+                            title = "Support & Feedback Tickets",
+                            subtitle = if (anilistUser != null) "Create tickets, submit bugs/suggestions & live chat" else "Log in with AniList to create tickets & chat with support",
+                            onClick = {
+                                if (anilistUser != null) {
+                                    showTicketsModal = true
+                                } else {
+                                    showAniListPromptForTickets = true
+                                }
+                            }
+                        )
+                        PixelDivider()
 
                         PixelSettingsActionRow(
                             iconType = SettingsIconType.EXPORT,
@@ -992,7 +1043,7 @@ fun AnimeBoxSettingsDialog(
                                 )
                                 Spacer(modifier = Modifier.height(3.dp))
                                 Text(
-                                    text = "Version 1.0.0 (Build 2026) • Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+                                    text = "Version ${com.lagradost.cloudstream3.BuildConfig.VERSION_NAME} • Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
                                     color = Color(0xFF8E918F),
                                     fontSize = 13.5.sp,
                                     lineHeight = 18.sp
@@ -1002,6 +1053,111 @@ fun AnimeBoxSettingsDialog(
                                     color = Color(0xFF8E918F),
                                     fontSize = 13.5.sp,
                                     lineHeight = 18.sp
+                                )
+                            }
+                        }
+
+                        PixelDivider()
+
+                        // Check for App Updates Row (In-App Direct Updater)
+                        val activity = context as? Activity
+                        val currentVersionName = com.lagradost.cloudstream3.BuildConfig.VERSION_NAME
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF222228))
+                                .border(1.dp, Color(0xFF383842), RoundedCornerShape(12.dp))
+                                .clickable {
+                                    if (activity != null) {
+                                        Toast.makeText(context, "Checking for app updates...", Toast.LENGTH_SHORT).show()
+                                        coroutineScope.launch {
+                                            try {
+                                                val hasUpdate = with(com.lagradost.cloudstream3.utils.InAppUpdater) {
+                                                    activity.runAutoUpdate(checkAutoUpdate = false)
+                                                }
+                                                if (!hasUpdate) {
+                                                    withContext(Dispatchers.Main) {
+                                                        Toast.makeText(context, "You're on the latest version (v$currentVersionName)", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            } catch (e: Exception) {
+                                                withContext(Dispatchers.Main) {
+                                                    Toast.makeText(context, "Update check: ${e.message ?: "Up to date"}", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        Toast.makeText(context, "Cannot check for updates in current context", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                                .padding(horizontal = 14.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF2E2E36)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Image(
+                                    painter = painterResource(id = R.drawable.firefly_logo),
+                                    contentDescription = "FireFly",
+                                    modifier = Modifier.size(28.dp).clip(RoundedCornerShape(6.dp))
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(14.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = "FireFly Updater",
+                                        color = Color.White,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Color(0xFF35353E))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "v$currentVersionName",
+                                            color = Color(0xFFE0E0E0),
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = "Check GitHub releases for latest updates",
+                                    color = Color(0xFFA0A0AB),
+                                    fontSize = 12.sp,
+                                    lineHeight = 15.sp
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(10.dp))
+
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.White)
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "CHECK",
+                                    color = Color.Black,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }
@@ -1015,6 +1171,15 @@ fun AnimeBoxSettingsDialog(
         // -------------------------------------------------------------
         // Dialog Modals
         // -------------------------------------------------------------
+
+        if (showSyncModal) {
+            val actProfId = com.lagradost.cloudstream3.ui.animebox.profiles.ProfileManager.getActiveProfile(context)
+            com.lagradost.cloudstream3.ui.animebox.sync.AnimeBoxSyncDialog(
+                profileId = actProfId,
+                initialProvider = targetSyncProvider,
+                onDismiss = { showSyncModal = false }
+            )
+        }
 
         // App Theme Picker Modal
         if (showAppThemePicker) {
@@ -1135,6 +1300,52 @@ fun AnimeBoxSettingsDialog(
                 shape = RoundedCornerShape(14.dp)
             )
         }
+
+        val actProf = remember { com.lagradost.cloudstream3.ui.animebox.profiles.ProfileManager.getActiveProfile(context) }
+        val currentAniUser = remember(actProf) { com.lagradost.cloudstream3.ui.animebox.sync.AnimeBoxAccountSyncManager.getAniListUser(context, actProf) }
+
+        if (showTicketsModal && currentAniUser != null) {
+            com.lagradost.cloudstream3.ui.animebox.tickets.AnimeBoxTicketListDialog(
+                anilistUser = currentAniUser,
+                profileId = actProf,
+                onDismiss = { showTicketsModal = false }
+            )
+        }
+
+        if (showAniListPromptForTickets) {
+            AlertDialog(
+                onDismissRequest = { showAniListPromptForTickets = false },
+                title = {
+                    Text(text = "AniList Account Required", color = Color.White, fontWeight = FontWeight.Bold)
+                },
+                text = {
+                    Text(
+                        text = "Support tickets and live chat threads are linked with your AniList identity. Please connect your AniList account first to submit tickets and chat with our team.",
+                        color = Color(0xFFCCCCCC),
+                        fontSize = 13.5.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showAniListPromptForTickets = false
+                            targetSyncProvider = com.lagradost.cloudstream3.ui.animebox.sync.SyncProvider.ANILIST
+                            showSyncModal = true
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF02A9FF), contentColor = Color.White)
+                    ) {
+                        Text("Connect AniList", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showAniListPromptForTickets = false }) {
+                        Text("Cancel", color = Color(0xFF8E918F))
+                    }
+                },
+                containerColor = Color(0xFF1E1F22),
+                shape = RoundedCornerShape(14.dp)
+            )
+        }
     }
 }
 
@@ -1203,7 +1414,8 @@ fun PixelSettingsSwitchRow(
             )
         }
         val context = LocalContext.current
-        val primaryColor = AnimeBoxSettings.getAppThemeColor(context)
+        val themeRevision by AnimeBoxThemeHelper.themeRevisionFlow.collectAsState()
+        val primaryColor = remember(themeRevision) { AnimeBoxSettings.getAppThemeColor(context) }
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
@@ -1339,7 +1551,8 @@ fun PixelSettingsSelectorRow(
 
 @Composable
 fun PixelSettingsActionRow(
-    iconType: SettingsIconType,
+    iconType: SettingsIconType? = null,
+    iconRes: Int? = null,
     title: String,
     subtitle: String,
     onClick: () -> Unit
@@ -1351,7 +1564,15 @@ fun PixelSettingsActionRow(
             .padding(vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        PixelSettingsIcon(type = iconType)
+        if (iconRes != null) {
+            Image(
+                painter = painterResource(id = iconRes),
+                contentDescription = null,
+                modifier = Modifier.size(24.dp).clip(RoundedCornerShape(5.dp))
+            )
+        } else if (iconType != null) {
+            PixelSettingsIcon(type = iconType)
+        }
         Spacer(modifier = Modifier.width(20.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(

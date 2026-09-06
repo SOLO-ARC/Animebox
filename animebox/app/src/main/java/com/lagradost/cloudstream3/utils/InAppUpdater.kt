@@ -7,8 +7,24 @@ import android.content.pm.PackageManager.NameNotFoundException
 import android.net.Uri
 import android.util.Log
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
-import androidx.core.content.ContextCompat
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import androidx.core.content.edit
 import androidx.preference.PreferenceManager
@@ -20,26 +36,23 @@ import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.mvvm.safe
-import com.lagradost.cloudstream3.services.PackageInstallerService
-import com.lagradost.cloudstream3.utils.AppContextUtils.setDefaultFocus
+import com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
-import com.lagradost.cloudstream3.utils.GitInfo.currentCommitHash
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import okio.BufferedSink
-import okio.buffer
-import okio.sink
-import java.io.BufferedReader
 import java.io.File
-import java.io.IOException
-import java.io.InputStreamReader
+import java.io.FileOutputStream
 
 object InAppUpdater {
-    private const val GITHUB_USER_NAME = "recloudstream"
-    private const val GITHUB_REPO = "cloudstream"
+    private const val GITHUB_USER_NAME = "SOLO-ARC"
+    private const val GITHUB_REPO = "Animebox"
 
     private const val PRERELEASE_PACKAGE_NAME = "com.lagradost.cloudstream3.prerelease"
     private const val LOG_TAG = "InAppUpdater"
@@ -55,23 +68,12 @@ object InAppUpdater {
     @Serializable
     private data class GithubRelease(
         @JsonProperty("tag_name") @SerialName("tag_name") val tagName: String, // Version code
-        @JsonProperty("body") @SerialName("body") val body: String, // Description
+        @JsonProperty("name") @SerialName("name") val name: String? = null,
+        @JsonProperty("body") @SerialName("body") val body: String? = null, // Description
         @JsonProperty("assets") @SerialName("assets") val assets: List<GithubAsset>,
-        @JsonProperty("target_commitish") @SerialName("target_commitish") val targetCommitish: String, // Branch
-        @JsonProperty("prerelease") @SerialName("prerelease") val prerelease: Boolean,
-        @JsonProperty("node_id") @SerialName("node_id") val nodeId: String,
-    )
-
-    @Serializable
-    private data class GithubObject(
-        @JsonProperty("sha") @SerialName("sha") val sha: String, // SHA-256 hash
-        @JsonProperty("type") @SerialName("type") val type: String,
-        @JsonProperty("url") @SerialName("url") val url: String,
-    )
-
-    @Serializable
-    private data class GithubTag(
-        @JsonProperty("object") @SerialName("object") val githubObject: GithubObject,
+        @JsonProperty("target_commitish") @SerialName("target_commitish") val targetCommitish: String? = null, // Branch
+        @JsonProperty("prerelease") @SerialName("prerelease") val prerelease: Boolean = false,
+        @JsonProperty("node_id") @SerialName("node_id") val nodeId: String? = null,
     )
 
     @Serializable
@@ -83,133 +85,179 @@ object InAppUpdater {
         @JsonProperty("updateNodeId") @SerialName("updateNodeId") val updateNodeId: String?,
     )
 
-    private suspend fun Activity.getAppUpdate(installPrerelease: Boolean): Update {
-        return try {
-            when {
-                // No updates on debug version
-                BuildConfig.DEBUG -> Update(false, null, null, null, null)
-                BuildConfig.FLAVOR == "prerelease" || installPrerelease -> getPreReleaseUpdate()
-                else -> getReleaseUpdate()
+    private fun parseSemVer(versionStr: String?): Long? {
+        if (versionStr.isNullOrBlank()) return null
+        val semverRegex = Regex("""(\d+)\.(\d+)(?:\.(\d+))?""")
+        val match = semverRegex.find(versionStr) ?: return null
+        val major = match.groupValues[1].toLongOrNull() ?: 0L
+        val minor = match.groupValues[2].toLongOrNull() ?: 0L
+        val patch = match.groupValues.getOrNull(3)?.toLongOrNull() ?: 0L
+        return major * 1_000_000L + minor * 1_000L + patch
+    }
+
+    private suspend fun Activity.getAppUpdate(installPrerelease: Boolean = false): Update {
+        // Method 1: Try GitHub REST API
+        try {
+            val url = "https://api.github.com/repos/$GITHUB_USER_NAME/$GITHUB_REPO/releases"
+            val headers = mapOf(
+                "Accept" to "application/vnd.github.v3+json",
+                "User-Agent" to "FireFly-Android-App/1.0"
+            )
+            val res = app.get(url, headers = headers)
+            val jsonText = res.text
+            if (res.isSuccessful && !jsonText.contains("API rate limit exceeded")) {
+                val response = parseJson<Array<GithubRelease>>(jsonText).toList()
+                if (response.isNotEmpty()) {
+                    val validReleases = response.mapNotNull { rel ->
+                        val apkAsset = rel.assets.firstOrNull { asset ->
+                            asset.contentType == "application/vnd.android.package-archive" ||
+                            asset.name.endsWith(".apk", ignoreCase = true)
+                        } ?: rel.assets.firstOrNull()
+
+                        val semver = parseSemVer(rel.tagName) ?: parseSemVer(rel.name) ?: parseSemVer(apkAsset?.name)
+                        if (apkAsset != null && semver != null && apkAsset.browserDownloadUrl.isNotBlank()) {
+                            Triple(rel, apkAsset, semver)
+                        } else null
+                    }.sortedBy { it.third }
+
+                    val latestRelease = validReleases.lastOrNull()
+                    if (latestRelease != null) {
+                        val rel = latestRelease.first
+                        val asset = latestRelease.second
+                        val remoteVersionCode = latestRelease.third
+
+                        val currentVersionStr = packageName?.let {
+                            try { packageManager.getPackageInfo(it, 0).versionName } catch (_: Exception) { BuildConfig.VERSION_NAME }
+                        } ?: BuildConfig.VERSION_NAME
+                        val currentVersionCode = parseSemVer(currentVersionStr) ?: 0L
+
+                        val shouldUpdate = remoteVersionCode > currentVersionCode
+                        val updateVersionName = rel.tagName.ifBlank { rel.name ?: "Latest" }
+
+                        Log.d(LOG_TAG, "API Update check: Current=$currentVersionStr ($currentVersionCode), Remote=${rel.tagName} ($remoteVersionCode), ShouldUpdate=$shouldUpdate")
+
+                        return Update(
+                            shouldUpdate = shouldUpdate,
+                            updateURL = asset.browserDownloadUrl,
+                            updateVersion = updateVersionName,
+                            changelog = rel.body,
+                            updateNodeId = rel.nodeId
+                        )
+                    }
+                }
             }
         } catch (e: Exception) {
-            Log.e(LOG_TAG, Log.getStackTraceString(e))
-            Update(false, null, null, null, null)
+            Log.w(LOG_TAG, "GitHub API fetch failed or rate-limited, trying fallback: ${e.message}")
         }
-    }
 
-    private suspend fun Activity.getReleaseUpdate(): Update {
-        val url = "https://api.github.com/repos/$GITHUB_USER_NAME/$GITHUB_REPO/releases"
-        val headers = mapOf("Accept" to "application/vnd.github.v3+json")
-        val response = parseJson<Array<GithubRelease>>(
-            app.get(url, headers = headers).text
-        ).toList()
+        // Method 2: Fallback to GitHub /releases/latest endpoint (100% Rate-Limit Free!)
+        try {
+            val latestWebUrl = "https://github.com/$GITHUB_USER_NAME/$GITHUB_REPO/releases/latest"
+            val headers = mapOf("User-Agent" to "Mozilla/5.0 (Android; Mobile)")
+            val res = app.get(latestWebUrl, headers = headers, allowRedirects = true)
+            val finalUrl = res.url
+            Log.d(LOG_TAG, "Fallback latest redirected URL: $finalUrl")
 
-        val versionRegex = Regex("""(.*?((\d+)\.(\d+)\.(\d+))\.apk)""")
-        val versionRegexLocal = Regex("""(.*?((\d+)\.(\d+)\.(\d+)).*)""")
-        val foundList = response.filter { rel ->
-            !rel.prerelease
-        }.sortedWith(compareBy { release ->
-            release.assets.firstOrNull { it.contentType == "application/vnd.android.package-archive" }?.name?.let { it1 ->
-                versionRegex.find(it1)?.groupValues?.let {
-                    it[3].toInt() * 100_000_000 + it[4].toInt() * 10_000 + it[5].toInt()
+            val tag = if (finalUrl.contains("/tag/")) {
+                finalUrl.substringAfterLast("/tag/").substringBefore("/")
+            } else if (res.text.contains("/releases/tag/")) {
+                val tagMatch = Regex("""/releases/tag/([vV]?\d+\.\d+(?:\.\d+)?)""").find(res.text)
+                tagMatch?.groupValues?.getOrNull(1) ?: ""
+            } else ""
+
+            if (tag.isNotBlank()) {
+                val remoteVersionCode = parseSemVer(tag)
+                val currentVersionStr = packageName?.let {
+                    try { packageManager.getPackageInfo(it, 0).versionName } catch (_: Exception) { BuildConfig.VERSION_NAME }
+                } ?: BuildConfig.VERSION_NAME
+                val currentVersionCode = parseSemVer(currentVersionStr) ?: 0L
+
+                if (remoteVersionCode != null) {
+                    val shouldUpdate = remoteVersionCode > currentVersionCode
+                    val downloadUrl = "https://github.com/$GITHUB_USER_NAME/$GITHUB_REPO/releases/download/$tag/firefly.apk"
+
+                    Log.d(LOG_TAG, "Web Fallback Update check: Current=$currentVersionStr ($currentVersionCode), Remote=$tag ($remoteVersionCode), ShouldUpdate=$shouldUpdate")
+
+                    return Update(
+                        shouldUpdate = shouldUpdate,
+                        updateURL = downloadUrl,
+                        updateVersion = tag,
+                        changelog = "• Latest FireFly $tag update available.",
+                        updateNodeId = tag
+                    )
                 }
             }
-        }).toList()
-
-        val found = foundList.lastOrNull()
-        val foundAsset = found?.assets?.getOrNull(0)
-        val foundVersion = foundAsset?.name?.let { versionRegex.find(it) }
-
-        if (foundVersion == null) {
-            return Update(false, null, null, null, null)
+        } catch (e: Exception) {
+            Log.e(LOG_TAG, "Fallback release check failed", e)
         }
 
-        val currentVersion = packageName?.let {
-            packageManager.getPackageInfo(it, 0)
-        }
-
-        val shouldUpdate = if (foundAsset.browserDownloadUrl.isBlank()) {
-            false
-        } else {
-            currentVersion?.versionName?.let { versionName ->
-                versionRegexLocal.find(versionName)?.groupValues?.let {
-                    it[3].toInt() * 100_000_000 + it[4].toInt() * 10_000 + it[5].toInt()
-                }
-            }?.compareTo(
-                foundVersion.groupValues.let {
-                    it[3].toInt() * 100_000_000 + it[4].toInt() * 10_000 + it[5].toInt()
-                })!! < 0
-        }
-
-        return Update(
-            shouldUpdate,
-            foundAsset.browserDownloadUrl,
-            foundVersion.groupValues[2],
-            found.body,
-            found.nodeId
-        )
-    }
-
-    private suspend fun Activity.getPreReleaseUpdate(): Update {
-        val tagUrl =
-            "https://api.github.com/repos/$GITHUB_USER_NAME/$GITHUB_REPO/git/ref/tags/pre-release"
-        val releaseUrl = "https://api.github.com/repos/$GITHUB_USER_NAME/$GITHUB_REPO/releases"
-        val headers = mapOf("Accept" to "application/vnd.github.v3+json")
-        val response = parseJson<Array<GithubRelease>>(
-            app.get(releaseUrl, headers = headers).text
-        ).toList()
-
-        val found = response.lastOrNull { rel ->
-            rel.prerelease || rel.tagName == "pre-release"
-        }
-
-        val foundAsset = found?.assets?.filter { it ->
-            it.contentType == "application/vnd.android.package-archive"
-        }?.getOrNull(0)
-
-        if (foundAsset == null) {
-            return Update(false, null, null, null, null)
-        }
-
-        val tagResponse = parseJson<GithubTag>(app.get(tagUrl, headers = headers).text)
-        val updateCommitHash = tagResponse.githubObject.sha.trim().take(7)
-        Log.d(LOG_TAG, "Fetched GitHub tag: $updateCommitHash")
-
-        return Update(
-            currentCommitHash() != updateCommitHash,
-            foundAsset.browserDownloadUrl,
-            updateCommitHash,
-            found.body,
-            found.nodeId
-        )
+        return Update(false, null, null, null, null)
     }
 
     private val updateLock = Mutex()
 
-    private suspend fun Activity.downloadUpdate(url: String): Boolean {
-        try {
-            Log.d(LOG_TAG, "Downloading update: $url")
-            val appUpdateName = "CloudStream"
-            val appUpdateSuffix = "apk"
+    private suspend fun Activity.downloadUpdateWithProgress(
+        url: String,
+        onProgress: (bytesDownloaded: Long, totalBytes: Long, percentage: Int, speedBps: Long) -> Unit
+    ): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                Log.d(LOG_TAG, "Downloading update: $url")
+                val appUpdateName = "FireFly_Update"
+                val appUpdateSuffix = "apk"
 
-            // Delete all old updates
-            this.cacheDir.listFiles()?.filter {
-                it.name.startsWith(appUpdateName) && it.extension == appUpdateSuffix
-            }?.forEach { deleteFileOnExit(it) }
+                // Delete old downloaded apk files
+                cacheDir.listFiles()?.filter {
+                    it.name.startsWith("FireFly_Update") || it.name.startsWith("CloudStream") && it.extension == appUpdateSuffix
+                }?.forEach { deleteFileOnExit(it) }
 
-            val downloadedFile = File.createTempFile(appUpdateName, ".$appUpdateSuffix")
-            val sink: BufferedSink = downloadedFile.sink().buffer()
+                val downloadedFile = File.createTempFile(appUpdateName, ".$appUpdateSuffix", cacheDir)
 
-            updateLock.withLock {
-                sink.writeAll(app.get(url).body.source())
-                sink.close()
-                openApk(this, Uri.fromFile(downloadedFile))
+                val response = app.get(url)
+                val body = response.body
+                val contentLength = body.contentLength()
+                val inputStream = body.byteStream()
+                val outputStream = FileOutputStream(downloadedFile)
+
+                val buffer = ByteArray(8192)
+                var bytesRead: Int
+                var totalBytesRead = 0L
+                var lastProgressTime = System.currentTimeMillis()
+                var lastProgressBytes = 0L
+                var currentSpeed = 0L
+
+                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                    outputStream.write(buffer, 0, bytesRead)
+                    totalBytesRead += bytesRead
+
+                    val now = System.currentTimeMillis()
+                    val timeDiff = now - lastProgressTime
+                    if (timeDiff >= 150) {
+                        currentSpeed = if (timeDiff > 0) ((totalBytesRead - lastProgressBytes) * 1000) / timeDiff else 0L
+                        lastProgressTime = now
+                        lastProgressBytes = totalBytesRead
+
+                        val percent = if (contentLength > 0) {
+                            ((totalBytesRead * 100) / contentLength).toInt().coerceIn(0, 100)
+                        } else -1
+                        withContext(Dispatchers.Main) {
+                            onProgress(totalBytesRead, contentLength, percent, currentSpeed)
+                        }
+                    }
+                }
+                outputStream.flush()
+                outputStream.close()
+                inputStream.close()
+
+                withContext(Dispatchers.Main) {
+                    onProgress(totalBytesRead, contentLength, 100, currentSpeed)
+                    openApk(this@downloadUpdateWithProgress, Uri.fromFile(downloadedFile))
+                }
+                true
+            } catch (e: Exception) {
+                logError(e)
+                false
             }
-
-            return true
-        } catch (e: Exception) {
-            logError(e)
-            return false
         }
     }
 
@@ -220,7 +268,7 @@ object InAppUpdater {
         )
         val installIntent = Intent(Intent.ACTION_VIEW).apply {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
             data = contentUri
         }
@@ -242,6 +290,78 @@ object InAppUpdater {
         }
     }
 
+    private fun Activity.showDownloadProgressDialog(update: Update) {
+        if (isFinishing || isDestroyed) return
+
+        val layout = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(60, 40, 60, 30)
+        }
+
+        val tvStatus = android.widget.TextView(this).apply {
+            text = "Downloading FireFly v${update.updateVersion}..."
+            setTextColor(android.graphics.Color.WHITE)
+            textSize = 15f
+            setPadding(0, 0, 0, 20)
+        }
+
+        val progressBar = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = false
+            max = 100
+            progress = 0
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        val tvDetails = android.widget.TextView(this).apply {
+            text = "0% (0.0 MB / -- MB)"
+            setTextColor(android.graphics.Color.LTGRAY)
+            textSize = 12f
+            setPadding(0, 15, 0, 0)
+        }
+
+        layout.addView(tvStatus)
+        layout.addView(progressBar)
+        layout.addView(tvDetails)
+
+        val progressDialog = androidx.appcompat.app.AlertDialog.Builder(this, R.style.AlertDialogCustom)
+            .setTitle("Downloading Update")
+            .setView(layout)
+            .setCancelable(false)
+            .setNegativeButton(R.string.cancel) { d, _ ->
+                d.dismiss()
+            }
+            .create()
+
+        progressDialog.show()
+
+        ioSafe {
+            val success = downloadUpdateWithProgress(update.updateURL!!) { dlBytes, totBytes, percent, speed ->
+                runOnUiThread {
+                    if (progressDialog.isShowing && !isFinishing && !isDestroyed) {
+                        progressBar.progress = percent.coerceIn(0, 100)
+                        val dlMb = String.format(java.util.Locale.US, "%.1f", dlBytes / (1024f * 1024f))
+                        val totMb = if (totBytes > 0) String.format(java.util.Locale.US, "%.1f MB", totBytes / (1024f * 1024f)) else "-- MB"
+                        val speedMb = String.format(java.util.Locale.US, "%.1f MB/s", speed / (1024f * 1024f))
+                        tvDetails.text = "$percent% • $dlMb MB / $totMb ($speedMb)"
+                    }
+                }
+            }
+
+            runOnUiThread {
+                if (progressDialog.isShowing && !isFinishing && !isDestroyed) {
+                    progressDialog.dismiss()
+                }
+                if (!success) {
+                    showToast(R.string.download_failed, Toast.LENGTH_LONG)
+                }
+            }
+        }
+    }
+
+    private var hasAutoCheckedThisSession = false
 
     /**
      * @param checkAutoUpdate if the update check was launched automatically
@@ -253,8 +373,11 @@ object InAppUpdater {
         val settingsManager = PreferenceManager.getDefaultSharedPreferences(this)
         val autoUpdateEnabled =
             settingsManager.getBoolean(getString(R.string.auto_update_key), true)
-        if (checkAutoUpdate && !autoUpdateEnabled) {
-            return false
+        if (checkAutoUpdate) {
+            if (!autoUpdateEnabled || hasAutoCheckedThisSession) {
+                return false
+            }
+            hasAutoCheckedThisSession = true
         }
 
         val update = getAppUpdate(installPrerelease)
@@ -268,21 +391,22 @@ object InAppUpdater {
         )
 
         // Skips the update if its an automatic update and the update is skipped
-        // This allows updating manually
         if (update.updateNodeId.equals(updateNodeId) && checkAutoUpdate) {
             return false
         }
 
         runOnUiThread {
-            safe {
+            try {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+
                 val currentVersion = packageName?.let {
-                    packageManager.getPackageInfo(it, 0)
+                    try { packageManager.getPackageInfo(it, 0) } catch (_: Exception) { null }
                 }
 
-                val builder = AlertDialog.Builder(this, R.style.AlertDialogCustom)
+                val builder = androidx.appcompat.app.AlertDialog.Builder(this, R.style.AlertDialogCustom)
                 builder.setTitle(
                     getString(R.string.new_update_format).format(
-                        currentVersion?.versionName, update.updateVersion
+                        currentVersion?.versionName ?: BuildConfig.VERSION_NAME, update.updateVersion
                     )
                 )
 
@@ -294,51 +418,7 @@ object InAppUpdater {
                 builder.setMessage(sanitizedChangelog)
                 builder.apply {
                     setPositiveButton(R.string.update) { _, _ ->
-                        // Forcefully start any delayed installations
-                        if (ApkInstaller.delayedInstaller?.startInstallation() == true) return@setPositiveButton
-
-                        showToast(R.string.download_started, Toast.LENGTH_LONG)
-
-                        // Check if the setting hasn't been changed
-                        if (settingsManager.getInt(
-                                getString(R.string.apk_installer_key), -1
-                            ) == -1
-                        ) {
-                            // Set to legacy installer if using MIUI
-                            if (isMiUi()) {
-                                settingsManager.edit {
-                                    putInt(getString(R.string.apk_installer_key), 1)
-                                }
-                            }
-                        }
-
-                        val currentInstaller = settingsManager.getInt(
-                            getString(R.string.apk_installer_key), 1
-                        )
-
-                        when (currentInstaller) {
-                            // New method
-                            0 -> {
-                                val intent = PackageInstallerService.Companion.getIntent(
-                                    this@runAutoUpdate, update.updateURL
-                                )
-                                ContextCompat.startForegroundService(
-                                    this@runAutoUpdate, intent
-                                )
-                            }
-                            // Legacy
-                            1 -> {
-                                ioSafe {
-                                    if (!downloadUpdate(update.updateURL)) {
-                                        runOnUiThread {
-                                            showToast(
-                                                R.string.download_failed, Toast.LENGTH_LONG
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        showDownloadProgressDialog(update)
                     }
 
                     setNegativeButton(R.string.cancel) { _, _ -> }
@@ -353,20 +433,11 @@ object InAppUpdater {
                         }
                     }
                 }
-                builder.show().setDefaultFocus()
+                builder.show()
+            } catch (e: Exception) {
+                logError(e)
             }
         }
         return true
-    }
-
-    private fun isMiUi(): Boolean = !getSystemProperty("ro.miui.ui.version.name").isNullOrEmpty()
-
-    private fun getSystemProperty(propName: String): String? = try {
-        val p = Runtime.getRuntime().exec("getprop $propName")
-        BufferedReader(InputStreamReader(p.inputStream), 1024).use {
-            it.readLine()
-        }
-    } catch (_: IOException) {
-        null
     }
 }

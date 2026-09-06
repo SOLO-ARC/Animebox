@@ -141,8 +141,15 @@ class PlayerSubtitleHelper {
     fun initSubtitles(subView: SubtitleView?, subHolder: FrameLayout?, style: SaveCaptionStyle?) {
         subtitleView = subView
         subView?.let { sView ->
-            (sView.parent as ViewGroup?)?.removeView(sView)
-            subHolder?.addView(sView)
+            val targetHolder = subHolder ?: (sView.parent?.parent as? ViewGroup)
+            val parent = sView.parent as? ViewGroup
+            if (targetHolder != null && parent !== targetHolder) {
+                parent?.removeView(sView)
+                targetHolder.addView(sView, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                ))
+            }
         }
         style?.let {
             setSubStyle(it)

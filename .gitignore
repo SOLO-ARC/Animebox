@@ -3,6 +3,8 @@ clean-kotlin-blueprint/
 anime-download-hub-main/
 anidrive-stream-finder-main/
 Animebox website/
+Animebox-PC-App/
+FireFly-TV-Web/
 anime-scraper-v1/
 animebox-admin/
 lovable api/
@@ -13,6 +15,26 @@ Animestudio's logo/
 # Extractors and proprietary download engines
 animebox/app/src/main/java/com/lagradost/cloudstream3/ui/animebox/extractors/
 animebox/app/src/main/java/com/lagradost/cloudstream3/ui/animebox/download/
+animebox/app/src/main/java/com/lagradost/cloudstream3/ui/animebox/api/CustomStreamManager.kt
+animebox/app/src/main/assets/shinchan_episodes.json
+
+# Scraping & Streaming Research / Reverse-Engineering Scripts & Backends
+*.py
+*.ps1
+scratch_*.kt
+Launch-Animebox-PC.bat
+*.js
+!animebox/**/*.js
+animebox/https_player.js
+animebox/node12.js
+animebox/scratch/
+Anivexa-API-main/
+MiruroAPI-main/
+reference_docchi_players/
+reference_docchi_stremio_addon/
+*.sql
+*.json
+animebox/*.html
 
 *.png
 !fireflytransparentlogo.png
@@ -27,6 +49,7 @@ animebox/app/src/main/java/com/lagradost/cloudstream3/ui/animebox/download/
 *.jpg
 !app showcase screenshots/*.jpg
 !Animebox website/**/*.jpg
+*.jpeg
 
 # OS & IDE
 .idea/

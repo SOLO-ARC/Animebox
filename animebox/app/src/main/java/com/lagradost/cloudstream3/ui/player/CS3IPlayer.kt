@@ -765,10 +765,11 @@ class CS3IPlayer : IPlayer {
                 return it
             }
 
-            // https://gist.github.com/ShivamKumarJha/3c8398b47053ae05112d2a8f8b5de531
             return try {
+                try {
+                    com.google.android.gms.net.CronetProviderInstaller.installProvider(context)
+                } catch (_: Throwable) {}
                 val cacheDirectory = File(context.cacheDir, "CronetEngine")
-                cacheDirectory.deleteRecursively()
                 if (!cacheDirectory.exists()) {
                     cacheDirectory.mkdirs()
                 }

@@ -66,6 +66,9 @@ val generateGitHash = tasks.register<GenerateGitHashTask>("generateGitHash") {
 }
 
 android {
+    val isReleaseTask = gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
+    val buildTimestamp = if (isReleaseTask) System.currentTimeMillis() else 1700000000000L
+
     @Suppress("UnstableApiUsage")
     testOptions {
         unitTests.isReturnDefaultValues = true
@@ -121,7 +124,7 @@ android {
         buildConfigField(
             "long",
             "BUILD_DATE",
-            "${System.currentTimeMillis()}"
+            "${buildTimestamp}L"
         )
         buildConfigField(
             "String",
@@ -136,12 +139,12 @@ android {
         buildConfigField(
             "String",
             "MAL_KEY",
-            "\"" + (System.getenv("MAL_KEY") ?: localProperties["mal.key"]) + "\""
+            "\"" + (System.getenv("MAL_KEY") ?: localProperties["mal.key"] ?: "6114d00ca681b77c0115652f1101e7bf") + "\""
         )
         buildConfigField(
             "String",
             "ANILIST_KEY",
-            "\"" + (System.getenv("ANILIST_KEY") ?: localProperties["anilist.key"]) + "\""
+            "\"" + (System.getenv("ANILIST_KEY") ?: localProperties["anilist.key"] ?: "49557") + "\""
         )
         buildConfigField(
             "String",
@@ -159,6 +162,7 @@ android {
             "\"" + (localProperties["lovable.anidrive.api"] ?: "https://anidrive.placeholder.com") + "\""
         )
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        resourceConfigurations += listOf("en", "hi", "ja")
     }
 
     buildTypes {
@@ -180,8 +184,21 @@ android {
         }
     }
 
+    flavorDimensions.add("edition")
     flavorDimensions.add("state")
     productFlavors {
+        create("standard") {
+            dimension = "edition"
+            buildConfigField("boolean", "ENABLE_TRANSCRIPTION", "false")
+            buildConfigField("boolean", "SHOW_PRO_MODELS", "false")
+        }
+        create("transcribe") {
+            dimension = "edition"
+            applicationIdSuffix = ".ai"
+            versionNameSuffix = "-AI"
+            buildConfigField("boolean", "ENABLE_TRANSCRIPTION", "true")
+            buildConfigField("boolean", "SHOW_PRO_MODELS", "true")
+        }
         create("stable") {
             dimension = "state"
         }
@@ -193,7 +210,9 @@ android {
                 logger.warn("No prerelease signing config!")
             }
             versionNameSuffix = "-PRE"
-            versionCode = (System.currentTimeMillis() / 60000).toInt()
+            if (isReleaseTask) {
+                versionCode = (System.currentTimeMillis() / 60000).toInt()
+            }
         }
     }
 
@@ -265,6 +284,7 @@ dependencies {
     // Media 3 (ExoPlayer)
     implementation(libs.bundles.media3)
     implementation(libs.video)
+    implementation("com.google.android.gms:play-services-cronet:18.0.1")
 
     // FFmpeg Decoding
     implementation(libs.bundles.nextlib)
@@ -299,9 +319,6 @@ dependencies {
     // Deprecated; will be removed once extensions have time to migrate from using it
     implementation("me.xdrop:fuzzywuzzy:1.4.0")
 
-    // Torrent Support
-    implementation(libs.torrentserver)
-
     // Downloading & Networking
     implementation(libs.work.runtime.ktx)
     implementation(libs.nicehttp) // HTTP Lib
@@ -310,6 +327,12 @@ dependencies {
     implementation(platform(libs.compose.bom))
     implementation(libs.bundles.compose)
     implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.0")
+
+    // Sherpa-ONNX: On-device speech recognition (SenseVoice / Whisper) - packaged ONLY in transcribe flavor
+    "transcribeImplementation"("com.bihe0832.android:lib-sherpa-onnx:8.6.6")
+
+    // Google ML Kit Translate: On-device subtitle translation for existing subtitle files (both flavors)
+    implementation("com.google.mlkit:translate:17.0.3")
 
     implementation(project(":library"))
 }
@@ -322,7 +345,7 @@ tasks.register<Jar>("androidSourcesJar") {
 tasks.register<Copy>("copyJar") {
     dependsOn("build", ":library:jvmJar")
     from(
-        "build/intermediates/compile_app_classes_jar/prereleaseDebug/bundlePrereleaseDebugClassesToCompileJar",
+        "build/intermediates/compile_app_classes_jar/standardPrereleaseDebug/bundleStandardPrereleaseDebugClassesToCompileJar",
         "../library/build/libs"
     )
     into("build/app-classes")
@@ -361,7 +384,7 @@ dokka {
     moduleName = "App"
     dokkaSourceSets {
         configureEach {
-            suppress = name != "prereleaseDebug"
+            suppress = !name.contains("PrereleaseDebug", ignoreCase = true)
             analysisPlatform = KotlinPlatform.JVM
             displayName = "JVM"
             documentedVisibilities(

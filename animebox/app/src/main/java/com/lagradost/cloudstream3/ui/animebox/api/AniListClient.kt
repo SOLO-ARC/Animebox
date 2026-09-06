@@ -128,6 +128,25 @@ object AniListClient {
                 }
             }
 
+            if (data.has("Studio") && !data.isNull("Studio")) {
+                val studio = data.getJSONObject("Studio")
+                val media = studio.optJSONObject("media")
+                if (media != null && media.has("nodes") && !media.isNull("nodes")) {
+                    val nodesArray = media.getJSONArray("nodes")
+                    val filteredArray = org.json.JSONArray()
+                    val seenMediaIds = mutableSetOf<Int>()
+                    for (i in 0 until nodesArray.length()) {
+                        val m = nodesArray.getJSONObject(i)
+                        val mId = m.optInt("id", -1)
+                        if (mId != -1 && !seenMediaIds.add(mId)) continue
+                        if (!isBlockedMedia(m)) {
+                            filteredArray.put(m)
+                        }
+                    }
+                    media.put("nodes", filteredArray)
+                }
+            }
+
             if (data.has("Media") && !data.isNull("Media")) {
                 val media = data.getJSONObject("Media")
                 if (isBlockedMedia(media)) {
@@ -266,6 +285,37 @@ object AniListClient {
         }
     """
 
+    private const val STUDIO_MEDIA_FIELDS = """
+        id
+        idMal
+        trailer {
+          id
+          site
+          thumbnail
+        }
+        title {
+          english
+          romaji
+        }
+        description
+        coverImage {
+          large
+          extraLarge
+        }
+        bannerImage
+        genres
+        format
+        averageScore
+        episodes
+        status
+        isAdult
+        startDate {
+          year
+          month
+          day
+        }
+    """
+
     /**
      * Fetch trending/popular anime for the Homepage Spotlight & Carousel lists
      */
@@ -310,6 +360,33 @@ object AniListClient {
               Page(page: 1, perPage: 25) {
                 media(type: ANIME, search: ${'$'}search) {
                   $MEDIA_FIELDS
+                }
+              }
+            }
+        """.trimIndent()
+        return query(graphqlQuery, variables)
+    }
+
+    /**
+     * Fetch popular anime by animation studio name (via AniList GraphQL Studio relation / search)
+     */
+    suspend fun getAnimeByStudio(studioName: String, page: Int = 1): String? {
+        val variables = JSONObject().apply {
+            put("studioName", studioName)
+            put("page", page)
+        }
+        val graphqlQuery = """
+            query (${'$'}studioName: String, ${'$'}page: Int) {
+              Studio(search: ${'$'}studioName) {
+                id
+                name
+                media(page: ${'$'}page, perPage: 30, sort: POPULARITY_DESC) {
+                  pageInfo {
+                    hasNextPage
+                  }
+                  nodes {
+                    $STUDIO_MEDIA_FIELDS
+                  }
                 }
               }
             }
@@ -421,6 +498,44 @@ object AniListClient {
             detailsCache.put(anilistId, res)
         }
         return res
+    }
+
+    /**
+     * Extracts official anime title (English/Romaji) and main/supporting character names
+     * to enhance subtitle transcription, spelling, and grammar without errors.
+     */
+    suspend fun fetchAnimeCharacterAndTitleContext(anilistId: Int): List<String> = withContext(Dispatchers.IO) {
+        if (anilistId <= 0) return@withContext emptyList()
+        val entities = mutableListOf<String>()
+        try {
+            val detailsJson = getAnimeDetails(anilistId) ?: return@withContext emptyList()
+            val mediaObj = JSONObject(detailsJson).optJSONObject("data")?.optJSONObject("Media") ?: return@withContext emptyList()
+
+            // 1. Anime titles
+            mediaObj.optJSONObject("title")?.let { tObj ->
+                val eng = tObj.optString("english", "").trim()
+                if (eng.isNotBlank() && eng != "null") entities.add(eng)
+                val rom = tObj.optString("romaji", "").trim()
+                if (rom.isNotBlank() && rom != "null") entities.add(rom)
+            }
+
+            // 2. Character names
+            val charEdges = mediaObj.optJSONObject("characters")?.optJSONArray("edges")
+            if (charEdges != null) {
+                for (i in 0 until charEdges.length()) {
+                    val node = charEdges.optJSONObject(i)?.optJSONObject("node")
+                    val nameObj = node?.optJSONObject("name")
+                    val full = nameObj?.optString("full", "")?.trim() ?: ""
+                    if (full.isNotBlank() && full != "null") {
+                        entities.add(full)
+                        // Split full names (e.g. "Satoru Gojo" -> "Satoru", "Gojo")
+                        val parts = full.split(" ").map { it.trim() }.filter { it.length >= 3 }
+                        entities.addAll(parts)
+                    }
+                }
+            }
+        } catch (_: Throwable) {}
+        entities.distinct()
     }
 
     /**
@@ -553,5 +668,36 @@ object AniListClient {
             }
         """.trimIndent()
         return query(graphqlQuery, variables)
+    }
+
+    /**
+     * Retrieve high quality portrait cover image directly from AniList
+     */
+    suspend fun getAnimeCover(anilistId: Int): String = withContext(Dispatchers.IO) {
+        if (anilistId <= 0) return@withContext ""
+        try {
+            val graphqlQuery = """
+                query (${'$'}id: Int) {
+                    Media(id: ${'$'}id, type: ANIME) {
+                        coverImage {
+                            extraLarge
+                            large
+                            medium
+                        }
+                    }
+                }
+            """.trimIndent()
+            val vars = JSONObject().apply { put("id", anilistId) }
+            val raw = query(graphqlQuery, vars)
+            if (raw != null) {
+                val mediaObj = JSONObject(raw).optJSONObject("data")?.optJSONObject("Media")
+                val coverObj = mediaObj?.optJSONObject("coverImage")
+                val cover = coverObj?.optString("extraLarge", "")?.ifEmpty {
+                    coverObj.optString("large", "")
+                } ?: ""
+                if (cover.isNotBlank()) return@withContext cover
+            }
+        } catch (_: Exception) {}
+        ""
     }
 }

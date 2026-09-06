@@ -271,7 +271,9 @@ object KitsuClient {
 
             val synopsis = attr.optString("synopsis", attr.optString("description", "")).replace(Regex("<[^>]*>"), "")
             val score = attr.optDouble("averageRating", 0.0).toInt().coerceIn(0, 100)
-            val episodesCount = attr.optInt("episodeCount", 12)
+            val isLongRunning = AniZipClient.getLongRunningTmdbId(anilistId) != null
+            val rawEpCount = attr.optInt("episodeCount", 0)
+            val episodesCount = if (rawEpCount > 0) rawEpCount else if (isLongRunning) 0 else 12
             val status = attr.optString("status", "").uppercase()
             val format = attr.optString("showType", "TV").uppercase()
             val startDate = attr.optString("startDate", "")

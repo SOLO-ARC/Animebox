@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.ui.animebox.AnimeBrief
 import com.lagradost.cloudstream3.ui.animebox.profiles.ProfileManager
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
+import kotlinx.coroutines.launch
 
 class LibraryManager(private val context: Context, private val profileId: String? = null) {
 
@@ -41,10 +42,48 @@ class LibraryManager(private val context: Context, private val profileId: String
     fun addOrUpdateLibraryItem(anime: AnimeBrief, category: String = "Plan to Watch") {
         val normalized = normalizeCategory(category)
         val currentList = getLibraryItems().toMutableList()
+        val existing = currentList.find { it.id == anime.id }
         currentList.removeAll { it.id == anime.id }
-        val updated = anime.copy(customListCategory = normalized)
+        val isInvalidCover = anime.coverUrl.isBlank() ||
+            anime.coverUrl.contains("episode", ignoreCase = true) ||
+            anime.coverUrl.contains("backdrop", ignoreCase = true) ||
+            anime.coverUrl.contains("banner", ignoreCase = true) ||
+            anime.coverUrl.contains("cover_${anime.id}_")
+
+        val effectiveCover = when {
+            !isInvalidCover -> anime.coverUrl
+            existing != null && existing.coverUrl.isNotBlank() && !existing.coverUrl.contains("episode", ignoreCase = true) && !existing.coverUrl.contains("backdrop", ignoreCase = true) && !existing.coverUrl.contains("banner", ignoreCase = true) -> existing.coverUrl
+            else -> anime.coverUrl
+        }
+        val updated = anime.copy(
+            customListCategory = normalized,
+            coverUrl = effectiveCover
+        )
         currentList.add(0, updated)
         getPrefs().edit().putString("library_list", currentList.toJson()).apply()
+
+        val profId = profileId ?: ProfileManager.getActiveProfile(context)
+        kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                if (effectiveCover.isBlank() || isInvalidCover) {
+                    val realCover = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getAnimeCover(updated.id)
+                    if (realCover.isNotBlank()) {
+                        val fixedItem = updated.copy(coverUrl = realCover)
+                        val refreshedList = getLibraryItems().toMutableList()
+                        val idx = refreshedList.indexOfFirst { it.id == updated.id }
+                        if (idx >= 0) {
+                            refreshedList[idx] = fixedItem
+                        } else {
+                            refreshedList.add(0, fixedItem)
+                        }
+                        getPrefs().edit().putString("library_list", refreshedList.toJson()).apply()
+                    }
+                }
+                com.lagradost.cloudstream3.ui.animebox.sync.AnimeBoxAccountSyncManager.syncLibraryItemToRemote(
+                    context, profId, updated.id, updated.customListCategory
+                )
+            } catch (_: Exception) {}
+        }
     }
 
     fun removeLibraryItem(animeId: Int) {
@@ -56,12 +95,20 @@ class LibraryManager(private val context: Context, private val profileId: String
     fun toggleLibraryItem(anime: AnimeBrief, defaultCategory: String = "Plan to Watch"): Boolean {
         val currentList = getLibraryItems().toMutableList()
         val exists = currentList.any { it.id == anime.id }
+        val profId = profileId ?: ProfileManager.getActiveProfile(context)
         if (exists) {
             currentList.removeAll { it.id == anime.id }
         } else {
             val normalized = normalizeCategory(if (anime.customListCategory.isEmpty()) defaultCategory else anime.customListCategory)
             val updated = anime.copy(customListCategory = normalized)
             currentList.add(0, updated)
+            kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    com.lagradost.cloudstream3.ui.animebox.sync.AnimeBoxAccountSyncManager.syncLibraryItemToRemote(
+                        context, profId, updated.id, updated.customListCategory
+                    )
+                } catch (_: Exception) {}
+            }
         }
         getPrefs().edit().putString("library_list", currentList.toJson()).apply()
         return !exists
@@ -80,7 +127,18 @@ class LibraryManager(private val context: Context, private val profileId: String
         val json = getPrefs().getString("library_list", null) ?: return emptyList()
         return try {
             val items = tryParseJson<List<AnimeBrief>>(json) ?: emptyList()
-            items.map { it.copy(customListCategory = normalizeCategory(it.customListCategory)) }
+            items.map { item ->
+                val isInvalidCover = item.coverUrl.isBlank() ||
+                        item.coverUrl.contains("episode", ignoreCase = true) ||
+                        item.coverUrl.contains("backdrop", ignoreCase = true) ||
+                        item.coverUrl.contains("banner", ignoreCase = true) ||
+                        item.coverUrl.contains("cover_${item.id}_")
+                val cleanCover = if (!isInvalidCover) item.coverUrl else ""
+                item.copy(
+                    customListCategory = normalizeCategory(item.customListCategory),
+                    coverUrl = cleanCover
+                )
+            }
         } catch (e: Exception) {
             emptyList()
         }

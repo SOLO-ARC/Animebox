@@ -15,10 +15,17 @@ object ProfileManager {
     private const val KEY_ACTIVE_PROFILE = "active_profile_id"
     private const val KEY_PROFILES_LIST = "profiles_list"
 
+    val profileRevisionFlow = kotlinx.coroutines.flow.MutableStateFlow(0L)
+
+    fun notifyProfilesChanged() {
+        profileRevisionFlow.value = System.currentTimeMillis()
+    }
+
     // Switch profile context
     fun setActiveProfile(context: Context, profileId: String) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString(KEY_ACTIVE_PROFILE, profileId).apply()
+        notifyProfilesChanged()
     }
 
     fun getActiveProfile(context: Context): String {
@@ -31,9 +38,8 @@ object ProfileManager {
         val guestAvatar = "android.resource://" + context.packageName + "/drawable/images"
         val guestProfile = UserProfile("guest", "Guest", guestAvatar)
         
-        // Force reset profiles list to only Guest with images.jpg to avoid cached old accounts (e.g. Primary User)
         val jsonStr = prefs.getString(KEY_PROFILES_LIST, null)
-        if (jsonStr.isNullOrEmpty() || !jsonStr.contains("\"id\":\"guest\"") || jsonStr.contains("Primary")) {
+        if (jsonStr.isNullOrEmpty()) {
             val defaultList = listOf(guestProfile)
             saveProfiles(context, defaultList)
             return defaultList
@@ -70,6 +76,7 @@ object ProfileManager {
             arr.put(obj)
         }
         prefs.edit().putString(KEY_PROFILES_LIST, arr.toString()).apply()
+        notifyProfilesChanged()
     }
 
     fun addProfile(context: Context, name: String, avatarUrl: String) {

@@ -86,6 +86,62 @@ object AniZipClient {
         if (kitsuId > 0) kitsuId else null
     }
 
+    private val kitsuEpisodeImagesCache = java.util.concurrent.ConcurrentHashMap<Int, Map<Int, String>>()
+    private val tmdbSeasonEpisodesCache = java.util.concurrent.ConcurrentHashMap<String, Map<Int, String>>()
+    private val tmdbAirdateMapCache = java.util.concurrent.ConcurrentHashMap<Int, Map<String, String>>()
+
+    suspend fun getKitsuEpisodeImages(kitsuId: Int): Map<Int, String> = withContext(Dispatchers.IO) {
+        if (kitsuId <= 0) return@withContext emptyMap()
+        val cached = kitsuEpisodeImagesCache[kitsuId]
+        if (cached != null && cached.isNotEmpty()) return@withContext cached
+
+        val resultMap = mutableMapOf<Int, String>()
+        var offset = 0
+        try {
+            while (offset <= 100) {
+                val url = "https://kitsu.io/api/edge/episodes?filter%5BmediaId%5D=$kitsuId&page%5Blimit%5D=20&page%5Boffset%5D=$offset"
+                val req = Request.Builder()
+                    .url(url)
+                    .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    .build()
+
+                var hasMore = false
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use
+                    val body = resp.body?.string() ?: return@use
+                    val json = JSONObject(body)
+                    val data = json.optJSONArray("data") ?: return@use
+                    for (i in 0 until data.length()) {
+                        val item = data.optJSONObject(i) ?: continue
+                        val attrs = item.optJSONObject("attributes") ?: continue
+                        val epNum = attrs.optInt("number", -1)
+                        val thumb = attrs.optJSONObject("thumbnail")
+                        if (epNum > 0 && thumb != null) {
+                            val img = thumb.optString("original",
+                                thumb.optString("large",
+                                    thumb.optString("medium",
+                                        thumb.optString("small",
+                                            thumb.optString("tiny", "")))))
+                            if (img.isNotEmpty() && !img.equals("null", ignoreCase = true)) {
+                                resultMap[epNum] = img
+                            }
+                        }
+                    }
+                    hasMore = data.length() >= 20
+                }
+                if (!hasMore) break
+                offset += 20
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        if (resultMap.isNotEmpty()) {
+            kitsuEpisodeImagesCache[kitsuId] = resultMap
+        }
+        resultMap
+    }
+
     suspend fun getTmdbEpisodeImage(tmdbId: Int, season: Int, episode: Int): String = withContext(Dispatchers.IO) {
         val key = "${season}_${episode}"
         val cache = tmdbImagesCache.getOrPut(tmdbId) { mutableMapOf() }
@@ -94,7 +150,10 @@ object AniZipClient {
         }
         
         val url = "https://api.themoviedb.org/3/tv/$tmdbId/season/$season?api_key=5a7f00b2528e0278ae94cd386deb6116"
-        val request = Request.Builder().url(url).build()
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .build()
         try {
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
@@ -121,10 +180,73 @@ object AniZipClient {
         return@withContext cache[key] ?: ""
     }
 
+    private suspend fun getTmdbAirdateStills(tmdbId: Int): Map<String, String> = withContext(Dispatchers.IO) {
+        if (tmdbId <= 0) return@withContext emptyMap()
+        val cached = tmdbAirdateMapCache[tmdbId]
+        if (cached != null) return@withContext cached
+
+        val map = mutableMapOf<String, String>()
+        try {
+            val url = "https://api.themoviedb.org/3/tv/$tmdbId/season/1?api_key=5a7f00b2528e0278ae94cd386deb6116"
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string() ?: return@use
+                    val json = JSONObject(body)
+                    val eps = json.optJSONArray("episodes") ?: return@use
+                    for (i in 0 until eps.length()) {
+                        val epObj = eps.optJSONObject(i) ?: continue
+                        val airDate = epObj.optString("air_date", "")
+                        val stillPath = epObj.optString("still_path", "")
+                        if (airDate.isNotEmpty() && stillPath.isNotEmpty() && stillPath != "null") {
+                            map[airDate] = "https://image.tmdb.org/t/p/w500$stillPath"
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        if (map.isNotEmpty()) {
+            tmdbAirdateMapCache[tmdbId] = map
+        }
+        map
+    }
+
     suspend fun getEpisodeMetadata(anilistId: Int): Map<Int, EpisodeMeta> = withContext(Dispatchers.IO) {
         val metadataMap = mutableMapOf<Int, EpisodeMeta>()
+        if (ShinChanEpisodeProvider.isShinChan(anilistId)) {
+            val covers = ShinChanSupabaseManager.getAllEpisodeCovers()
+            val maxEp = ShinChanSupabaseManager.getLatestEpisodeNumber()
+            for (ep in 1..maxEp) {
+                val cover = covers[ep] ?: ""
+                metadataMap[ep] = EpisodeMeta(
+                    title = "Episode $ep",
+                    overview = "",
+                    imageUrl = cover,
+                    airdate = ""
+                )
+            }
+            return@withContext metadataMap
+        }
         try {
             val json = getAniZipJson(anilistId) ?: return@withContext metadataMap
+            val mappings = json.optJSONObject("mappings")
+            val kitsuId = mappings?.optInt("kitsu_id", -1) ?: -1
+            val tmdbId = mappings?.optInt("themoviedb_id", 0) ?: 0
+
+            // Pre-fetch Kitsu episode images (exact 1:1 match with AniList seasons)
+            val kitsuImages = if (kitsuId > 0) {
+                getKitsuEpisodeImages(kitsuId)
+            } else {
+                emptyMap()
+            }
+
+            var tmdbAirdateMap: Map<String, String>? = null
+
             if (json.has("episodes")) {
                 val episodesObj = json.getJSONObject("episodes")
                 val keys = episodesObj.keys()
@@ -142,7 +264,7 @@ object AniZipClient {
                         if (cleanEn.isNotEmpty()) cleanEn else if (cleanJa.isNotEmpty()) cleanJa else "Episode $epNum"
                     } else "Episode $epNum"
                     
-                    val imageUrl = if (epObj.has("image")) epObj.getString("image") else ""
+                    var imageUrl = if (epObj.has("image")) epObj.getString("image") else ""
                     val season = epObj.optInt("seasonNumber", 1)
                     val episode = epObj.optInt("episodeNumber", epNum)
 
@@ -154,6 +276,33 @@ object AniZipClient {
                     val overview = epObj.optString("overview", epObj.optString("summary", ""))
                     val runtime = epObj.optInt("runtime", 24)
                     val isFiller = epObj.optBoolean("isFiller", epObj.optBoolean("filler", false))
+
+                    // 1. Resolve episode cover from Kitsu (exact season match, unblocked)
+                    if (imageUrl.isEmpty() && kitsuImages.containsKey(epNum)) {
+                        imageUrl = kitsuImages[epNum] ?: ""
+                    }
+
+                    // 2. Resolve episode cover from TMDB if Kitsu had no image
+                    if (imageUrl.isEmpty() && tmdbId > 0) {
+                        // First try airdate matching (handles shows where TMDB combines seasons into Season 1 e.g. JJK, My Dress-Up Darling)
+                        if (airdate.isNotEmpty()) {
+                            if (tmdbAirdateMap == null) {
+                                tmdbAirdateMap = getTmdbAirdateStills(tmdbId)
+                            }
+                            val airMatch = tmdbAirdateMap?.get(airdate)
+                            if (!airMatch.isNullOrEmpty()) {
+                                imageUrl = airMatch
+                            }
+                        }
+                        // Second try standard TMDB season/episode
+                        if (imageUrl.isEmpty()) {
+                            val tmdbStill = getTmdbEpisodeImage(tmdbId, season, episode)
+                            if (tmdbStill.isNotEmpty()) {
+                                imageUrl = tmdbStill
+                            }
+                        }
+                    }
+
                     metadataMap[epNum] = EpisodeMeta(title, imageUrl, airdate, season, episode, overview, runtime, isFiller)
                 }
             }
@@ -163,8 +312,33 @@ object AniZipClient {
         return@withContext metadataMap
     }
 
-    suspend fun getAnimeLogoUrl(anilistId: Int): String = withContext(Dispatchers.IO) {
-        var tmdbId = getLongRunningTmdbId(anilistId)
+    suspend fun getAnimeLogoUrl(anilistId: Int, isMovie: Boolean = false): String = withContext(Dispatchers.IO) {
+        if (ShinChanEpisodeProvider.isShinChan(anilistId)) {
+            return@withContext ShinChanEpisodeProvider.SHINCHAN_LOGO_URL
+        }
+        // 0. Check Supabase dynamic custom logo first!
+        val dynamicLogo = AnimeMovieTmdbMapping.getDynamicLogo(anilistId)
+        if (!dynamicLogo.isNullOrBlank()) {
+            return@withContext dynamicLogo
+        }
+
+        val dynamicType = AnimeMovieTmdbMapping.getDynamicTmdbType(anilistId)
+        val staticMovie = AnimeMovieTmdbMapping.isStaticMovie(anilistId)
+        var targetIsMovie = when {
+            dynamicType != null -> dynamicType.equals("movie", ignoreCase = true)
+            staticMovie -> true
+            else -> isMovie
+        }
+        var targetType = if (targetIsMovie) "movie" else "tv"
+
+        var tmdbId: Int? = AnimeMovieTmdbMapping.getTmdbMapping(anilistId)
+        if (tmdbId == null || tmdbId <= 0) {
+            if (targetIsMovie) {
+                tmdbId = AnimeMovieTmdbMapping.getMovieTmdbId(anilistId)
+            } else {
+                tmdbId = getLongRunningTmdbId(anilistId)
+            }
+        }
         if (tmdbId == null || tmdbId <= 0) {
             tmdbId = getTmdbId(anilistId)
         }
@@ -172,73 +346,95 @@ object AniZipClient {
             val aniJson = getAniZipJson(anilistId)
             if (aniJson != null && aniJson.has("mappings")) {
                 val mappings = aniJson.getJSONObject("mappings")
+                if (mappings.optString("type", "").equals("MOVIE", ignoreCase = true)) {
+                    targetIsMovie = true
+                    targetType = "movie"
+                    AnimeMovieTmdbMapping.setDynamicType(anilistId, "movie")
+                }
                 val tId = mappings.optInt("themoviedb_id", 0)
-                if (tId > 0) tmdbId = tId else {
+                if (tId > 0) {
+                    tmdbId = tId
+                    if (targetIsMovie) {
+                        AnimeMovieTmdbMapping.setDynamicMapping(anilistId, tId, "movie")
+                    }
+                } else {
                     val sId = mappings.optInt("themoviedb_season_id", 0)
                     if (sId > 0) tmdbId = sId
                 }
             }
         }
         if (tmdbId == null || tmdbId <= 0) {
-            tmdbId = getTmdbIdFromFribb(anilistId)
+            tmdbId = getTmdbIdFromFribb(anilistId, isMovie = targetIsMovie)
         }
         
-        // 1. Try TMDB English logo first (check tv and movie)
-        if (tmdbId != null && tmdbId > 0) {
-            val tmdbTypes = listOf("tv", "movie")
-            for (type in tmdbTypes) {
-                val tmdbUrl = "https://api.themoviedb.org/3/$type/$tmdbId/images?api_key=5a7f00b2528e0278ae94cd386deb6116&include_image_language=en,null"
+        // Helper to query TMDB logos for a given media type
+        fun queryTmdbLogo(type: String, id: Int): String {
+            try {
+                val tmdbUrl = "https://api.themoviedb.org/3/$type/$id/images?api_key=5a7f00b2528e0278ae94cd386deb6116&include_image_language=en,null"
                 val tmdbRequest = Request.Builder().url(tmdbUrl).build()
-                try {
-                    client.newCall(tmdbRequest).execute().use { tmdbResponse ->
-                        if (tmdbResponse.isSuccessful) {
-                            val tmdbJsonStr = tmdbResponse.body?.string() ?: return@use
-                            val tmdbJson = JSONObject(tmdbJsonStr)
-                            if (tmdbJson.has("logos")) {
-                                val logosArray = tmdbJson.getJSONArray("logos")
-                                var englishLogo = ""
-                                var fallbackLogo = ""
-                                for (i in 0 until logosArray.length()) {
-                                    val obj = logosArray.getJSONObject(i)
-                                    val lang = obj.optString("iso_639_1", "")
-                                    val filePath = obj.optString("file_path", "")
-                                    if (filePath.isNotEmpty()) {
-                                        if (lang == "en" && englishLogo.isEmpty()) {
-                                            englishLogo = "https://image.tmdb.org/t/p/original$filePath"
-                                        } else if (fallbackLogo.isEmpty()) {
-                                            fallbackLogo = "https://image.tmdb.org/t/p/original$filePath"
-                                        }
+                client.newCall(tmdbRequest).execute().use { tmdbResponse ->
+                    if (tmdbResponse.isSuccessful) {
+                        val tmdbJsonStr = tmdbResponse.body?.string() ?: return@use
+                        val tmdbJson = JSONObject(tmdbJsonStr)
+                        if (tmdbJson.has("logos")) {
+                            val logosArray = tmdbJson.getJSONArray("logos")
+                            var englishLogo = ""
+                            var fallbackLogo = ""
+                            for (i in 0 until logosArray.length()) {
+                                val obj = logosArray.getJSONObject(i)
+                                val lang = obj.optString("iso_639_1", "")
+                                val filePath = obj.optString("file_path", "")
+                                if (filePath.isNotEmpty()) {
+                                    if (lang == "en" && englishLogo.isEmpty()) {
+                                        englishLogo = "https://image.tmdb.org/t/p/original$filePath"
+                                    } else if (fallbackLogo.isEmpty()) {
+                                        fallbackLogo = "https://image.tmdb.org/t/p/original$filePath"
                                     }
                                 }
-                                val chosenLogo = englishLogo.ifEmpty { fallbackLogo }
-                                if (chosenLogo.isNotEmpty()) return@withContext chosenLogo
                             }
+                            val chosenLogo = englishLogo.ifEmpty { fallbackLogo }
+                            if (chosenLogo.isNotEmpty()) return chosenLogo
                         }
                     }
-                } catch (e: Exception) {}
-            }
+                }
+            } catch (_: Exception) {}
 
-            // Also check all languages without filter if English was not found
-            for (type in tmdbTypes) {
-                val tmdbUrl = "https://api.themoviedb.org/3/$type/$tmdbId/images?api_key=5a7f00b2528e0278ae94cd386deb6116"
-                val tmdbRequest = Request.Builder().url(tmdbUrl).build()
-                try {
-                    client.newCall(tmdbRequest).execute().use { tmdbResponse ->
-                        if (tmdbResponse.isSuccessful) {
-                            val tmdbJsonStr = tmdbResponse.body?.string() ?: return@use
-                            val tmdbJson = JSONObject(tmdbJsonStr)
-                            if (tmdbJson.has("logos")) {
-                                val logosArray = tmdbJson.getJSONArray("logos")
-                                if (logosArray.length() > 0) {
-                                    val filePath = logosArray.getJSONObject(0).optString("file_path", "")
-                                    if (filePath.isNotEmpty()) {
-                                        return@withContext "https://image.tmdb.org/t/p/original$filePath"
-                                    }
+            try {
+                val allLangUrl = "https://api.themoviedb.org/3/$type/$id/images?api_key=5a7f00b2528e0278ae94cd386deb6116"
+                val allLangRequest = Request.Builder().url(allLangUrl).build()
+                client.newCall(allLangRequest).execute().use { tmdbResponse ->
+                    if (tmdbResponse.isSuccessful) {
+                        val tmdbJsonStr = tmdbResponse.body?.string() ?: return@use
+                        val tmdbJson = JSONObject(tmdbJsonStr)
+                        if (tmdbJson.has("logos")) {
+                            val logosArray = tmdbJson.getJSONArray("logos")
+                            if (logosArray.length() > 0) {
+                                val filePath = logosArray.getJSONObject(0).optString("file_path", "")
+                                if (filePath.isNotEmpty()) {
+                                    return "https://image.tmdb.org/t/p/original$filePath"
                                 }
                             }
                         }
                     }
-                } catch (e: Exception) {}
+                }
+            } catch (_: Exception) {}
+            return ""
+        }
+
+        // 1. Try TMDB logo for targetType
+        if (tmdbId != null && tmdbId > 0) {
+            val logo = queryTmdbLogo(targetType, tmdbId)
+            if (logo.isNotEmpty()) return@withContext logo
+
+            // Fallback: try alternate media type (movie <-> tv)
+            val altType = if (targetType == "movie") "tv" else "movie"
+            val altLogo = queryTmdbLogo(altType, tmdbId)
+            if (altLogo.isNotEmpty()) {
+                if (altType == "movie") {
+                    AnimeMovieTmdbMapping.setDynamicType(anilistId, "movie")
+                    AnimeMovieTmdbMapping.setDynamicMapping(anilistId, tmdbId, "movie")
+                }
+                return@withContext altLogo
             }
         }
 
@@ -268,6 +464,54 @@ object AniZipClient {
         return@withContext ""
     }
 
+    private val animeCoverCache = android.util.LruCache<Int, String>(100)
+
+    suspend fun getAnimeCover(anilistId: Int): String = withContext(Dispatchers.IO) {
+        if (ShinChanEpisodeProvider.isShinChan(anilistId)) {
+            return@withContext ShinChanEpisodeProvider.SHINCHAN_POSTER_URL
+        }
+        val cached = animeCoverCache.get(anilistId)
+        if (cached != null && cached.isNotEmpty()) return@withContext cached
+
+        try {
+            val aniJson = getAniZipJson(anilistId)
+            if (aniJson != null && aniJson.has("images")) {
+                val images = aniJson.getJSONArray("images")
+                for (i in 0 until images.length()) {
+                    val img = images.getJSONObject(i)
+                    val imgType = img.optString("image_type", img.optString("type", ""))
+                    if (imgType.equals("poster", ignoreCase = true) || imgType.equals("cover", ignoreCase = true)) {
+                        val url = img.optString("image_url", img.optString("url", ""))
+                        if (url.isNotBlank()) {
+                            animeCoverCache.put(anilistId, url)
+                            return@withContext url
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        // Fallback to AniList
+        try {
+            val aniCover = AniListClient.getAnimeCover(anilistId)
+            if (aniCover.isNotBlank()) {
+                animeCoverCache.put(anilistId, aniCover)
+                return@withContext aniCover
+            }
+        } catch (_: Exception) {}
+
+        // Fallback to Kitsu
+        try {
+            val detail = KitsuClient.getAnimeDetail(anilistId)
+            if (detail != null && detail.coverUrl.isNotBlank()) {
+                animeCoverCache.put(anilistId, detail.coverUrl)
+                return@withContext detail.coverUrl
+            }
+        } catch (_: Exception) {}
+
+        return@withContext ""
+    }
+
     private val animeBackdropCache = android.util.LruCache<Int, String>(100)
 
     suspend fun getAnimeBackdropUrl(anilistId: Int): String = withContext(Dispatchers.IO) {
@@ -293,48 +537,53 @@ object AniZipClient {
             tmdbId = getTmdbIdFromFribb(anilistId)
         }
 
+        val dynamicType = AnimeMovieTmdbMapping.getDynamicTmdbType(anilistId)
+        val targetType = when {
+            dynamicType != null -> dynamicType.lowercase()
+            AnimeMovieTmdbMapping.isStaticMovie(anilistId) -> "movie"
+            else -> "tv"
+        }
+
         // 1. Check TMDB backdrops
         if (tmdbId != null && tmdbId > 0) {
-            for (type in listOf("tv", "movie")) {
-                // Check direct show details first
-                try {
-                    val detailsUrl = "https://api.themoviedb.org/3/$type/$tmdbId?api_key=5a7f00b2528e0278ae94cd386deb6116"
-                    val req = Request.Builder().url(detailsUrl).build()
-                    client.newCall(req).execute().use { resp ->
-                        if (resp.isSuccessful) {
-                            val json = JSONObject(resp.body?.string() ?: "")
-                            val backdrop = json.optString("backdrop_path", "")
-                            if (backdrop.isNotEmpty() && backdrop != "null") {
-                                val url = "https://image.tmdb.org/t/p/w780$backdrop"
-                                animeBackdropCache.put(anilistId, url)
-                                return@withContext url
-                            }
+            // Check direct show details first
+            try {
+                val detailsUrl = "https://api.themoviedb.org/3/$targetType/$tmdbId?api_key=5a7f00b2528e0278ae94cd386deb6116"
+                val req = Request.Builder().url(detailsUrl).build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val json = JSONObject(resp.body?.string() ?: "")
+                        val backdrop = json.optString("backdrop_path", "")
+                        if (backdrop.isNotEmpty() && backdrop != "null") {
+                            val url = "https://image.tmdb.org/t/p/w780$backdrop"
+                            animeBackdropCache.put(anilistId, url)
+                            return@withContext url
                         }
                     }
-                } catch (_: Exception) {}
+                }
+            } catch (_: Exception) {}
 
-                val tmdbUrl = "https://api.themoviedb.org/3/$type/$tmdbId/images?api_key=5a7f00b2528e0278ae94cd386deb6116"
-                val tmdbRequest = Request.Builder().url(tmdbUrl).build()
-                try {
-                    client.newCall(tmdbRequest).execute().use { tmdbResponse ->
-                        if (tmdbResponse.isSuccessful) {
-                            val tmdbJsonStr = tmdbResponse.body?.string() ?: return@use
-                            val tmdbJson = JSONObject(tmdbJsonStr)
-                            if (tmdbJson.has("backdrops")) {
-                                val backdrops = tmdbJson.getJSONArray("backdrops")
-                                if (backdrops.length() > 0) {
-                                    val filePath = backdrops.getJSONObject(0).optString("file_path", "")
-                                    if (filePath.isNotEmpty()) {
-                                        val url = "https://image.tmdb.org/t/p/w780$filePath"
-                                        animeBackdropCache.put(anilistId, url)
-                                        return@withContext url
-                                    }
+            val tmdbUrl = "https://api.themoviedb.org/3/$targetType/$tmdbId/images?api_key=5a7f00b2528e0278ae94cd386deb6116"
+            val tmdbRequest = Request.Builder().url(tmdbUrl).build()
+            try {
+                client.newCall(tmdbRequest).execute().use { tmdbResponse ->
+                    if (tmdbResponse.isSuccessful) {
+                        val tmdbJsonStr = tmdbResponse.body?.string() ?: return@use
+                        val tmdbJson = JSONObject(tmdbJsonStr)
+                        if (tmdbJson.has("backdrops")) {
+                            val backdrops = tmdbJson.getJSONArray("backdrops")
+                            if (backdrops.length() > 0) {
+                                val filePath = backdrops.getJSONObject(0).optString("file_path", "")
+                                if (filePath.isNotEmpty()) {
+                                    val url = "https://image.tmdb.org/t/p/w780$filePath"
+                                    animeBackdropCache.put(anilistId, url)
+                                    return@withContext url
                                 }
                             }
                         }
                     }
-                } catch (e: Exception) {}
-            }
+                }
+            } catch (_: Exception) {}
         }
 
         // 2. Check AniZip / TVDB Fanart or Banner images
@@ -554,13 +803,25 @@ object AniZipClient {
         if (anilistId == 129201) {
             return@withContext "https://image.tmdb.org/t/p/original/1czz0r7urqCPP0CZTAEkCk4TZY1.jpg"
         }
-        val targetMediaType = if (isMovie) "movie" else "tv"
+        val staticMovieTmdb = AnimeMovieTmdbMapping.getMovieTmdbId(anilistId)
+        if (staticMovieTmdb != null && staticMovieTmdb > 0) {
+            val verified = verifyTmdbIsAnime(staticMovieTmdb, "movie")
+            if (!verified.isNullOrEmpty()) {
+                return@withContext verified
+            }
+        }
+        val targetMediaType = if (isMovie || staticMovieTmdb != null) "movie" else "tv"
         try {
             // Step 1: Check AniZip mapping with Anime Verification (Animation genre / Japan country & strict media type)
             val json = getAniZipJson(anilistId)
             var anizipTmdbId = 0
+            var anizipIsMovie = false
             if (json != null && json.has("mappings")) {
                 val mappings = json.getJSONObject("mappings")
+                if (mappings.optString("type", "").equals("MOVIE", ignoreCase = true)) {
+                    anizipIsMovie = true
+                    AnimeMovieTmdbMapping.setDynamicType(anilistId, "movie")
+                }
                 anizipTmdbId = try {
                     mappings.getString("themoviedb_id").toIntOrNull() ?: 0
                 } catch (e: Exception) {
@@ -568,19 +829,39 @@ object AniZipClient {
                 }
             }
 
+            val effectiveMediaType = if (targetMediaType == "movie" || anizipIsMovie) "movie" else "tv"
+
             if (anizipTmdbId > 0) {
-                val verifiedBackdrop = verifyTmdbIsAnime(anizipTmdbId, targetMediaType)
+                val verifiedBackdrop = verifyTmdbIsAnime(anizipTmdbId, effectiveMediaType)
                 if (!verifiedBackdrop.isNullOrEmpty()) {
+                    if (effectiveMediaType == "movie") {
+                        AnimeMovieTmdbMapping.setDynamicMapping(anilistId, anizipTmdbId, "movie")
+                    }
                     return@withContext verifiedBackdrop
+                }
+                // Fallback: try alternate media type (movie <-> tv)
+                val altMediaType = if (effectiveMediaType == "movie") "tv" else "movie"
+                val altBackdrop = verifyTmdbIsAnime(anizipTmdbId, altMediaType)
+                if (!altBackdrop.isNullOrEmpty()) {
+                    if (altMediaType == "movie") {
+                        AnimeMovieTmdbMapping.setDynamicType(anilistId, "movie")
+                        AnimeMovieTmdbMapping.setDynamicMapping(anilistId, anizipTmdbId, "movie")
+                    }
+                    return@withContext altBackdrop
                 }
             }
 
             // Step 2: Fallback to Fribb's list if AniZip TMDB was wrong or not anime
-            val fribbTmdbId = getTmdbIdFromFribb(anilistId, isMovie = isMovie) ?: 0
+            val fribbTmdbId = getTmdbIdFromFribb(anilistId, isMovie = isMovie || anizipIsMovie) ?: 0
             if (fribbTmdbId > 0 && fribbTmdbId != anizipTmdbId) {
-                val fribbBackdrop = verifyTmdbIsAnime(fribbTmdbId, targetMediaType)
+                val fribbBackdrop = verifyTmdbIsAnime(fribbTmdbId, effectiveMediaType)
                 if (!fribbBackdrop.isNullOrEmpty()) {
                     return@withContext fribbBackdrop
+                }
+                val altMediaType = if (effectiveMediaType == "movie") "tv" else "movie"
+                val altBackdrop = verifyTmdbIsAnime(fribbTmdbId, altMediaType)
+                if (!altBackdrop.isNullOrEmpty()) {
+                    return@withContext altBackdrop
                 }
             }
         } catch (e: Exception) {
@@ -621,6 +902,9 @@ object AniZipClient {
     }
 
     suspend fun getBestBackdropUrl(anilistId: Int, anilistBanner: String = "", isMovie: Boolean = false): String = withContext(Dispatchers.IO) {
+        if (ShinChanEpisodeProvider.isShinChan(anilistId)) {
+            return@withContext ShinChanEpisodeProvider.SHINCHAN_BACKDROP_URL
+        }
         // Priority 1: TMDB backdrop with strict Movie vs TV anime verification
         val tmdbBackdrop = getTmdbBackdropUrl(anilistId, isMovie = isMovie)
         if (tmdbBackdrop.isNotEmpty()) {
@@ -644,6 +928,8 @@ object AniZipClient {
     }
 
     suspend fun getTmdbId(anilistId: Int): Int? = withContext(Dispatchers.IO) {
+        val staticMovieTmdb = AnimeMovieTmdbMapping.getMovieTmdbId(anilistId)
+        if (staticMovieTmdb != null && staticMovieTmdb > 0) return@withContext staticMovieTmdb
         try {
             val json = getAniZipJson(anilistId)
             if (json != null && json.has("mappings")) {
@@ -750,13 +1036,62 @@ object AniZipClient {
         resultMap
     }
 
-    fun getLongRunningTmdbId(anilistId: Int): Int? = when (anilistId) {
+    fun getLongRunningTmdbId(anilistId: Int): Int? {
+        if (ShinChanEpisodeProvider.isShinChan(anilistId)) return null
+        return AnimeMovieTmdbMapping.getMovieTmdbId(anilistId) ?: when (anilistId) {
         21 -> 37854    // One Piece
-        235 -> 30983   // Detective Conan
+        235 -> 30983   // Detective Conan / Case Closed
         20 -> 46260    // Naruto
         1735 -> 31910  // Naruto Shippuden
+        269 -> 30984   // Bleach
+        918 -> 57243   // Gintama
+        527 -> 60572   // Pokemon
+        158871 -> 220150 // Pokemon Horizons: The Series (2023)
+        12031 -> 61663 // Fairy Tail
+        223 -> 34747   // Dragon Ball
+        813 -> 12697   // Dragon Ball Z
+        6702 -> 34748  // Fairy Tail (2009)
+        1316 -> 44872  // Idaten Jump
+        1319 -> 44872  // Idaten Jump (alias)
+        // Kiteretsu Daihyakka (331 eps)
+        6509 -> 80609
+        2021 -> 80609
+
+        // Chinpui / Chimpui (56 eps / 112 segments)
+        5908 -> 65719
+        2300 -> 65719
+
+        // Monster Kid / Kaibutsu-kun (1980: 94/188 eps | 1968: 49 eps)
+        3130 -> 66251   // 1980 color series (Latest near version)
+        4094 -> 66251
+        3129 -> 204045  // 1968 B&W series
+        5898 -> 204045
+
+        // Ultra B (119 eps)
+        10250 -> 207937
+        4216 -> 207937
+
+        // Tsurupika Hagemaru-kun (59 eps)
+        5830 -> 209246
+        3272 -> 209246
+
+        // Ninja Hattori-kun (1981: 694 eps | 2012: 52/104 eps)
+        4936 -> 158198   // Ninja Hattori-kun Returns (mapped to TMDB 158198)
+        3949 -> 158198
+        18845 -> 158198
+        158198 -> 158198
+        83307 -> 158198
+        80885 -> 80885
+
+        // Perman (1983: 526 eps | 1967: 54 eps)
+        11595 -> 132791 // 1983 color series (Latest near version)
+        2022 -> 132791
+        132791 -> 132791
+        6303 -> 65739   // 1967 B&W series
+        6566 -> 65739
         else -> null
     }
+}
 }
 
 data class EpisodeMeta(

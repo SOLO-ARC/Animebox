@@ -17,9 +17,15 @@ import androidx.activity.OnBackPressedCallback
 import kotlin.OptIn
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -73,6 +79,7 @@ import kotlinx.coroutines.delay
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import org.json.JSONObject
+import org.json.JSONArray
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
@@ -85,6 +92,16 @@ import androidx.compose.foundation.verticalScroll
 import coil3.compose.rememberAsyncImagePainter
 import android.app.Activity
 import android.content.ContextWrapper
+
+data class PendingPublicSubData(
+    val anilistId: Int,
+    val episodeNum: Int,
+    val animeTitle: String,
+    val langCode: String,
+    val langName: String,
+    val vttContent: String,
+    val uploaderName: String
+)
 
 fun Context.findActivity(): Activity? {
     var ctx = this
@@ -122,6 +139,45 @@ data class FallbackDialogData(
     val primaryButtonText: String,
     val onPrimaryAction: () -> Unit
 )
+
+val AiSparklesIcon: ImageVector
+    get() = ImageVector.Builder(
+        name = "AiSparkles",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).path(
+        fill = SolidColor(Color.White)
+    ) {
+        moveTo(19f, 9f)
+        lineTo(20.25f, 6.25f)
+        lineTo(23f, 5f)
+        lineTo(20.25f, 3.75f)
+        lineTo(19f, 1f)
+        lineTo(17.75f, 3.75f)
+        lineTo(15f, 5f)
+        lineTo(17.75f, 6.25f)
+        close()
+        moveTo(9f, 18f)
+        lineTo(6.5f, 12.5f)
+        lineTo(1f, 10f)
+        lineTo(6.5f, 7.5f)
+        lineTo(9f, 2f)
+        lineTo(11.5f, 7.5f)
+        lineTo(17f, 10f)
+        lineTo(11.5f, 12.5f)
+        close()
+        moveTo(19f, 15f)
+        lineTo(17.75f, 17.75f)
+        lineTo(15f, 19f)
+        lineTo(17.75f, 20.25f)
+        lineTo(19f, 23f)
+        lineTo(20.25f, 20.25f)
+        lineTo(23f, 19f)
+        lineTo(20.25f, 17.75f)
+        close()
+    }.build()
 
 val YtPopupDownloadIcon: ImageVector
     get() = ImageVector.Builder(
@@ -269,6 +325,7 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        isCurrentlyInPip = false
 
         // Handle back button properly
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -325,7 +382,33 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
         val fromContinueWatching = intent.getBooleanExtra("fromContinueWatching", false)
 
         setContent {
-            MaterialTheme {
+            val playerThemeColor = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.getPrimaryColor(this@AnimeBoxPlayerActivity)
+            MaterialTheme(
+                colorScheme = darkColorScheme(
+                    primary = playerThemeColor,
+                    background = Color(0xFF000000),
+                    surface = Color(0xFF16161A)
+                ),
+                typography = androidx.compose.material3.Typography().copy(
+                    bodyLarge = androidx.compose.ui.text.TextStyle(fontFamily = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.MotoGoogleSansFontFamily),
+                    bodyMedium = androidx.compose.ui.text.TextStyle(fontFamily = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.MotoGoogleSansFontFamily),
+                    bodySmall = androidx.compose.ui.text.TextStyle(fontFamily = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.MotoGoogleSansFontFamily),
+                    titleLarge = androidx.compose.ui.text.TextStyle(fontFamily = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.MotoGoogleSansFontFamily),
+                    titleMedium = androidx.compose.ui.text.TextStyle(fontFamily = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.MotoGoogleSansFontFamily),
+                    titleSmall = androidx.compose.ui.text.TextStyle(fontFamily = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.MotoGoogleSansFontFamily),
+                    labelLarge = androidx.compose.ui.text.TextStyle(fontFamily = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.MotoGoogleSansFontFamily),
+                    labelMedium = androidx.compose.ui.text.TextStyle(fontFamily = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.MotoGoogleSansFontFamily),
+                    labelSmall = androidx.compose.ui.text.TextStyle(fontFamily = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.MotoGoogleSansFontFamily),
+                    headlineLarge = androidx.compose.ui.text.TextStyle(fontFamily = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.MotoGoogleSansFontFamily),
+                    headlineMedium = androidx.compose.ui.text.TextStyle(fontFamily = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.MotoGoogleSansFontFamily),
+                    headlineSmall = androidx.compose.ui.text.TextStyle(fontFamily = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.MotoGoogleSansFontFamily),
+                    displayLarge = androidx.compose.ui.text.TextStyle(fontFamily = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.MotoGoogleSansFontFamily),
+                    displayMedium = androidx.compose.ui.text.TextStyle(fontFamily = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.MotoGoogleSansFontFamily),
+                    displaySmall = androidx.compose.ui.text.TextStyle(fontFamily = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.MotoGoogleSansFontFamily)
+                )
+            ) {
+                val isOfflineDownload = intent.getBooleanExtra("isOffline", false)
+                val isExternalPlayback = (isExternalAction || anilistId <= 0) && !isOfflineDownload
                 VideoPlayerScreen(
                     hlsUrl = hlsUrl,
                     referer = referer,
@@ -337,7 +420,8 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                     showCoverUrl = showCoverUrl,
                     totalEpisodes = totalEpisodes,
                     streamType = streamType,
-                    fromContinueWatching = fromContinueWatching
+                    fromContinueWatching = fromContinueWatching,
+                    isExternalAction = isExternalPlayback
                 )
             }
         }
@@ -356,12 +440,17 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
         showCoverUrl: String,
         totalEpisodes: Int,
         streamType: String,
-        fromContinueWatching: Boolean
+        fromContinueWatching: Boolean,
+        isExternalAction: Boolean = false
     ) {
         val context = LocalContext.current
         val historyManager = remember { WatchHistoryManager(context) }
         val coroutineScope = rememberCoroutineScope()
         val prefs = remember { getPrefs() }
+
+        fun canSaveHistory(targetAnilistId: Int): Boolean {
+            return !isExternalAction && targetAnilistId > 0
+        }
 
         // ─── Load persisted settings (Session retention or fresh default) ──────
         val activeAudioExtra = remember { (context as? android.app.Activity)?.intent?.getStringExtra("activeAudio") }
@@ -475,6 +564,45 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
         var currentHlsUrl by remember { mutableStateOf(hlsUrl) }
         var currentReferer by remember { mutableStateOf(referer) }
         var currentSubtitleUrl by remember { mutableStateOf(subtitleUrl) }
+        var currentProvider by remember { mutableStateOf((context as? android.app.Activity)?.intent?.getStringExtra("provider") ?: "") }
+        val originalSubtitleUrl = remember(subtitleUrl, currentEpisodeNum) { subtitleUrl }
+        var liveSubtitleCues by remember { mutableStateOf<List<com.lagradost.cloudstream3.ui.animebox.api.LiveSubtitleCue>>(emptyList()) }
+        var showSaveToPublicCard by remember { mutableStateOf(false) }
+        var pendingPublicSubInfo by remember { mutableStateOf<PendingPublicSubData?>(null) }
+        var publicSubtitlesList by remember { mutableStateOf<List<com.lagradost.cloudstream3.ui.animebox.api.PublicSubtitleItem>>(emptyList()) }
+
+        LaunchedEffect(currentAnilistId, currentEpisodeNum) {
+            liveSubtitleCues = emptyList()
+            showSaveToPublicCard = false
+            pendingPublicSubInfo = null
+            if (currentAnilistId > 0 && currentEpisodeNum > 0) {
+                val publicSubs = com.lagradost.cloudstream3.ui.animebox.api.PublicSubtitlesManager.fetchPublicSubtitles(currentAnilistId, currentEpisodeNum)
+                publicSubtitlesList = publicSubs
+            }
+            if (currentAnilistId > 0 && (currentShowCoverUrl.isBlank() || currentShowCoverUrl.contains("backdrop", ignoreCase = true) || currentShowCoverUrl.contains("banner", ignoreCase = true))) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val details = com.lagradost.cloudstream3.ui.animebox.api.AniListClient.getAnimeDetails(currentAnilistId)
+                    if (details != null) {
+                        try {
+                            val media = org.json.JSONObject(details).getJSONObject("data").getJSONObject("Media")
+                            val coverObj = media.optJSONObject("coverImage")
+                            val p = coverObj?.optString("extraLarge", coverObj.optString("large", "")) ?: ""
+                            if (p.isNotBlank()) {
+                                currentShowCoverUrl = p
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+        }
+
+        LaunchedEffect(showSaveToPublicCard, pendingPublicSubInfo) {
+            if (showSaveToPublicCard && pendingPublicSubInfo != null) {
+                delay(18000L)
+                showSaveToPublicCard = false
+            }
+        }
+
         var currentBackupHls by remember { mutableStateOf((context as? android.app.Activity)?.intent?.getStringExtra("backupHls") ?: "") }
         var currentBackupProvider by remember { mutableStateOf((context as? android.app.Activity)?.intent?.getStringExtra("backupProvider") ?: "") }
         
@@ -517,6 +645,33 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
             hlsUrl.startsWith("content://") || hlsUrl.startsWith("file://") || hlsUrl.startsWith("/")
         }
         var currentStreamType by remember { mutableStateOf(initialStreamType) }
+        var subPreset by remember { mutableStateOf(prefs.getString("subPreset", "Default") ?: "Default") }
+        var selectedSub by remember {
+            mutableStateOf(
+                if (isOfflineMode) {
+                    if (currentStreamType == "hardsub") "Hard Sub" else "English (VTT)"
+                } else if (currentStreamType == "hardsub" && subtitleUrl.isNotEmpty() && (referer.contains("animeapps", ignoreCase = true) || referer.contains("anibd", ignoreCase = true) || currentProvider.contains("anibd", ignoreCase = true) || currentProvider.contains("anidb", ignoreCase = true))) {
+                    "English (Soft Sub)"
+                } else if (com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isRememberPlaybackPrefsEnabled(context)) {
+                    rememberedSubMode
+                } else {
+                    savedSub
+                }
+            )
+        }
+        var selectedAudio by remember {
+            mutableStateOf(
+                if (showAudioFallbackWarningExtra) {
+                    "Japanese (Original)"
+                } else if (activeAudioExtra != null) {
+                    if (streamType == "dub") "English" else if (streamType == "hindi") "Hindi" else "Japanese (Original)"
+                } else if (com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isRememberPlaybackPrefsEnabled(context)) {
+                    if (currentStreamType == "sub" && rememberedAudio == "English") "Japanese (Original)" else rememberedAudio
+                } else {
+                    savedAudio
+                }
+            )
+        }
         var isReloadingStream by remember { mutableStateOf(false) }
         var fallbackDialogData by remember { mutableStateOf<FallbackDialogData?>(null) }
         var showStreamReportPill by remember { mutableStateOf(false) }
@@ -543,33 +698,88 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                         val fbHls = fbMap["hls"] as String
                         currentHlsUrl = fbHls
                         currentReferer = (fbMap["referer"] as? String) ?: ""
+                        currentProvider = (fbMap["provider"] as? String) ?: ""
                         val fbSub = (fbMap["subtitle"] as? String) ?: ""
                         if (fbSub.isNotEmpty()) {
                             currentSubtitleUrl = fbSub
                         }
                     } else {
-                        fallbackDialogData = FallbackDialogData(
-                            title = "Anime not found or stream unavailable",
-                            description = "Try changing the language, it may work.",
-                            primaryButtonText = "Retry",
-                            onPrimaryAction = {
-                                isReloadingStream = true
-                                coroutineScope.launch {
-                                    val fbMap = fetchStreamInfo(anilistId, currentEpisodeNum, currentStreamType)
-                                    isReloadingStream = false
-                                    if (fbMap != null && (fbMap["hls"] as? String)?.isNotEmpty() == true) {
-                                        currentHlsUrl = fbMap["hls"] as String
-                                        currentReferer = (fbMap["referer"] as? String) ?: ""
-                                        val fbSub = (fbMap["subtitle"] as? String) ?: ""
-                                        if (fbSub.isNotEmpty()) {
-                                            currentSubtitleUrl = fbSub
+                        if (currentStreamType == "sub") {
+                            fallbackDialogData = FallbackDialogData(
+                                title = "Soft Sub Stream Unavailable",
+                                description = "Soft subtitle stream could not be loaded for Episode $currentEpisodeNum. Would you like to switch to Hard Sub?",
+                                primaryButtonText = "Switch to Hard Sub",
+                                onPrimaryAction = {
+                                    currentStreamType = "hardsub"
+                                    isReloadingStream = true
+                                    coroutineScope.launch {
+                                        val hsMap = fetchStreamInfo(anilistId, currentEpisodeNum, "hardsub")
+                                        isReloadingStream = false
+                                        if (hsMap != null && (hsMap["hls"] as? String)?.isNotEmpty() == true) {
+                                            currentHlsUrl = hsMap["hls"] as String
+                                            currentReferer = (hsMap["referer"] as? String) ?: ""
+                                            currentProvider = (hsMap["provider"] as? String) ?: ""
+                                            val subUrl = (hsMap["subtitle"] as? String) ?: ""
+                                            val isAniDb = currentProvider.contains("anibd", ignoreCase = true) || currentProvider.contains("anidb", ignoreCase = true) || currentReferer.contains("animeapps", ignoreCase = true) || currentReferer.contains("anibd", ignoreCase = true)
+                                            if (isAniDb && subUrl.isNotEmpty()) {
+                                                currentSubtitleUrl = subUrl
+                                                subPreset = "Hardsub"
+                                                prefs.edit().putString("subPreset", "Hardsub").apply()
+                                                selectedSub = "English (Soft Sub)"
+                                                prefs.edit().putString("selectedSub", "English (Soft Sub)").apply()
+                                            } else {
+                                                currentSubtitleUrl = ""
+                                                selectedSub = "Hard Sub"
+                                            }
+                                        } else {
+                                            android.widget.Toast.makeText(context, "Hard Sub stream not available", android.widget.Toast.LENGTH_SHORT).show()
                                         }
                                     }
                                 }
-                            }
-                        )
+                            )
+                        } else {
+                            fallbackDialogData = FallbackDialogData(
+                                title = "Anime not found or stream unavailable",
+                                description = "Try changing the language, it may work.",
+                                primaryButtonText = "Retry",
+                                onPrimaryAction = {
+                                    isReloadingStream = true
+                                    coroutineScope.launch {
+                                        val retryMap = fetchStreamInfo(anilistId, currentEpisodeNum, currentStreamType)
+                                        isReloadingStream = false
+                                        if (retryMap != null && (retryMap["hls"] as? String)?.isNotEmpty() == true) {
+                                            currentHlsUrl = retryMap["hls"] as String
+                                            currentReferer = (retryMap["referer"] as? String) ?: ""
+                                            currentProvider = (retryMap["provider"] as? String) ?: ""
+                                            val fbSub = (retryMap["subtitle"] as? String) ?: ""
+                                            if (fbSub.isNotEmpty()) {
+                                                currentSubtitleUrl = fbSub
+                                            }
+                                        }
+                                    }
+                                }
+                            )
+                        }
                         showStreamReportPill = true
                     }
+                }
+            }
+        }
+
+        LaunchedEffect(currentHlsUrl, currentStreamType, currentProvider, currentSubtitleUrl) {
+            val isAniDb = currentProvider.contains("anibd", ignoreCase = true) ||
+                    currentProvider.contains("anidb", ignoreCase = true) ||
+                    currentReferer.contains("animeapps", ignoreCase = true) ||
+                    currentReferer.contains("anibd", ignoreCase = true)
+
+            if (isAniDb && (currentStreamType == "hardsub" || selectedSub.contains("Hard Sub", ignoreCase = true)) && currentSubtitleUrl.isNotEmpty()) {
+                if (!subPreset.equals("Hardsub", ignoreCase = true)) {
+                    subPreset = "Hardsub"
+                    prefs.edit().putString("subPreset", "Hardsub").apply()
+                }
+                if (selectedSub.contains("Hard Sub", ignoreCase = true) || selectedSub == "Off") {
+                    selectedSub = "English (Soft Sub)"
+                    prefs.edit().putString("selectedSub", "English (Soft Sub)").apply()
                 }
             }
         }
@@ -594,23 +804,17 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
         var subTextColor by remember { mutableStateOf(savedTextColor) }
         var subBgOpacity by remember { mutableStateOf(savedBgOpacity) }
         var subEdgeType by remember { mutableIntStateOf(prefs.getInt("subEdgeType", androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE)) }
-        var subPreset by remember { mutableStateOf(prefs.getString("subPreset", "Default") ?: "Default") }
         var showSubtitleStyleSettings by remember { mutableStateOf(false) }
         var showCastDialog by remember { mutableStateOf(false) }
+
+        LaunchedEffect(showCastDialog) {
+            if (showCastDialog) {
+                delay(7000L)
+                showCastDialog = false
+            }
+        }
         var isExternalAction = remember { (context as? android.app.Activity)?.intent?.action == Intent.ACTION_VIEW }
         var playerViewInstance by remember { mutableStateOf<PlayerView?>(null) }
-        // Use outer state (not shadowed) for selected audio/sub
-        var selectedSub by remember {
-            mutableStateOf(
-                if (isOfflineMode) {
-                    if (currentStreamType == "hardsub") "Hard Sub" else "English (VTT)"
-                } else if (com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isRememberPlaybackPrefsEnabled(context)) {
-                    rememberedSubMode
-                } else {
-                    savedSub
-                }
-            )
-        }
 
         val subtitlePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
             contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
@@ -629,19 +833,6 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                 selectedSub = fileName
                 android.widget.Toast.makeText(context, "Loaded subtitle: $fileName", android.widget.Toast.LENGTH_SHORT).show()
             }
-        }
-        var selectedAudio by remember {
-            mutableStateOf(
-                if (showAudioFallbackWarningExtra) {
-                    "Japanese (Original)"
-                } else if (activeAudioExtra != null) {
-                    if (streamType == "dub") "English" else if (streamType == "hindi") "Hindi" else "Japanese (Original)"
-                } else if (com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isRememberPlaybackPrefsEnabled(context)) {
-                    if (currentStreamType == "sub" && rememberedAudio == "English") "Japanese (Original)" else rememberedAudio
-                } else {
-                    savedAudio
-                }
-            )
         }
         
         val hindiJsonStr = remember { (context as? android.app.Activity)?.intent?.getStringExtra("hindiStreamsJson") ?: "" }
@@ -663,6 +854,39 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
             )
         }
         var currentHindiIndex by remember { mutableStateOf(0) }
+
+        // ─── Special Thanking Banner State (Shin Chan & Pokémon) ─────────
+        val isShinChanContent = remember(currentAnilistId, currentAnimeTitle) {
+            com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.isShinChan(currentAnilistId, currentAnimeTitle)
+        }
+        val isPokemonContent = remember(currentAnilistId, currentAnimeTitle) {
+            currentAnilistId == 527 || com.lagradost.cloudstream3.ui.animebox.extractors.PokemonHindiExtractor.isPokemon(currentAnilistId, currentAnimeTitle)
+        }
+
+        val isThankingAudioActive = when {
+            isShinChanContent -> (selectedAudio.contains("Japanese", ignoreCase = true) || selectedSub.contains("Hard Sub", ignoreCase = true) || currentStreamType != "hindi")
+            isPokemonContent -> (selectedAudio.equals("Hindi", ignoreCase = true) || currentStreamType == "hindi")
+            else -> false
+        }
+
+        var showThankingBanner by remember { mutableStateOf(false) }
+        var hasShownThankingForEpisode by remember { mutableStateOf<String?>(null) }
+
+        // Trigger on playback start with matching audio and auto-hide in 5.5 to 6 seconds.
+        // Seeking 10s forward/backward or pause/play will NOT re-trigger this.
+        LaunchedEffect(currentEpisodeNum, isThankingAudioActive, isPlaying) {
+            val sessionKey = "${currentEpisodeNum}_${isThankingAudioActive}"
+            if (isPlaying && isThankingAudioActive) {
+                if (hasShownThankingForEpisode != sessionKey) {
+                    hasShownThankingForEpisode = sessionKey
+                    showThankingBanner = true
+                    delay(5800)
+                    showThankingBanner = false
+                }
+            } else if (!isThankingAudioActive) {
+                showThankingBanner = false
+            }
+        }
 
         val dubJsonStr = remember { (context as? android.app.Activity)?.intent?.getStringExtra("dubStreamsJson") ?: "" }
         var dubStreamsList by remember {
@@ -704,9 +928,21 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
 
         var showMorePanel by remember { mutableStateOf(false) }
 
-        // Dynamic Quality & Graphics Upscaler
+        // Dynamic Quality & AI Graphics Enhancer
         var videoTrackHeights by remember { mutableStateOf<List<Int>>(emptyList()) }
         var isGraphicsUpscalerEnabled by remember { mutableStateOf(prefs.getBoolean("graphics_upscaler_enabled", false)) }
+        var enhancerPreset by remember {
+            mutableStateOf(
+                com.lagradost.cloudstream3.ui.animebox.enhancer.EnhancerPreset.fromId(
+                    prefs.getString("enhancer_preset_id", com.lagradost.cloudstream3.ui.animebox.enhancer.EnhancerPreset.ULTRA_CLARITY.id) ?: "ultra_clarity"
+                )
+            )
+        }
+        var enhancerSharpness by remember { mutableFloatStateOf(prefs.getFloat("enhancer_sharpness", 0.20f)) }
+        var enhancerContrast by remember { mutableFloatStateOf(prefs.getFloat("enhancer_contrast", 1.06f)) }
+        var enhancerSaturation by remember { mutableFloatStateOf(prefs.getFloat("enhancer_saturation", 1.06f)) }
+        var enhancerLineClarity by remember { mutableFloatStateOf(prefs.getFloat("enhancer_line_clarity", 0.40f)) }
+        var showShaderSettings by remember { mutableStateOf(false) }
         val deviceSpecs = remember {
             val cores = Runtime.getRuntime().availableProcessors()
             val maxMemMb = (Runtime.getRuntime().maxMemory() / (1024 * 1024)).toInt()
@@ -714,10 +950,48 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
             Triple(cores, maxMemMb, tier)
         }
 
-        // Subtitle auto-translation state
+        // Subtitle auto-translation & on-device AI model states
         var isTranslatingSub by remember { mutableStateOf(false) }
         var showTranslateSubDialog by remember { mutableStateOf(false) }
         var translatedSubMap by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+        var modelDownloadPrompt by remember { mutableStateOf<com.lagradost.cloudstream3.ui.animebox.api.AiModelInfo?>(null) }
+        var localModelWarningPrompt by remember { mutableStateOf<com.lagradost.cloudstream3.ui.animebox.api.AiModelInfo?>(null) }
+        var speechApiNoticeMessage by remember { mutableStateOf<String?>(null) }
+        var showSpeechApiNoticeBanner by remember { mutableStateOf(false) }
+        var activeModelDownloadProgress by remember { mutableStateOf<com.lagradost.cloudstream3.ui.animebox.api.ModelDownloadProgress?>(null) }
+        var activeModelDownloadJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+        LaunchedEffect(showSpeechApiNoticeBanner) {
+            if (showSpeechApiNoticeBanner) {
+                kotlinx.coroutines.delay(6000L)
+                showSpeechApiNoticeBanner = false
+            }
+        }
+
+        LaunchedEffect(anilistId, currentEpisodeNum) {
+            val savedSubs = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.getSavedSubtitlesForEpisode(context, anilistId, currentEpisodeNum)
+            val newMap = mutableMapOf<String, String>()
+            for (s in savedSubs) {
+                val label = if (s.langCode.equals("en", true)) "English (AI Translated)" else "${s.langName} (AI Translated)"
+                newMap[label] = s.filePath
+            }
+            translatedSubMap = newMap
+            val activePath = newMap[selectedSub]
+                ?: (if (selectedSub.contains("English", ignoreCase = true)) newMap["English (AI Translated)"] else null)
+                ?: (if (currentSubtitleUrl.isEmpty() && newMap.containsKey("English (AI Translated)")) newMap["English (AI Translated)"] else null)
+            if (activePath != null) {
+                val file = java.io.File(activePath)
+                if (file.exists() && file.length() > 150) {
+                    val cues = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.parseVttToCues(file.readText())
+                    if (cues.size >= 2) {
+                        liveSubtitleCues = cues
+                        if (!selectedSub.contains("Translated", ignoreCase = true) && !selectedSub.contains("AI", ignoreCase = true)) {
+                            selectedSub = newMap.entries.firstOrNull { it.value == activePath }?.key ?: "English (AI Translated)"
+                        }
+                    }
+                }
+            }
+        }
 
         // Resume dialog
         val savedProgress = remember(currentEpisodeNum, fromContinueWatching) {
@@ -735,6 +1009,20 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
             if (showStreamReportPill) {
                 delay(6000)
                 showStreamReportPill = false
+            }
+        }
+
+        LaunchedEffect(anilistId) {
+            if (anilistId > 0 && (animePosterUrl.isEmpty() || animePosterUrl.contains("backdrop", ignoreCase = true) || animePosterUrl.contains("banner", ignoreCase = true) || animePosterUrl.contains("episode", ignoreCase = true))) {
+                val realPoster = withContext(Dispatchers.IO) {
+                    val cover = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getAnimeCover(anilistId)
+                    if (cover.isNotEmpty()) cover else {
+                        com.lagradost.cloudstream3.ui.animebox.api.AniListClient.getAnimeCover(anilistId)
+                    }
+                }
+                if (realPoster.isNotEmpty()) {
+                    animePosterUrl = realPoster
+                }
             }
         }
 
@@ -758,27 +1046,36 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
 
                 if (streamInfo != null && (streamInfo["hls"] as? String)?.isNotEmpty() == true) {
                     val targetCover = withContext(Dispatchers.IO) {
-                        val tmdbId = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getLongRunningTmdbId(anilistId)
-                        if (tmdbId != null) {
-                            val allEps = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getTmdbAllEpisodes(tmdbId)
-                            allEps[targetEp]?.imageUrl ?: showCoverUrl
-                        } else {
-                            try {
-                                val mappingUrl = "https://api.ani.zip/mappings?anilist_id=$anilistId"
-                                val request = okhttp3.Request.Builder().url(mappingUrl).build()
-                                okhttp3.OkHttpClient().newCall(request).execute().use { response ->
-                                    if (response.isSuccessful) {
-                                        val j = JSONObject(response.body?.string() ?: "")
-                                        if (j.has("episodes")) {
-                                            val episodes = j.getJSONObject("episodes")
-                                            if (episodes.has(targetEp.toString())) {
-                                                episodes.getJSONObject(targetEp.toString()).optString("image", showCoverUrl)
-                                            } else showCoverUrl
-                                        } else showCoverUrl
-                                    } else showCoverUrl
-                                }
-                            } catch (e: Exception) { showCoverUrl }
+                        if (com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.isShinChan(anilistId)) {
+                            return@withContext com.lagradost.cloudstream3.ui.animebox.api.ShinChanSupabaseManager.getEpisodeCoverUrl(targetEp, context)
+                                ?: com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.SHINCHAN_BACKDROP_URL
                         }
+                        val isMovie = com.lagradost.cloudstream3.ui.animebox.api.AnimeMovieTmdbMapping.isStaticMovie(anilistId)
+                        var epImg = ""
+                        if (isMovie) {
+                            epImg = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getBestBackdropUrl(anilistId, isMovie = true)
+                        }
+                        if (epImg.isBlank()) {
+                            val tmdbId = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getLongRunningTmdbId(anilistId)
+                            if (tmdbId != null) {
+                                val allEps = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getTmdbAllEpisodes(tmdbId)
+                                epImg = allEps[targetEp]?.imageUrl ?: ""
+                            }
+                        }
+                        if (epImg.isBlank()) {
+                            try {
+                                val epMeta = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getEpisodeMetadata(anilistId)
+                                epImg = epMeta[targetEp]?.imageUrl ?: ""
+                            } catch (_: Exception) {}
+                        }
+                        if (epImg.isBlank()) {
+                            // Fallback to show backdrop so Continue Watching never shows a black box
+                            epImg = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getBestBackdropUrl(anilistId, isMovie = isMovie)
+                        }
+                        if (epImg.isBlank()) {
+                            epImg = showCoverUrl.ifEmpty { coverUrl }
+                        }
+                        epImg
                     }
 
                     currentEpisodeNum = targetEp
@@ -788,14 +1085,23 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                     startPosition = 0L
                     showResumeDialog = false
 
-                    historyManager.saveWatchProgress(
-                        anilistId = anilistId,
-                        animeTitle = animeTitle,
-                        coverImageUrl = targetCover,
-                        episodeNumber = targetEp,
-                        progressPositionMs = 1000L,
-                        totalDurationMs = 1440000L
-                    )
+                    if (canSaveHistory(anilistId)) {
+                        val validPortraitPoster = when {
+                            animePosterUrl.isNotBlank() && !animePosterUrl.contains("backdrop", ignoreCase = true) && !animePosterUrl.contains("banner", ignoreCase = true) && !animePosterUrl.contains("episode", ignoreCase = true) -> animePosterUrl
+                            showCoverUrl.isNotBlank() && !showCoverUrl.contains("backdrop", ignoreCase = true) && !showCoverUrl.contains("banner", ignoreCase = true) && !showCoverUrl.contains("episode", ignoreCase = true) -> showCoverUrl
+                            coverUrl.isNotBlank() && !coverUrl.contains("backdrop", ignoreCase = true) && !coverUrl.contains("banner", ignoreCase = true) && !coverUrl.contains("episode", ignoreCase = true) -> coverUrl
+                            else -> animePosterUrl.ifEmpty { showCoverUrl.ifEmpty { coverUrl } }
+                        }
+                        historyManager.saveWatchProgress(
+                            anilistId = anilistId,
+                            animeTitle = animeTitle,
+                            coverImageUrl = targetCover,
+                            episodeNumber = targetEp,
+                            progressPositionMs = 1000L,
+                            totalDurationMs = 1440000L,
+                            showCoverUrl = validPortraitPoster
+                        )
+                    }
 
                     currentIntroStart = (streamInfo["introStart"] as? Long) ?: 0L
                     currentIntroEnd   = (streamInfo["introEnd"] as? Long) ?: 0L
@@ -805,7 +1111,21 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                     currentBackupHls = (streamInfo["backupHls"] as? String) ?: ""
                     currentBackupProvider = (streamInfo["backupProvider"] as? String) ?: ""
 
-                    currentSubtitleUrl = (streamInfo["subtitle"] as? String) ?: ""
+                    currentProvider = (streamInfo["provider"] as? String) ?: ""
+                    val subUrl = (streamInfo["subtitle"] as? String) ?: ""
+                    val prov = currentProvider
+                    val isAniDb = prov.contains("anibd", ignoreCase = true) || prov.contains("anidb", ignoreCase = true) || ((streamInfo["referer"] as? String) ?: "").contains("animeapps", ignoreCase = true)
+                    if (isAniDb && currentStreamType == "hardsub" && subUrl.isNotEmpty()) {
+                        currentSubtitleUrl = subUrl
+                        subPreset = "Hardsub"
+                        prefs.edit().putString("subPreset", "Hardsub").apply()
+                        selectedSub = "English (Soft Sub)"
+                    } else if (currentStreamType == "hardsub") {
+                        currentSubtitleUrl = ""
+                        selectedSub = "Hard Sub"
+                    } else {
+                        currentSubtitleUrl = subUrl
+                    }
                     currentReferer     = (streamInfo["referer"] as? String) ?: ""
                     currentHlsUrl       = (streamInfo["hls"] as? String) ?: ""
 
@@ -846,9 +1166,9 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
             isReloadingStream = true
             coroutineScope.launch {
                 val sInfo = withContext(Dispatchers.IO) {
-                    var info = com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(context, newAnilistId, targetEp, currentStreamType)
+                    var info = com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(context, newAnilistId, targetEp, currentStreamType, newTitle)
                     if (info == null && currentStreamType != "sub") {
-                        info = com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(context, newAnilistId, targetEp, "sub")
+                        info = com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(context, newAnilistId, targetEp, "sub", newTitle)
                     }
                     info
                 }
@@ -864,14 +1184,17 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                     startPosition = 0L
                     showResumeDialog = false
 
-                    historyManager.saveWatchProgress(
-                        anilistId = newAnilistId,
-                        animeTitle = newTitle,
-                        coverImageUrl = newCover,
-                        episodeNumber = targetEp,
-                        progressPositionMs = 1000L,
-                        totalDurationMs = 1440000L
-                    )
+                    if (canSaveHistory(newAnilistId)) {
+                        historyManager.saveWatchProgress(
+                            anilistId = newAnilistId,
+                            animeTitle = newTitle,
+                            coverImageUrl = newCover,
+                            episodeNumber = targetEp,
+                            progressPositionMs = 1000L,
+                            totalDurationMs = 1440000L,
+                            showCoverUrl = newCover
+                        )
+                    }
 
                     currentIntroStart = (sInfo["introStart"] as? Number)?.toLong() ?: 0L
                     currentIntroEnd   = (sInfo["introEnd"] as? Number)?.toLong() ?: 0L
@@ -881,7 +1204,21 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                     currentBackupHls = (sInfo["backupHls"] as? String) ?: ""
                     currentBackupProvider = (sInfo["backupProvider"] as? String) ?: ""
 
-                    currentSubtitleUrl = (sInfo["subtitle"] as? String) ?: ""
+                    currentProvider = (sInfo["provider"] as? String) ?: ""
+                    val relSubUrl = (sInfo["subtitle"] as? String) ?: ""
+                    val relProv = currentProvider
+                    val relIsAniDb = relProv.contains("anibd", ignoreCase = true) || relProv.contains("anidb", ignoreCase = true) || ((sInfo["referer"] as? String) ?: "").contains("animeapps", ignoreCase = true)
+                    if (relIsAniDb && currentStreamType == "hardsub" && relSubUrl.isNotEmpty()) {
+                        currentSubtitleUrl = relSubUrl
+                        subPreset = "Hardsub"
+                        prefs.edit().putString("subPreset", "Hardsub").apply()
+                        selectedSub = "English (Soft Sub)"
+                    } else if (currentStreamType == "hardsub") {
+                        currentSubtitleUrl = ""
+                        selectedSub = "Hard Sub"
+                    } else {
+                        currentSubtitleUrl = relSubUrl
+                    }
                     currentReferer     = (sInfo["referer"] as? String) ?: ""
                     currentHlsUrl       = (sInfo["hls"] as? String) ?: ""
 
@@ -900,9 +1237,11 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
         }
 
         // ─── Build player ──────────────────────────────────────────────────────
-        val player = remember(currentHlsUrl, currentReferer, currentStreamType, currentSubtitleUrl) {
+        val player = remember(currentHlsUrl, currentReferer, currentStreamType) {
             buildPlayer(context, currentHlsUrl, currentReferer, currentSubtitleUrl, streamType = currentStreamType, startPositionMs = startPosition, playImmediately = !showResumeDialog)
         }
+
+        var liveTranslatingStatus by remember { mutableStateOf<String?>(null) }
 
         // Track available stream resolutions dynamically
         DisposableEffect(player) {
@@ -921,6 +1260,21 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                     }
                     if (heights.isNotEmpty()) {
                         videoTrackHeights = heights.sortedDescending()
+                    }
+                }
+
+                override fun onCues(cueGroup: androidx.media3.common.text.CueGroup) {
+                    val isAiSub = isTranslatingSub || liveSubtitleCues.isNotEmpty() || selectedSub.contains("AI", ignoreCase = true) || selectedSub.contains("Translated", ignoreCase = true) || selectedSub.contains("Public", ignoreCase = true)
+                    if (isAiSub) {
+                        // AI / Translated subtitles are actively rendered by LaunchedEffect; do not clear or hide
+                        return
+                    }
+                    if (selectedSub != "Off" && !selectedSub.contains("Hard Sub")) {
+                        playerViewInstance?.subtitleView?.visibility = View.VISIBLE
+                        playerViewInstance?.subtitleView?.setCues(cueGroup.cues)
+                    } else {
+                        playerViewInstance?.subtitleView?.setCues(emptyList())
+                        playerViewInstance?.subtitleView?.visibility = View.INVISIBLE
                     }
                 }
 
@@ -958,6 +1312,7 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                                 if (fbMap != null && (fbMap["hls"] as? String)?.isNotEmpty() == true) {
                                     currentHlsUrl = fbMap["hls"] as String
                                     currentReferer = (fbMap["referer"] as? String) ?: ""
+                                    currentProvider = (fbMap["provider"] as? String) ?: ""
                                     val fbSub = (fbMap["subtitle"] as? String) ?: ""
                                     if (fbSub.isNotEmpty()) {
                                         currentSubtitleUrl = fbSub
@@ -978,6 +1333,11 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                                 val pos = player.currentPosition
                                 currentHlsUrl = fbMap["hls"] as String
                                 currentReferer = (fbMap["referer"] as? String) ?: ""
+                                currentProvider = (fbMap["provider"] as? String) ?: ""
+                                val fbSub = (fbMap["subtitle"] as? String) ?: ""
+                                if (fbSub.isNotEmpty()) {
+                                    currentSubtitleUrl = fbSub
+                                }
                                 startPosition = pos
                             }
                         }
@@ -1048,105 +1408,121 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
             }
         }
 
-        // Fetch episode images and titles from AniZip or TMDB (online mode only)
+        // Fetch episode images and titles from AniZip, TMDB, or ShinChanSupabaseManager (online mode only)
         LaunchedEffect(currentAnilistId, isOfflineMode) {
             if (!isOfflineMode) {
                 coroutineScope.launch {
+                    val isShinChan = com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.isShinChan(currentAnilistId)
                     try {
-                        val tmdbId = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getLongRunningTmdbId(currentAnilistId)
-                        val metaMap = if (tmdbId != null) {
-                            com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getTmdbAllEpisodes(tmdbId)
-                        } else {
-                            com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getEpisodeMetadata(currentAnilistId)
-                        }
-                    val imgMap = mutableMapOf<Int, String>()
-                    val titleMap = mutableMapOf<Int, String>()
-                    val futSet = mutableSetOf<Int>()
-                    
-                    metaMap.forEach { (epNum, meta) ->
-                        imgMap[epNum] = meta.imageUrl
-                        titleMap[epNum] = meta.title
-                        if (meta.airdate.isNotEmpty() && isFutureDate(meta.airdate)) {
-                            futSet.add(epNum)
-                        }
-                    }
-                    
-                    episodeMetaMap = metaMap
-                    episodeImages = imgMap
-                    episodeTitles = titleMap
-                    futureEps = futSet
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-
-                // Fetch real anime poster and top 2-3 specific related anime
-                try {
-                    val detailsJson = com.lagradost.cloudstream3.ui.animebox.api.AniListClient.getAnimeDetails(currentAnilistId)
-                    if (detailsJson != null) {
-                        val mediaObj = org.json.JSONObject(detailsJson).getJSONObject("data").getJSONObject("Media")
-                        
-                        // Extract real anime poster
-                        if (mediaObj.has("coverImage") && !mediaObj.isNull("coverImage")) {
-                            val cov = mediaObj.getJSONObject("coverImage")
-                            val poster = cov.optString("extraLarge", "").ifEmpty { cov.optString("large", "") }
-                            if (poster.isNotEmpty()) {
-                                animePosterUrl = poster
+                        if (isShinChan) {
+                            com.lagradost.cloudstream3.ui.animebox.api.ShinChanSupabaseManager.loadBundledAssetIfNeeded(context)
+                            com.lagradost.cloudstream3.ui.animebox.api.ShinChanSupabaseManager.loadShinChanEpisodes(context)
+                            val covers = com.lagradost.cloudstream3.ui.animebox.api.ShinChanSupabaseManager.getAllEpisodeCovers(context)
+                            val maxEp = maxOf(com.lagradost.cloudstream3.ui.animebox.api.ShinChanSupabaseManager.getLatestEpisodeNumber(), 1349)
+                            val imgMap = mutableMapOf<Int, String>()
+                            val titleMap = mutableMapOf<Int, String>()
+                            for (ep in 1..maxEp) {
+                                imgMap[ep] = covers[ep] ?: ""
+                                titleMap[ep] = "Episode $ep"
                             }
+                            episodeImages = imgMap
+                            episodeTitles = titleMap
+                        } else {
+                            val tmdbId = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getLongRunningTmdbId(currentAnilistId)
+                            val metaMap = if (tmdbId != null) {
+                                com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getTmdbAllEpisodes(tmdbId)
+                            } else {
+                                com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getEpisodeMetadata(currentAnilistId)
+                            }
+                            val imgMap = mutableMapOf<Int, String>()
+                            val titleMap = mutableMapOf<Int, String>()
+                            val futSet = mutableSetOf<Int>()
+                            
+                            metaMap.forEach { (epNum, meta) ->
+                                imgMap[epNum] = meta.imageUrl
+                                titleMap[epNum] = meta.title
+                                if (meta.airdate.isNotEmpty() && isFutureDate(meta.airdate)) {
+                                    futSet.add(epNum)
+                                }
+                            }
+                            
+                            episodeMetaMap = metaMap
+                            episodeImages = imgMap
+                            episodeTitles = titleMap
+                            futureEps = futSet
                         }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
 
-                        // Extract 2-3 specific related anime matching Detail Activity Related Section exactly
-                        val relList = mutableListOf<PlayerRelatedAnime>()
-                        if (mediaObj.has("relations") && !mediaObj.isNull("relations")) {
-                            val relObj = mediaObj.getJSONObject("relations")
-                            if (relObj.has("edges")) {
-                                val edges = relObj.getJSONArray("edges")
-                                for (i in 0 until edges.length()) {
-                                    val edge = edges.getJSONObject(i)
-                                    val relType = edge.optString("relationType", "")
-                                    if (edge.has("node") && !edge.isNull("node")) {
-                                        val node = edge.getJSONObject("node")
-                                        if (com.lagradost.cloudstream3.ui.animebox.api.AniListClient.isBlockedMedia(node)) continue
-                                        val relId = node.getInt("id")
-                                        if (relId == currentAnilistId) continue
-                                        val relTitleObj = node.getJSONObject("title")
-                                        val relTitle = if (relTitleObj.has("english") && !relTitleObj.isNull("english")) {
-                                            relTitleObj.getString("english")
-                                        } else {
-                                            relTitleObj.getString("romaji")
+                    // Fetch real anime poster and top 2-3 specific related anime
+                    try {
+                        val detailsJson = com.lagradost.cloudstream3.ui.animebox.api.AniListClient.getAnimeDetails(currentAnilistId)
+                        if (detailsJson != null) {
+                            val mediaObj = org.json.JSONObject(detailsJson).getJSONObject("data").getJSONObject("Media")
+                            
+                            // Extract real anime poster
+                            if (mediaObj.has("coverImage") && !mediaObj.isNull("coverImage")) {
+                                val cov = mediaObj.getJSONObject("coverImage")
+                                val poster = cov.optString("extraLarge", "").ifEmpty { cov.optString("large", "") }
+                                if (poster.isNotEmpty()) {
+                                    animePosterUrl = poster
+                                }
+                            }
+
+                            // Extract 2-3 specific related anime matching Detail Activity Related Section exactly
+                            val relList = mutableListOf<PlayerRelatedAnime>()
+                            if (mediaObj.has("relations") && !mediaObj.isNull("relations")) {
+                                val relObj = mediaObj.getJSONObject("relations")
+                                if (relObj.has("edges")) {
+                                    val edges = relObj.getJSONArray("edges")
+                                    for (i in 0 until edges.length()) {
+                                        val edge = edges.getJSONObject(i)
+                                        val relType = edge.optString("relationType", "")
+                                        if (edge.has("node") && !edge.isNull("node")) {
+                                            val node = edge.getJSONObject("node")
+                                            if (com.lagradost.cloudstream3.ui.animebox.api.AniListClient.isBlockedMedia(node)) continue
+                                            val relId = node.getInt("id")
+                                            if (relId == currentAnilistId) continue
+                                            val relTitleObj = node.getJSONObject("title")
+                                            val relTitle = if (relTitleObj.has("english") && !relTitleObj.isNull("english")) {
+                                                relTitleObj.getString("english")
+                                            } else {
+                                                relTitleObj.getString("romaji")
+                                            }
+                                            val relCover = node.getJSONObject("coverImage").optString("large", "")
+                                            val format = node.optString("format", "")
+                                            val formatUpper = format.uppercase()
+                                            val relTypeUpper = relType.uppercase()
+                                            val isTvOrMovie = (formatUpper == "TV" || formatUpper == "MOVIE" || formatUpper == "TV_SHORT")
+                                            val isSequelPrequelOrMovieSideStory = (relTypeUpper == "SEQUEL" || relTypeUpper == "PREQUEL" || (formatUpper == "MOVIE" && relTypeUpper == "SIDE_STORY"))
+                                            if (!isTvOrMovie || !isSequelPrequelOrMovieSideStory) continue
+                                            val shortTitle = if (relTitle.length > 24) relTitle.take(22) + "…" else relTitle
+                                            relList.add(PlayerRelatedAnime(relId, shortTitle, relCover, format))
                                         }
-                                        val relCover = node.getJSONObject("coverImage").optString("large", "")
-                                        val format = node.optString("format", "")
-                                        val formatUpper = format.uppercase()
-                                        val relTypeUpper = relType.uppercase()
-                                        val isTvOrMovie = (formatUpper == "TV" || formatUpper == "MOVIE" || formatUpper == "TV_SHORT")
-                                        val isSequelPrequelOrMovieSideStory = (relTypeUpper == "SEQUEL" || relTypeUpper == "PREQUEL" || (formatUpper == "MOVIE" && relTypeUpper == "SIDE_STORY"))
-                                        if (!isTvOrMovie || !isSequelPrequelOrMovieSideStory) continue
-                                        val shortTitle = if (relTitle.length > 24) relTitle.take(22) + "…" else relTitle
-                                        relList.add(PlayerRelatedAnime(relId, shortTitle, relCover, format))
                                     }
                                 }
                             }
+                            if (relList.isNotEmpty()) {
+                                relatedAnimeList = relList.distinctBy { it.id }.take(3)
+                            }
                         }
-                        if (relList.isNotEmpty()) {
-                            relatedAnimeList = relList.distinctBy { it.id }.take(3)
-                        }
-                    }
 
-                    // Fallback to Kitsu relations if AniList down or no relations found
-                    if (relatedAnimeList.isEmpty() || detailsJson == null) {
-                        val kitsuId = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getKitsuIdFromAnilist(currentAnilistId) ?: currentAnilistId
-                        val kitsuRelations = com.lagradost.cloudstream3.ui.animebox.api.KitsuClient.getAnimeRelations(kitsuId)
-                        if (kitsuRelations.isNotEmpty()) {
-                            relatedAnimeList = kitsuRelations.map { rel ->
-                                val shortTitle = if (rel.title.length > 24) rel.title.take(22) + "…" else rel.title
-                                PlayerRelatedAnime(rel.id, shortTitle, rel.coverUrl, rel.format)
-                            }.distinctBy { it.id }.take(3)
+                        // Fallback to Kitsu relations if AniList down or no relations found (skip for Shin Chan)
+                        if (!isShinChan && (relatedAnimeList.isEmpty() || detailsJson == null)) {
+                            val kitsuId = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getKitsuIdFromAnilist(currentAnilistId) ?: currentAnilistId
+                            val kitsuRelations = com.lagradost.cloudstream3.ui.animebox.api.KitsuClient.getAnimeRelations(kitsuId)
+                            if (kitsuRelations.isNotEmpty()) {
+                                relatedAnimeList = kitsuRelations.map { rel ->
+                                    val shortTitle = if (rel.title.length > 24) rel.title.take(22) + "…" else rel.title
+                                    PlayerRelatedAnime(rel.id, shortTitle, rel.coverUrl, rel.format)
+                                }.distinctBy { it.id }.take(3)
+                            }
                         }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
                     }
-                } catch (e: Exception) {
-                    e.printStackTrace()
                 }
-            }
             }
         }
 
@@ -1159,69 +1535,232 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
 
         // Initial progress record for Continue Watching on launch
         LaunchedEffect(Unit) {
-            val initialCover = if (totalEpisodes == 1) showCoverUrl else currentCoverUrl
-            historyManager.saveWatchProgress(
-                anilistId = anilistId,
-                animeTitle = animeTitle,
-                coverImageUrl = initialCover,
-                episodeNumber = currentEpisodeNum,
-                progressPositionMs = startPosition.coerceAtLeast(1000L),
-                totalDurationMs = 1440000L
-            )
+            if (canSaveHistory(anilistId)) {
+                val isMovie = com.lagradost.cloudstream3.ui.animebox.api.AnimeMovieTmdbMapping.isStaticMovie(anilistId)
+                var initialCover = currentCoverUrl
+                if (isMovie) {
+                    withContext(Dispatchers.IO) {
+                        val mBackdrop = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getBestBackdropUrl(anilistId, isMovie = true)
+                        if (mBackdrop.isNotBlank()) {
+                            initialCover = mBackdrop
+                            currentCoverUrl = mBackdrop
+                        }
+                    }
+                } else {
+                    if (totalEpisodes == 1 && showCoverUrl.isNotBlank()) {
+                        initialCover = showCoverUrl
+                    }
+                    val tmdbId = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getLongRunningTmdbId(anilistId)
+                    if (tmdbId != null && (initialCover.isBlank() || !initialCover.contains("tmdb.org"))) {
+                        withContext(Dispatchers.IO) {
+                            try {
+                                val allEps = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getTmdbAllEpisodes(tmdbId)
+                                val epImg = allEps[currentEpisodeNum]?.imageUrl ?: ""
+                                if (epImg.isNotBlank()) {
+                                    initialCover = epImg
+                                    currentCoverUrl = epImg
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+                val validPoster = when {
+                    animePosterUrl.isNotBlank() && !animePosterUrl.contains("backdrop", ignoreCase = true) && !animePosterUrl.contains("banner", ignoreCase = true) && !animePosterUrl.contains("episode", ignoreCase = true) -> animePosterUrl
+                    showCoverUrl.isNotBlank() && !showCoverUrl.contains("backdrop", ignoreCase = true) && !showCoverUrl.contains("banner", ignoreCase = true) && !showCoverUrl.contains("episode", ignoreCase = true) -> showCoverUrl
+                    coverUrl.isNotBlank() && !coverUrl.contains("backdrop", ignoreCase = true) && !coverUrl.contains("banner", ignoreCase = true) && !coverUrl.contains("episode", ignoreCase = true) -> coverUrl
+                    else -> animePosterUrl.ifEmpty { showCoverUrl.ifEmpty { coverUrl } }
+                }
+                historyManager.saveWatchProgress(
+                    anilistId = anilistId,
+                    animeTitle = animeTitle,
+                    coverImageUrl = initialCover,
+                    episodeNumber = currentEpisodeNum,
+                    progressPositionMs = startPosition.coerceAtLeast(1000L),
+                    totalDurationMs = 1440000L,
+                    showCoverUrl = validPoster
+                )
+            }
         }
 
         // Apply subtitle style (Presets & Hardsub styling from Screenshot 2)
-        LaunchedEffect(playerViewInstance, subFontSize, subTextColor, subBgOpacity, subEdgeType) {
+        LaunchedEffect(playerViewInstance, subFontSize, subTextColor, subBgOpacity, subEdgeType, subPreset) {
             playerViewInstance?.subtitleView?.apply {
-                val subTypeface = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.google_sans)
-                    ?: android.graphics.Typeface.SANS_SERIF
-                val captionStyle = androidx.media3.ui.CaptionStyleCompat(
-                    subTextColor,
-                    android.graphics.Color.argb(subBgOpacity, 0, 0, 0),
-                    android.graphics.Color.TRANSPARENT,
-                    subEdgeType,
-                    android.graphics.Color.BLACK,
-                    subTypeface
-                )
+                val isHardsub = subPreset.equals("Hardsub", ignoreCase = true)
+                val subTypeface = if (isHardsub) {
+                    // Rounded bold sans-serif matching Screenshot 2
+                    android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
+                } else {
+                    androidx.core.content.res.ResourcesCompat.getFont(context, R.font.google_sans)
+                        ?: android.graphics.Typeface.SANS_SERIF
+                }
+                val captionStyle = if (isHardsub) {
+                    androidx.media3.ui.CaptionStyleCompat(
+                        android.graphics.Color.WHITE,
+                        android.graphics.Color.TRANSPARENT,
+                        android.graphics.Color.TRANSPARENT,
+                        androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+                        android.graphics.Color.BLACK,
+                        subTypeface
+                    )
+                } else {
+                    androidx.media3.ui.CaptionStyleCompat(
+                        subTextColor,
+                        android.graphics.Color.argb(subBgOpacity, 0, 0, 0),
+                        android.graphics.Color.TRANSPARENT,
+                        subEdgeType,
+                        android.graphics.Color.BLACK,
+                        subTypeface
+                    )
+                }
                 setStyle(captionStyle)
+                setApplyEmbeddedStyles(!isHardsub)
+                setApplyEmbeddedFontSizes(!isHardsub)
                 setBottomPaddingFraction(0.08f)
-                val sizeFraction = when {
-                    subFontSize <= 14f -> 0.045f
-                    subFontSize >= 24f -> 0.065f
-                    subFontSize >= 20f -> 0.055f
-                    else -> 0.050f
+                val sizeFraction = if (isHardsub) {
+                    0.058f
+                } else {
+                    when {
+                        subFontSize <= 14f -> 0.045f
+                        subFontSize >= 24f -> 0.065f
+                        subFontSize >= 20f -> 0.055f
+                        else -> 0.050f
+                    }
                 }
                 setFractionalTextSize(sizeFraction)
             }
         }
 
-        // Apply subtitle visibility (Off vs On)
-        LaunchedEffect(selectedSub, player) {
-            if (selectedSub == "Off" || selectedSub.contains("Hard Sub")) {
-                // Disable subtitle track rendering
-                player.trackSelectionParameters = player.trackSelectionParameters
-                    .buildUpon()
-                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                    .build()
-                playerViewInstance?.subtitleView?.visibility = View.INVISIBLE
-            } else {
-                player.trackSelectionParameters = player.trackSelectionParameters
-                    .buildUpon()
-                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                    .setPreferredTextLanguage("en")
-                    .build()
-                playerViewInstance?.subtitleView?.visibility = View.VISIBLE
+        // Configure track selection only when subtitle mode / track state actually changes
+        LaunchedEffect(player, selectedSub, isTranslatingSub, liveSubtitleCues.isNotEmpty(), isInPipMode) {
+            try {
+                if (isInPipMode || selectedSub == "Off" || selectedSub.contains("Hard Sub")) {
+                    player.trackSelectionParameters = player.trackSelectionParameters
+                        .buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                        .build()
+                } else {
+                    val isAiSub = selectedSub.contains("Translated", ignoreCase = true) ||
+                            selectedSub.contains("AI", ignoreCase = true) ||
+                            selectedSub.contains("Public", ignoreCase = true) ||
+                            isTranslatingSub ||
+                            (liveSubtitleCues.isNotEmpty() && !selectedSub.contains("Hard Sub", ignoreCase = true))
+
+                    if (isAiSub) {
+                        player.trackSelectionParameters = player.trackSelectionParameters
+                            .buildUpon()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                            .build()
+                    } else {
+                        player.trackSelectionParameters = player.trackSelectionParameters
+                            .buildUpon()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                            .setPreferredTextLanguage("en")
+                            .setSelectUndeterminedTextLanguage(true)
+                            .setIgnoredTextSelectionFlags(0)
+                            .build()
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
+
+        // Real-time subtitle cue synchronization for standard tracks and AI Translated tracks
+        LaunchedEffect(selectedSub, liveSubtitleCues, currentPosition, isTranslatingSub, isInPipMode, playerViewInstance, subFontSize, subTextColor, subBgOpacity, subEdgeType, subPreset) {
+            try {
+                val subView = playerViewInstance?.subtitleView ?: return@LaunchedEffect
+
+                // ─── Re-apply EXACT same style for both AI & native subtitles ───
+                try {
+                    val isHardsub = subPreset.equals("Hardsub", ignoreCase = true)
+                    val subTypeface = if (isHardsub) {
+                        android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
+                    } else {
+                        androidx.core.content.res.ResourcesCompat.getFont(subView.context, R.font.google_sans)
+                            ?: android.graphics.Typeface.SANS_SERIF
+                    }
+                    val captionStyle = if (isHardsub) {
+                        androidx.media3.ui.CaptionStyleCompat(
+                            android.graphics.Color.WHITE,
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT,
+                            androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+                            android.graphics.Color.BLACK,
+                            subTypeface
+                        )
+                    } else {
+                        androidx.media3.ui.CaptionStyleCompat(
+                            subTextColor,
+                            android.graphics.Color.argb(subBgOpacity, 0, 0, 0),
+                            android.graphics.Color.TRANSPARENT,
+                            subEdgeType,
+                            android.graphics.Color.BLACK,
+                            subTypeface
+                        )
+                    }
+                    subView.setStyle(captionStyle)
+                    subView.setApplyEmbeddedStyles(!isHardsub)
+                    subView.setApplyEmbeddedFontSizes(!isHardsub)
+                    subView.setBottomPaddingFraction(0.08f)
+                    val sizeFraction = if (isHardsub) {
+                        0.058f
+                    } else {
+                        when {
+                            subFontSize <= 14f -> 0.045f
+                            subFontSize >= 24f -> 0.065f
+                            subFontSize >= 20f -> 0.055f
+                            else -> 0.050f
+                        }
+                    }
+                    subView.setFractionalTextSize(sizeFraction)
+                } catch (_: Throwable) {}
+
+                try {
+                    subView.bringToFront()
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                        subView.elevation = 100f
+                    }
+                } catch (_: Throwable) {}
+
+                if (isInPipMode || selectedSub == "Off" || selectedSub.contains("Hard Sub")) {
+                    subView.setCues(emptyList())
+                    subView.visibility = View.INVISIBLE
+                    return@LaunchedEffect
+                }
+
+                val isAiSub = selectedSub.contains("Translated", ignoreCase = true) ||
+                        selectedSub.contains("AI", ignoreCase = true) ||
+                        selectedSub.contains("Public", ignoreCase = true) ||
+                        isTranslatingSub ||
+                        (liveSubtitleCues.isNotEmpty() && !selectedSub.contains("Hard Sub", ignoreCase = true))
+
+                if (isAiSub) {
+                    val activeCue = liveSubtitleCues.firstOrNull { currentPosition in it.startMs..it.endMs }
+                    if (activeCue != null && activeCue.translatedText.isNotBlank() && com.lagradost.cloudstream3.ui.animebox.api.SenseVoiceAudioTranscriber.isValidDialogueCue(activeCue.translatedText)) {
+                        val stripped = com.lagradost.cloudstream3.ui.animebox.api.SenseVoiceAudioTranscriber.stripSpeakerPrefix(activeCue.translatedText)
+                        val rawLines = splitIntoSubtitleLines(stripped).filter { it.isNotBlank() }
+                        var cleanText = rawLines.joinToString("\n")
+                        cleanText = normalizePunctuationSpacing(cleanText)
+                        val nativeCue = androidx.media3.common.text.Cue.Builder()
+                            .setText(cleanText)
+                            .build()
+                        subView.visibility = View.VISIBLE
+                        subView.setCues(listOf(nativeCue))
+                    } else {
+                        subView.setCues(emptyList())
+                    }
+                } else {
+                    subView.visibility = View.VISIBLE
+                    subView.setCues(player.currentCues.cues)
+                }
+            } catch (t: Throwable) {
+                t.printStackTrace()
             }
         }
 
-        // Apply AI Graphics Upscaler track selection & scaling mode safely
+        // Apply AI Graphics Enhancer bitrate tuning
         LaunchedEffect(isGraphicsUpscalerEnabled, player) {
             try {
-                player.videoScalingMode = if (isGraphicsUpscalerEnabled) {
-                    C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
-                } else {
-                    C.VIDEO_SCALING_MODE_SCALE_TO_FIT
-                }
+                player.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
                 val params = player.trackSelectionParameters.buildUpon()
                 if (isGraphicsUpscalerEnabled) {
                     params.setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
@@ -1247,10 +1786,12 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                     isPlaying = playing
                     isBuffering = player.playbackState == Player.STATE_BUFFERING
                     currentPosition = player.currentPosition.coerceAtLeast(0L)
-                    duration = player.duration.coerceAtLeast(0L)
+                    val rawDur = player.duration.coerceAtLeast(0L)
+                    duration = if (isOfflineMode && rawDur in 1L..10_000L) maxOf(rawDur, maxOf(currentPosition + 30_000L, 1440_000L)) else rawDur
                 }
                 override fun onPlaybackStateChanged(state: Int) {
-                    duration = player.duration.coerceAtLeast(0L)
+                    val rawDur = player.duration.coerceAtLeast(0L)
+                    duration = if (isOfflineMode && rawDur in 1L..10_000L) maxOf(rawDur, maxOf(player.currentPosition + 30_000L, 1440_000L)) else rawDur
                     currentPosition = player.currentPosition.coerceAtLeast(0L)
                     isBuffering = state == Player.STATE_BUFFERING
 
@@ -1272,6 +1813,16 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                 ) {
                     currentPosition = player.currentPosition.coerceAtLeast(0L)
                     duration = player.duration.coerceAtLeast(0L)
+                }
+                override fun onCues(cueGroup: androidx.media3.common.text.CueGroup) {
+                    val isAiSub = isTranslatingSub || liveSubtitleCues.isNotEmpty() ||
+                            selectedSub.contains("AI", ignoreCase = true) ||
+                            selectedSub.contains("Translated", ignoreCase = true) ||
+                            selectedSub.contains("Public", ignoreCase = true)
+                    if (selectedSub != "Off" && !selectedSub.contains("Hard Sub") && !isAiSub) {
+                        playerViewInstance?.subtitleView?.visibility = View.VISIBLE
+                        playerViewInstance?.subtitleView?.setCues(cueGroup.cues)
+                    }
                 }
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                     error.printStackTrace()
@@ -1319,7 +1870,39 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                                     currentSubtitleUrl = fbSub
                                 }
                             } else {
-                                android.widget.Toast.makeText(context, "Unable to load stream for episode $currentEpisodeNum", android.widget.Toast.LENGTH_SHORT).show()
+                                if (currentStreamType == "sub") {
+                                    fallbackDialogData = FallbackDialogData(
+                                        title = "Soft Sub Playback Error",
+                                        description = "There was an error playing the soft subtitle stream. Would you like to switch to the Hard Sub version?",
+                                        primaryButtonText = "Switch to Hard Sub",
+                                        onPrimaryAction = {
+                                            currentStreamType = "hardsub"
+                                            selectedSub = "Hard Sub"
+                                            isReloadingStream = true
+                                            coroutineScope.launch {
+                                                val savedPos = player.currentPosition
+                                                val hsMap = fetchStreamInfo(anilistId, currentEpisodeNum, "hardsub")
+                                                isReloadingStream = false
+                                                if (hsMap != null && (hsMap["hls"] as? String)?.isNotEmpty() == true) {
+                                                    currentHlsUrl = hsMap["hls"] as String
+                                                    currentReferer = (hsMap["referer"] as? String) ?: ""
+                                                    currentSubtitleUrl = ""
+                                                    selectedSub = "Hard Sub"
+                                                    delay(400)
+                                                    if (savedPos > 0L) {
+                                                        player.seekTo(savedPos)
+                                                    }
+                                                    player.play()
+                                                } else {
+                                                    android.widget.Toast.makeText(context, "Hard Sub stream not available", android.widget.Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
+                                    )
+                                    showStreamReportPill = true
+                                } else {
+                                    android.widget.Toast.makeText(context, "Unable to load stream for episode $currentEpisodeNum", android.widget.Toast.LENGTH_SHORT).show()
+                                }
                             }
                         }
                     }
@@ -1331,15 +1914,22 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                 override fun run() {
                     val currentPos = player.currentPosition
                     val dur = player.duration
-                    if (dur > 0 && currentPos > 0) {
+                    if (dur > 0 && currentPos > 0 && canSaveHistory(anilistId)) {
                         val finalCover = if (totalEpisodes == 1) showCoverUrl else currentCoverUrl
+                        val validPoster = when {
+                            animePosterUrl.isNotBlank() && !animePosterUrl.contains("backdrop", ignoreCase = true) && !animePosterUrl.contains("banner", ignoreCase = true) && !animePosterUrl.contains("episode", ignoreCase = true) -> animePosterUrl
+                            showCoverUrl.isNotBlank() && !showCoverUrl.contains("backdrop", ignoreCase = true) && !showCoverUrl.contains("banner", ignoreCase = true) && !showCoverUrl.contains("episode", ignoreCase = true) -> showCoverUrl
+                            coverUrl.isNotBlank() && !coverUrl.contains("backdrop", ignoreCase = true) && !coverUrl.contains("banner", ignoreCase = true) && !coverUrl.contains("episode", ignoreCase = true) -> coverUrl
+                            else -> animePosterUrl.ifEmpty { showCoverUrl.ifEmpty { coverUrl } }
+                        }
                         historyManager.saveWatchProgress(
                             anilistId = anilistId,
                             animeTitle = animeTitle,
                             coverImageUrl = finalCover,
                             episodeNumber = currentEpisodeNum,
                             progressPositionMs = currentPos,
-                            totalDurationMs = dur
+                            totalDurationMs = dur,
+                            showCoverUrl = validPoster
                         )
                     }
                     handler.postDelayed(this, 5000)
@@ -1404,7 +1994,11 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
         ) {
             AndroidView(
                 factory = { ctx ->
-                    PlayerView(ctx).apply {
+                    val pv = (android.view.LayoutInflater.from(ctx).inflate(
+                        com.lagradost.cloudstream3.R.layout.animebox_player_view,
+                        null
+                    ) as? PlayerView) ?: PlayerView(ctx)
+                    pv.apply {
                         useController = false
                         this.player = player
                         playerViewInstance = this
@@ -1421,6 +2015,24 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                             subtitleView?.visibility = View.INVISIBLE
                         }
                         
+                        // Ensure SubtitleView is detached from AspectRatioFrameLayout and attached directly to PlayerView
+                        // so that resizing, zooming (crop), or stretching the video surface never pushes subtitles off-screen or scales them.
+                        subtitleView?.let { subView ->
+                            val parent = subView.parent as? android.view.ViewGroup
+                            if (parent != null && parent !== this) {
+                                parent.removeView(subView)
+                                this.addView(subView, android.widget.FrameLayout.LayoutParams(
+                                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                                ))
+                            }
+                            // Force SubtitleView to be the top-most child on top of all panels, controls, and dialogs
+                            subView.bringToFront()
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                                subView.elevation = 50f
+                            }
+                        }
+
                         // Push SubtitleView layout margin up dynamically!
                         val density = ctx.resources.displayMetrics.density
                         subtitleView?.let { subView ->
@@ -1429,8 +2041,8 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                                 ?: android.widget.FrameLayout.LayoutParams(android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.MATCH_PARENT)
                             lp.bottomMargin = targetMargin
                             subView.layoutParams = lp
-                            
-                            // Safe layout listener to prevent ExoPlayer resets
+
+                            // Safe layout listener to prevent ExoPlayer resets + ALWAYS keep subtitles on top layer
                             subView.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
                                 val currentLp = (v.layoutParams as? android.widget.FrameLayout.LayoutParams)
                                     ?: android.widget.FrameLayout.LayoutParams(android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.MATCH_PARENT)
@@ -1438,6 +2050,11 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                                 if (currentLp.bottomMargin != currentTarget) {
                                     currentLp.bottomMargin = currentTarget
                                     v.layoutParams = currentLp
+                                }
+                                // Ensure subtitles stay top-most even after other views are added/laid out
+                                v.bringToFront()
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                                    v.elevation = 50f
                                 }
                             }
                         }
@@ -1450,7 +2067,39 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                         2 -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                         else -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                     }
-                    if (selectedSub == "Off" || selectedSub.contains("Hard Sub")) {
+                    // Re-apply subtitle top-layer guarantee on every update pass (panels may have been added)
+                    view.subtitleView?.let { subView ->
+                        subView.bringToFront()
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                            subView.elevation = 50f
+                        }
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                        val nativeEffect = if (isGraphicsUpscalerEnabled) {
+                            com.lagradost.cloudstream3.ui.animebox.enhancer.AnimeGraphicsEnhancer.createNativeRenderEffect(
+                                sharpness = enhancerSharpness,
+                                contrast = enhancerContrast,
+                                saturation = enhancerSaturation,
+                                lineClarity = enhancerLineClarity
+                            )
+                        } else null
+                        // Apply effect exclusively to the video texture surface so SubtitleView is NOT affected!
+                        view.videoSurfaceView?.setRenderEffect(nativeEffect)
+                        view.setRenderEffect(null)
+                    }
+                    try {
+                        view.subtitleView?.let { subView ->
+                            val parent = subView.parent as? android.view.ViewGroup
+                            if (parent != null && parent !== view) {
+                                parent.removeView(subView)
+                                view.addView(subView, android.widget.FrameLayout.LayoutParams(
+                                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                                ))
+                            }
+                        }
+                    } catch (_: Throwable) {}
+                    if (isInPipMode || selectedSub == "Off" || selectedSub.contains("Hard Sub")) {
                         view.subtitleView?.visibility = View.INVISIBLE
                     } else {
                         view.subtitleView?.visibility = View.VISIBLE
@@ -1468,40 +2117,6 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                 },
                 modifier = Modifier.fillMaxSize()
             )
-
-            // Real-time AI Super Resolution, Line Sharpening & HDR Clarity Visual Layer
-            if (isGraphicsUpscalerEnabled) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen
-                        }
-                        .drawWithContent {
-                            drawContent()
-                            // 1. Dynamic Anime Line-art Clarity (Enhances ink outline definition & deep line contrast)
-                            drawRect(
-                                color = Color(0xFF0A0A14).copy(alpha = 0.16f),
-                                blendMode = androidx.compose.ui.graphics.BlendMode.ColorBurn
-                            )
-                            // 2. Anime OLED Color Saturation Pop & Richness
-                            drawRect(
-                                color = Color(0xFFFFD54F).copy(alpha = 0.13f),
-                                blendMode = androidx.compose.ui.graphics.BlendMode.Overlay
-                            )
-                            // 3. HDR Luminance & Dynamic Range Pop
-                            drawRect(
-                                color = Color(0xFFF0F4FF).copy(alpha = 0.10f),
-                                blendMode = androidx.compose.ui.graphics.BlendMode.Softlight
-                            )
-                            // 4. Micro-Contrast & Background Detail Sharpness
-                            drawRect(
-                                color = Color(0xFF808080).copy(alpha = 0.08f),
-                                blendMode = androidx.compose.ui.graphics.BlendMode.Hardlight
-                            )
-                        }
-                )
-            }
 
             if (!isInPipMode) {
                 // Resize toast notification
@@ -1746,6 +2361,7 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                     }
                 }
             }
+
 
             // ─── Gesture Brightness Thin-Line Vertical Slider (Left Side) ───────
             AnimatedVisibility(
@@ -2312,6 +2928,616 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                 }
             }
 
+            // ─── Persona-Style Special Thanking Dialogue Box (Centered Top-Middle) ───
+            AnimatedVisibility(
+                visible = showThankingBanner && isThankingAudioActive,
+                enter = fadeIn(tween(350)) + scaleIn(tween(400, easing = FastOutSlowInEasing), initialScale = 0.85f) + slideInVertically(initialOffsetY = { -it / 3 }),
+                exit = fadeOut(tween(250)) + scaleOut(tween(250), targetScale = 0.85f) + slideOutVertically(targetOffsetY = { -it / 3 })
+            ) {
+                val thankSubber = if (isShinChanContent) "Shinchan OTAKU" else "Blissey's Husband"
+                val thankMsg = if (isShinChanContent) {
+                    "Thanks to \"Shinchan OTAKU\" for subbing these episodes! Support him on his OK.ru account."
+                } else {
+                    "Special thanks to \"Blissey's Husband\" for providing Hindi dub episodes!"
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 22.dp, start = 16.dp, end = 16.dp),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .widthIn(max = 520.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { showThankingBanner = false },
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        // 1. Chibi Character (Firefly holding heart)
+                        Box(
+                            modifier = Modifier
+                                .size(76.dp)
+                                .offset(y = 2.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.ic_thank_chibi),
+                                contentDescription = "Chibi",
+                                modifier = Modifier
+                                    .size(76.dp)
+                                    .shadow(12.dp, shape = CircleShape, spotColor = Color(0xFFFF4081)),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
+
+                        // 2. Speech Bubble Tail (Pointing directly from dialogue box towards her mouth)
+                        Canvas(
+                            modifier = Modifier
+                                .size(14.dp, 20.dp)
+                                .offset(x = 1.dp, y = (-18).dp)
+                        ) {
+                            val path = Path().apply {
+                                moveTo(size.width, 0f)
+                                lineTo(0f, size.height * 0.5f)
+                                lineTo(size.width, size.height)
+                                close()
+                            }
+                            drawPath(path, color = Color(0xF5141522))
+                            drawPath(
+                                path,
+                                color = Color(0xFFFF4081),
+                                style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                            )
+                        }
+
+                        // 3. Persona Dialogue Bubble Body
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 16.dp))
+                                .background(
+                                    Brush.linearGradient(
+                                        colors = listOf(
+                                            Color(0xF8151725),
+                                            Color(0xF20F101A)
+                                        )
+                                    )
+                                )
+                                .border(
+                                    width = 1.8.dp,
+                                    brush = Brush.horizontalGradient(
+                                        colors = listOf(
+                                            Color(0xFFFF4081), // Neon Pink
+                                            Color(0xFF9C27B0), // Persona Purple
+                                            Color(0xFF00E5FF)  // Electric Cyan
+                                        )
+                                    ),
+                                    shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 16.dp)
+                                )
+                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                        ) {
+                            // Top Bar with Angled Badge & Subber
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    listOf(Color(0xFFFF1493), Color(0xFFFF69B4))
+                                                )
+                                            )
+                                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "SPECIAL THANKS ♥",
+                                            color = Color.White,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Black,
+                                            letterSpacing = 0.8.sp
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = thankSubber,
+                                        color = Color(0xFFFFD54F),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                Text(
+                                    text = "✕",
+                                    color = Color.White.copy(alpha = 0.6f),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(5.dp))
+
+                            Text(
+                                text = thankMsg,
+                                color = Color(0xFFF1F3FF),
+                                fontSize = 11.5.sp,
+                                lineHeight = 16.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ─── Persona-Style Speech Recognition / API Status Dialogue Box (Centered Top-Middle) ───
+            AnimatedVisibility(
+                visible = showSpeechApiNoticeBanner && !speechApiNoticeMessage.isNullOrBlank(),
+                enter = fadeIn(tween(350)) + scaleIn(tween(400, easing = FastOutSlowInEasing), initialScale = 0.85f) + slideInVertically(initialOffsetY = { -it / 3 }),
+                exit = fadeOut(tween(250)) + scaleOut(tween(250), targetScale = 0.85f) + slideOutVertically(targetOffsetY = { -it / 3 })
+            ) {
+                val notice = speechApiNoticeMessage ?: ""
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 22.dp, start = 16.dp, end = 16.dp),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .widthIn(max = 520.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { showSpeechApiNoticeBanner = false },
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        // 1. Chibi Character
+                        Box(
+                            modifier = Modifier
+                                .size(76.dp)
+                                .offset(y = 2.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.ic_thank_chibi),
+                                contentDescription = "Chibi",
+                                modifier = Modifier
+                                    .size(76.dp)
+                                    .shadow(12.dp, shape = CircleShape, spotColor = Color(0xFF00E5FF)),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
+
+                        // 2. Speech Bubble Tail
+                        Canvas(
+                            modifier = Modifier
+                                .size(14.dp, 20.dp)
+                                .offset(x = 1.dp, y = (-18).dp)
+                        ) {
+                            val path = Path().apply {
+                                moveTo(size.width, 0f)
+                                lineTo(0f, size.height * 0.5f)
+                                lineTo(size.width, size.height)
+                                close()
+                            }
+                            drawPath(path, color = Color(0xF5141522))
+                            drawPath(
+                                path,
+                                color = Color(0xFF00E5FF),
+                                style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                            )
+                        }
+
+                        // 3. Persona Dialogue Bubble Body
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 16.dp))
+                                .background(
+                                    Brush.linearGradient(
+                                        colors = listOf(
+                                            Color(0xF8151725),
+                                            Color(0xF20F101A)
+                                        )
+                                    )
+                                )
+                                .border(
+                                    1.5.dp,
+                                    Brush.horizontalGradient(
+                                        colors = listOf(
+                                            Color(0xFF00E5FF),
+                                            Color(0xFF7C4DFF)
+                                        )
+                                    ),
+                                    shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 16.dp)
+                                )
+                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    listOf(Color(0xFF00B0FF), Color(0xFF00E5FF))
+                                                )
+                                            )
+                                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "CLOUD AI SPEECH",
+                                            color = Color.Black,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Black,
+                                            letterSpacing = 0.8.sp
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Status & Notice",
+                                        color = Color(0xFFFFD54F),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                Text(
+                                    text = "✕",
+                                    color = Color.White.copy(alpha = 0.6f),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(5.dp))
+
+                            Text(
+                                text = notice,
+                                color = Color(0xFFF1F3FF),
+                                fontSize = 11.5.sp,
+                                lineHeight = 16.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ─── Persona-Style Community Public Subtitles Save Dialogue Card ───
+            AnimatedVisibility(
+                visible = showSaveToPublicCard && pendingPublicSubInfo != null,
+                enter = fadeIn(tween(350)) + scaleIn(tween(400, easing = FastOutSlowInEasing), initialScale = 0.85f) + slideInVertically(initialOffsetY = { -it / 3 }),
+                exit = fadeOut(tween(250)) + scaleOut(tween(250), targetScale = 0.85f) + slideOutVertically(targetOffsetY = { -it / 3 })
+            ) {
+                val info = pendingPublicSubInfo ?: return@AnimatedVisibility
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 22.dp, start = 16.dp, end = 16.dp),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Row(
+                        modifier = Modifier.widthIn(max = 540.dp),
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(76.dp)
+                                .offset(y = 2.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.ic_thank_chibi),
+                                contentDescription = "Chibi",
+                                modifier = Modifier
+                                    .size(76.dp)
+                                    .shadow(12.dp, shape = CircleShape, spotColor = Color(0xFF00E5FF)),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
+
+                        Canvas(
+                            modifier = Modifier
+                                .size(14.dp, 20.dp)
+                                .offset(x = 1.dp, y = (-18).dp)
+                        ) {
+                            val path = Path().apply {
+                                moveTo(size.width, 0f)
+                                lineTo(0f, size.height * 0.5f)
+                                lineTo(size.width, size.height)
+                                close()
+                            }
+                            drawPath(path, color = Color(0xF5141522))
+                            drawPath(
+                                path,
+                                color = Color(0xFF00E5FF),
+                                style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                            )
+                        }
+
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 16.dp))
+                                .background(
+                                    Brush.linearGradient(
+                                        colors = listOf(
+                                            Color(0xF8151725),
+                                            Color(0xF20F101A)
+                                        )
+                                    )
+                                )
+                                .border(
+                                    width = 1.8.dp,
+                                    brush = Brush.horizontalGradient(
+                                        colors = listOf(
+                                            Color(0xFF00E5FF),
+                                            Color(0xFF3D5AFE),
+                                            Color(0xFFFF4081)
+                                        )
+                                    ),
+                                    shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 16.dp)
+                                )
+                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    listOf(Color(0xFF00E5FF), Color(0xFF3D5AFE))
+                                                )
+                                            )
+                                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "COMMUNITY SUBTITLE",
+                                            color = Color.White,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Black,
+                                            letterSpacing = 0.8.sp
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "by ${info.uploaderName}",
+                                        color = Color(0xFFFFD54F),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                Text(
+                                    text = "✕",
+                                    color = Color.White.copy(alpha = 0.6f),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.clickable { showSaveToPublicCard = false }
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Text(
+                                text = "AI Transcription complete for Ep ${info.episodeNum} (${info.langName})! Share to Public Subtitles so other anime fans can enjoy?",
+                                color = Color(0xFFE2E8F0),
+                                fontSize = 11.5.sp,
+                                lineHeight = 15.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(
+                                horizontalArrangement = Arrangement.End,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Button(
+                                    onClick = { showSaveToPublicCard = false },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF33333E)),
+                                    shape = RoundedCornerShape(6.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(30.dp)
+                                ) {
+                                    Text("Skip", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                Button(
+                                    onClick = {
+                                        showSaveToPublicCard = false
+                                        coroutineScope.launch {
+                                            val success = com.lagradost.cloudstream3.ui.animebox.api.PublicSubtitlesManager.uploadPublicSubtitle(
+                                                context = context,
+                                                anilistId = info.anilistId,
+                                                episodeNum = info.episodeNum,
+                                                animeTitle = info.animeTitle,
+                                                langCode = info.langCode,
+                                                langName = info.langName,
+                                                vttContent = info.vttContent,
+                                                customUploaderName = info.uploaderName
+                                            )
+                                            if (success) {
+                                                android.widget.Toast.makeText(context, "Saved to Public Subtitles! Thank you for contributing!", android.widget.Toast.LENGTH_LONG).show()
+                                                val updated = com.lagradost.cloudstream3.ui.animebox.api.PublicSubtitlesManager.fetchPublicSubtitles(info.anilistId, info.episodeNum)
+                                                publicSubtitlesList = updated
+                                            } else {
+                                                android.widget.Toast.makeText(context, "Failed to share subtitle to Public.", android.widget.Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
+                                    shape = RoundedCornerShape(6.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(30.dp)
+                                ) {
+                                    Text("Save to Public", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ─── Persona-Style Casting Coming Soon Dialogue Box (Centered Top-Middle) ───
+            AnimatedVisibility(
+                visible = showCastDialog,
+                enter = fadeIn(tween(350)) + scaleIn(tween(400, easing = FastOutSlowInEasing), initialScale = 0.85f) + slideInVertically(initialOffsetY = { -it / 3 }),
+                exit = fadeOut(tween(250)) + scaleOut(tween(250), targetScale = 0.85f) + slideOutVertically(targetOffsetY = { -it / 3 })
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 22.dp, start = 16.dp, end = 16.dp),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .widthIn(max = 520.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { showCastDialog = false },
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        // 1. Chibi Character Avatar (Firefly mascot)
+                        Box(
+                            modifier = Modifier
+                                .size(76.dp)
+                                .offset(y = 2.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.ic_thank_chibi),
+                                contentDescription = "Chibi",
+                                modifier = Modifier
+                                    .size(76.dp)
+                                    .shadow(12.dp, shape = CircleShape, spotColor = Color(0xFFFF4081)),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
+
+                        // 2. Speech Bubble Tail
+                        Canvas(
+                            modifier = Modifier
+                                .size(14.dp, 20.dp)
+                                .offset(x = 1.dp, y = (-18).dp)
+                        ) {
+                            val path = Path().apply {
+                                moveTo(size.width, 0f)
+                                lineTo(0f, size.height * 0.5f)
+                                lineTo(size.width, size.height)
+                                close()
+                            }
+                            drawPath(path, color = Color(0xF5141522))
+                            drawPath(
+                                path,
+                                color = Color(0xFFFF4081),
+                                style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                            )
+                        }
+
+                        // 3. Persona Dialogue Bubble Body
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 16.dp))
+                                .background(
+                                    Brush.linearGradient(
+                                        colors = listOf(
+                                            Color(0xF8151725),
+                                            Color(0xF20F101A)
+                                        )
+                                    )
+                                )
+                                .border(
+                                    width = 1.8.dp,
+                                    brush = Brush.horizontalGradient(
+                                        colors = listOf(
+                                            Color(0xFFFF4081), // Neon Pink
+                                            Color(0xFF9C27B0), // Persona Purple
+                                            Color(0xFF00E5FF)  // Electric Cyan
+                                        )
+                                    ),
+                                    shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 16.dp)
+                                )
+                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                        ) {
+                            // Top Bar with Badge & Title
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    listOf(Color(0xFFFF1493), Color(0xFFFF69B4))
+                                                )
+                                            )
+                                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "CASTING",
+                                            color = Color.White,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Black,
+                                            letterSpacing = 0.8.sp
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Coming Soon ✨",
+                                        color = Color(0xFFFFD54F),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                Text(
+                                    text = "✕",
+                                    color = Color.White.copy(alpha = 0.6f),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.clickable { showCastDialog = false }
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(5.dp))
+
+                            Text(
+                                text = "TV and device casting is currently being crafted with love and will be available in an upcoming update! Thank you for enjoying AnimeBox.",
+                                color = Color(0xFFF1F3FF),
+                                fontSize = 11.5.sp,
+                                lineHeight = 16.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
+
             // ─── Audio & Subtitles Drawer ──────────────────────────────────────
             AudioSubtitlesDrawerPanel(
                 show = showAudioSubtitlesPanel,
@@ -2345,6 +3571,13 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                 onAudioSelected = { track ->
                     if (track != selectedAudio) {
                         val newType = if (track == "Hindi") "hindi" else if (track == "English") "dub" else "sub"
+                        if ((track == "English" || track == "Hindi") && selectedSub == "Hard Sub") {
+                            selectedSub = "Off"
+                            prefs.edit().putString("selectedSub", "Off").apply()
+                            if (com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isRememberPlaybackPrefsEnabled(context)) {
+                                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setLastUsedSubMode(context, "Off")
+                            }
+                        }
                         isReloadingStream = true
                         startPosition = player.currentPosition
                         coroutineScope.launch {
@@ -2427,28 +3660,13 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                             com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setLastUsedSubMode(context, sub)
                         }
                         
-                        if (translatedSubMap.containsKey(sub)) {
-                            val localFilePath = translatedSubMap[sub]!!
-                            startPosition = player.currentPosition
-                            val subConfig = MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(java.io.File(localFilePath)))
-                                .setMimeType(MimeTypes.TEXT_VTT)
-                                .setLanguage("translated")
-                                .setLabel(sub)
-                                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_FORCED)
-                                .setRoleFlags(C.ROLE_FLAG_SUBTITLE)
-                                .build()
-                            
-                            val isMp4 = currentHlsUrl.contains(".mp4", ignoreCase = true)
-                            val mimeType = if (isMp4) MimeTypes.VIDEO_MP4 else MimeTypes.APPLICATION_M3U8
-                            val mediaItem = MediaItem.Builder()
-                                .setUri(currentHlsUrl)
-                                .setMimeType(mimeType)
-                                .setSubtitleConfigurations(listOf(subConfig))
-                                .build()
-                            player.setMediaItem(mediaItem, startPosition)
-                            player.prepare()
-                            player.play()
-                        } else if (sub == "Hard Sub") {
+                        if (sub == "Hard Sub") {
+                            selectedAudio = "Japanese (Original)"
+                            currentStreamType = "hardsub"
+                            prefs.edit().putString("selectedAudio", "Japanese (Original)").apply()
+                            if (com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isRememberPlaybackPrefsEnabled(context)) {
+                                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setLastUsedAudio(context, "Japanese (Original)")
+                            }
                             startPosition = player.currentPosition
                             isReloadingStream = true
                             coroutineScope.launch {
@@ -2459,8 +3677,22 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                                 if (hardInfo != null && (hardInfo["hls"] as? String)?.isNotEmpty() == true) {
                                     currentHlsUrl = hardInfo["hls"] as String
                                     currentReferer = (hardInfo["referer"] as? String) ?: ""
-                                    currentSubtitleUrl = ""
-                                    android.widget.Toast.makeText(context, "Subtitles: Hard Sub", android.widget.Toast.LENGTH_SHORT).show()
+                                    currentProvider = (hardInfo["provider"] as? String) ?: ""
+                                    val prov = currentProvider
+                                    val subUrl = (hardInfo["subtitle"] as? String) ?: ""
+                                    val isAniDb = prov.contains("anibd", ignoreCase = true) || prov.contains("anidb", ignoreCase = true) || currentReferer.contains("animeapps", ignoreCase = true) || currentReferer.contains("anibd", ignoreCase = true)
+                                    if (isAniDb && subUrl.isNotEmpty()) {
+                                        currentSubtitleUrl = subUrl
+                                        subPreset = "Hardsub"
+                                        prefs.edit().putString("subPreset", "Hardsub").apply()
+                                        selectedSub = "English (Soft Sub)"
+                                        prefs.edit().putString("selectedSub", "English (Soft Sub)").apply()
+                                        android.widget.Toast.makeText(context, "AniBD: Hard Sub with Soft Subtitles", android.widget.Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        currentSubtitleUrl = ""
+                                        selectedSub = "Hard Sub"
+                                        android.widget.Toast.makeText(context, "Subtitles: Hard Sub (Japanese Audio)", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
                                 } else {
                                     if (com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isShowFallbackDialogsEnabled(context)) {
                                         fallbackDialogData = FallbackDialogData(
@@ -2481,6 +3713,7 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                                                     if (sInfo != null) {
                                                         currentHlsUrl = sInfo["hls"] as String
                                                         currentReferer = sInfo["referer"] as String
+                                                        currentProvider = (sInfo["provider"] as? String) ?: ""
                                                         currentSubtitleUrl = (sInfo["subtitle"] as? String) ?: ""
                                                     }
                                                 }
@@ -2491,78 +3724,124 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                                     }
                                 }
                             }
+                        } else if (sub == "English (Soft Sub)") {
+                            selectedSub = "English (Soft Sub)"
+                            subPreset = "Hardsub"
+                            prefs.edit().putString("selectedSub", "English (Soft Sub)").putString("subPreset", "Hardsub").apply()
+                            liveSubtitleCues = emptyList()
                         } else if (sub == "English (VTT)") {
-                            if (isOfflineMode) {
-                                val subsDir = java.io.File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS), "AnimeBox/subtitles")
-                                val localVtt = java.io.File(subsDir, "sub_${anilistId}_${currentEpisodeNum}.vtt")
-                                val localSrt = java.io.File(subsDir, "sub_${anilistId}_${currentEpisodeNum}.srt")
-                                val extSubsDir = java.io.File(context.getExternalFilesDir(null), "AnimeBox/subtitles")
-                                val extLocalVtt = java.io.File(extSubsDir, "sub_${anilistId}_${currentEpisodeNum}.vtt")
-                                val extLocalSrt = java.io.File(extSubsDir, "sub_${anilistId}_${currentEpisodeNum}.srt")
-                                
-                                val resolvedPath = when {
-                                    localVtt.exists() && localVtt.length() > 0 -> localVtt.absolutePath
-                                    localSrt.exists() && localSrt.length() > 0 -> localSrt.absolutePath
-                                    extLocalVtt.exists() && extLocalVtt.length() > 0 -> extLocalVtt.absolutePath
-                                    extLocalSrt.exists() && extLocalSrt.length() > 0 -> extLocalSrt.absolutePath
-                                    currentSubtitleUrl.isNotEmpty() && java.io.File(currentSubtitleUrl).exists() -> currentSubtitleUrl
-                                    else -> ""
-                                }
-                                if (resolvedPath.isNotEmpty()) {
-                                    currentSubtitleUrl = resolvedPath
-                                    playerViewInstance?.subtitleView?.visibility = View.VISIBLE
-                                    android.widget.Toast.makeText(context, "Subtitles: English (VTT)", android.widget.Toast.LENGTH_SHORT).show()
-                                } else {
-                                    android.widget.Toast.makeText(context, "Subtitles enabled", android.widget.Toast.LENGTH_SHORT).show()
-                                    playerViewInstance?.subtitleView?.visibility = View.VISIBLE
-                                }
-                            } else if (oldSub == "Hard Sub" || currentSubtitleUrl.isEmpty()) {
+                            selectedSub = "English (VTT)"
+                            prefs.edit().putString("selectedSub", "English (VTT)").apply()
+                            liveSubtitleCues = emptyList()
+
+                            if (currentStreamType == "hardsub") {
+                                currentStreamType = "sub"
                                 startPosition = player.currentPosition
                                 isReloadingStream = true
                                 coroutineScope.launch {
-                                    val targetStreamType = if (selectedAudio == "English") "dub" else if (selectedAudio == "Hindi") "hindi" else "sub"
-                                    val streamInfo = withContext(Dispatchers.IO) {
-                                        fetchStreamInfo(anilistId, currentEpisodeNum, targetStreamType)
+                                    val softInfo = withContext(Dispatchers.IO) {
+                                        fetchStreamInfo(anilistId, currentEpisodeNum, "sub")
                                     }
                                     isReloadingStream = false
-                                    if (streamInfo != null) {
-                                        currentHlsUrl = streamInfo["hls"] as String
-                                        currentReferer = streamInfo["referer"] as String
-                                        currentSubtitleUrl = (streamInfo["subtitle"] as? String) ?: ""
-                                        android.widget.Toast.makeText(context, "Subtitles: English (VTT)", android.widget.Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        if (com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isShowFallbackDialogsEnabled(context)) {
-                                            fallbackDialogData = FallbackDialogData(
-                                                title = "Soft Subtitles Unavailable",
-                                                description = "• Soft Subtitles: Text is overlaid dynamically and can be styled, colored, or translated.\n• Hard Subtitles: Subtitles are permanently burned into the video stream for maximum compatibility.\n\nSoft Subtitles are not available for this episode. Would you like to switch to Hard Subtitles?",
-                                                primaryButtonText = "Switch to Hard Sub",
-                                                onPrimaryAction = {
-                                                    selectedSub = "Hard Sub"
-                                                    if (com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isRememberPlaybackPrefsEnabled(context)) {
-                                                        com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setLastUsedSubMode(context, "Hard Sub")
-                                                    }
-                                                    coroutineScope.launch {
-                                                        isReloadingStream = true
-                                                        val hardInfo = withContext(Dispatchers.IO) {
-                                                            fetchStreamInfo(anilistId, currentEpisodeNum, "hardsub")
-                                                        }
-                                                        isReloadingStream = false
-                                                        if (hardInfo != null && (hardInfo["hls"] as? String)?.isNotEmpty() == true) {
-                                                            currentHlsUrl = hardInfo["hls"] as String
-                                                            currentReferer = (hardInfo["referer"] as? String) ?: ""
-                                                            currentSubtitleUrl = ""
-                                                        }
-                                                    }
-                                                }
-                                            )
-                                        } else {
-                                            android.widget.Toast.makeText(context, "Soft Subtitles not available for this episode", android.widget.Toast.LENGTH_SHORT).show()
+                                    if (softInfo != null && (softInfo["hls"] as? String)?.isNotEmpty() == true) {
+                                        currentHlsUrl = softInfo["hls"] as String
+                                        currentReferer = (softInfo["referer"] as? String) ?: ""
+                                        val softSub = (softInfo["subtitle"] as? String) ?: ""
+                                        if (softSub.isNotEmpty()) {
+                                            currentSubtitleUrl = softSub
+                                        }
+                                        android.widget.Toast.makeText(context, "Subtitles: English (VTT) - Soft Sub", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            } else {
+                                val origSub = if (originalSubtitleUrl.isNotEmpty()) originalSubtitleUrl else subtitleUrl
+                                if (origSub.isNotEmpty()) {
+                                    currentSubtitleUrl = origSub
+                                }
+                                player.trackSelectionParameters = player.trackSelectionParameters
+                                    .buildUpon()
+                                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                                    .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                                    .setPreferredTextLanguage("en")
+                                    .setSelectUndeterminedTextLanguage(true)
+                                    .setIgnoredTextSelectionFlags(0)
+                                    .build()
+                                playerViewInstance?.subtitleView?.visibility = View.VISIBLE
+                                val nativeCues = player.currentCues.cues
+                                playerViewInstance?.subtitleView?.setCues(nativeCues)
+                                android.widget.Toast.makeText(context, "Subtitles: English (VTT)", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        } else if (sub.contains("Translated", ignoreCase = true) || sub.contains("AI", ignoreCase = true) || translatedSubMap.containsKey(sub)) {
+                            var transFilePath = translatedSubMap[sub]
+                            if (transFilePath == null && sub.contains("English", ignoreCase = true)) {
+                                transFilePath = translatedSubMap["English (AI Translated)"]
+                            }
+                            if (transFilePath == null) {
+                                val allLangs = listOf(com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.ENGLISH_MODEL) + com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.SUPPORTED_LANGUAGES
+                                val langInfo = allLangs.firstOrNull { sub.contains(it.langName, ignoreCase = true) }
+                                if (langInfo != null) {
+                                    val savedFile = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.getSavedSubtitleFile(context, anilistId, currentEpisodeNum, langInfo.langCode)
+                                    if (savedFile.exists() && savedFile.length() > 150) {
+                                        val cues = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.parseVttToCues(savedFile.readText())
+                                        if (cues.size >= 2) {
+                                            transFilePath = savedFile.absolutePath
+                                            translatedSubMap = translatedSubMap + (sub to transFilePath)
                                         }
                                     }
                                 }
                             }
+                            if (transFilePath != null) {
+                                val f = java.io.File(transFilePath)
+                                if (f.exists() && f.length() > 150) {
+                                    val vttContent = f.readText()
+                                    val cues = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.parseVttToCues(vttContent)
+                                    if (cues.size >= 2) {
+                                        liveSubtitleCues = cues
+                                        val allLangs = listOf(com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.ENGLISH_MODEL) + com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.SUPPORTED_LANGUAGES
+                                        val targetLang = allLangs.firstOrNull { sub.contains(it.langName, ignoreCase = true) } ?: com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.ENGLISH_MODEL
+                                        val isAudioModeSub = (originalSubtitleUrl.isEmpty() && currentSubtitleUrl.isEmpty()) || sub.contains("SenseVoice", ignoreCase = true) || sub.contains("AI Translated", ignoreCase = true)
+                                        if (isAudioModeSub && anilistId > 0 && currentEpisodeNum > 0 && !com.lagradost.cloudstream3.ui.animebox.api.PublicSubtitlesManager.hasSavedToPublic(context, anilistId, currentEpisodeNum, targetLang.langCode)) {
+                                            pendingPublicSubInfo = PendingPublicSubData(
+                                                anilistId = anilistId,
+                                                episodeNum = currentEpisodeNum,
+                                                animeTitle = animeTitle,
+                                                langCode = targetLang.langCode,
+                                                langName = targetLang.langName,
+                                                vttContent = vttContent,
+                                                uploaderName = com.lagradost.cloudstream3.ui.animebox.api.PublicSubtitlesManager.getEffectiveUploaderName(context)
+                                            )
+                                            showSaveToPublicCard = true
+                                        }
+                                    }
+                                }
+                            }
+                            selectedSub = sub
+                            prefs.edit().putString("selectedSub", sub).apply()
+
+                            if (currentStreamType == "hardsub") {
+                                currentStreamType = "sub"
+                                startPosition = player.currentPosition
+                                isReloadingStream = true
+                                coroutineScope.launch {
+                                    val softInfo = withContext(Dispatchers.IO) {
+                                        fetchStreamInfo(anilistId, currentEpisodeNum, "sub")
+                                    }
+                                    isReloadingStream = false
+                                    if (softInfo != null && (softInfo["hls"] as? String)?.isNotEmpty() == true) {
+                                        currentHlsUrl = softInfo["hls"] as String
+                                        currentReferer = (softInfo["referer"] as? String) ?: ""
+                                        val softSub = (softInfo["subtitle"] as? String) ?: ""
+                                        if (softSub.isNotEmpty()) {
+                                            currentSubtitleUrl = softSub
+                                        }
+                                    }
+                                }
+                            }
+                            android.widget.Toast.makeText(context, "Subtitles: $sub", android.widget.Toast.LENGTH_SHORT).show()
                         } else if (sub == "Off") {
-                            currentSubtitleUrl = ""
+                            selectedSub = "Off"
+                            prefs.edit().putString("selectedSub", "Off").apply()
+                            liveSubtitleCues = emptyList()
                             android.widget.Toast.makeText(context, "Subtitles: Off", android.widget.Toast.LENGTH_SHORT).show()
                         }
                     }
@@ -2579,9 +3858,9 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                     subBgOpacity = opacityVal
                     prefs.edit().putInt("subBgOpacity", opacityVal).apply()
                 },
-                onEdgeTypeChanged = { edge ->
-                    subEdgeType = edge
-                    prefs.edit().putInt("subEdgeType", edge).apply()
+                onEdgeTypeChanged = { edgeTypeVal ->
+                    subEdgeType = edgeTypeVal
+                    prefs.edit().putInt("subEdgeType", edgeTypeVal).apply()
                 },
                 onPresetSelected = { presetName, fSize, tColor, bgOp, edge ->
                     subPreset = presetName
@@ -2598,10 +3877,47 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                         .apply()
                 },
                 onRequestTranslate = {
-                    if (currentSubtitleUrl.isNotEmpty()) {
-                        showTranslateSubDialog = true
-                    } else {
-                        android.widget.Toast.makeText(context, "No active subtitle found to translate", android.widget.Toast.LENGTH_SHORT).show()
+                    showTranslateSubDialog = true
+                },
+                isAudioMode = currentSubtitleUrl.isEmpty() && selectedSub != "Hard Sub",
+                publicSubtitlesList = publicSubtitlesList,
+                onPublicSubSelected = { pubSub ->
+                    try {
+                        val subKey = "${pubSub.langName} (Public)"
+                        selectedSub = subKey
+                        prefs.edit().putString("selectedSub", subKey).apply()
+                        if (currentStreamType == "hardsub") {
+                            currentStreamType = "sub"
+                            coroutineScope.launch {
+                                try {
+                                    val fbMap = fetchStreamInfo(anilistId, currentEpisodeNum, "sub")
+                                    if (fbMap != null && (fbMap["hls"] as? String)?.isNotEmpty() == true) {
+                                        currentHlsUrl = fbMap["hls"] as String
+                                        currentReferer = (fbMap["referer"] as? String) ?: ""
+                                        val fbSub = (fbMap["subtitle"] as? String) ?: ""
+                                        if (fbSub.isNotEmpty()) {
+                                            currentSubtitleUrl = fbSub
+                                        }
+                                    }
+                                } catch (_: Throwable) {}
+                            }
+                        }
+                        val cues = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.parseVttToCues(pubSub.vttContent)
+                        if (cues.isNotEmpty()) {
+                            liveSubtitleCues = cues
+                            val targetAnilistId = if (currentAnilistId > 0) currentAnilistId else anilistId
+                            val safeLangCode = pubSub.langCode.replace(Regex("""[^a-zA-Z0-9_\-]"""), "_")
+                            val savedFile = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.getSavedSubtitleFile(context, targetAnilistId, currentEpisodeNum, safeLangCode)
+                            try {
+                                savedFile.parentFile?.mkdirs()
+                                savedFile.writeText(pubSub.vttContent)
+                                translatedSubMap = translatedSubMap + (subKey to savedFile.absolutePath)
+                            } catch (_: Exception) {}
+                        }
+                        android.widget.Toast.makeText(context, "Loaded ${pubSub.langName} public subtitles by ${pubSub.uploaderName}", android.widget.Toast.LENGTH_SHORT).show()
+                    } catch (t: Throwable) {
+                        t.printStackTrace()
+                        android.widget.Toast.makeText(context, "Loaded ${pubSub.langName} public subtitles", android.widget.Toast.LENGTH_SHORT).show()
                     }
                 }
             )
@@ -2614,9 +3930,18 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                 currentQuality = currentQuality,
                 videoTrackHeights = videoTrackHeights,
                 isGraphicsUpscalerEnabled = isGraphicsUpscalerEnabled,
+                showShaderSettings = showShaderSettings,
+                enhancerPreset = enhancerPreset,
+                enhancerSharpness = enhancerSharpness,
+                enhancerContrast = enhancerContrast,
+                enhancerSaturation = enhancerSaturation,
+                enhancerLineClarity = enhancerLineClarity,
                 deviceSpecs = deviceSpecs,
                 currentSpeed = currentSpeed,
-                onClose = { showSpeedQualityPanel = false },
+                onClose = {
+                    showShaderSettings = false
+                    showSpeedQualityPanel = false
+                },
                 onQualitySelected = { qualKey ->
                     currentQuality = qualKey
                     val (maxW, maxH) = when {
@@ -2643,9 +3968,56 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                     prefs.edit().putBoolean("graphics_upscaler_enabled", enabled).apply()
                     android.widget.Toast.makeText(
                         context,
-                        if (enabled) "✨ Ultra Anime HDR & Graphics Enhancer Activated" else "Graphics Enhancer Disabled",
+                        if (enabled) "✨ Graphics Enhancer Activated" else "Graphics Enhancer Disabled",
                         android.widget.Toast.LENGTH_SHORT
                     ).show()
+                },
+                onToggleShaderSettings = { showShaderSettings = it },
+                onPresetSelected = { preset ->
+                    enhancerPreset = preset
+                    enhancerSharpness = preset.defaultSharpness
+                    enhancerContrast = preset.defaultContrast
+                    enhancerSaturation = preset.defaultSaturation
+                    enhancerLineClarity = preset.defaultLineClarity
+                    prefs.edit()
+                        .putString("enhancer_preset_id", preset.id)
+                        .putFloat("enhancer_sharpness", preset.defaultSharpness)
+                        .putFloat("enhancer_contrast", preset.defaultContrast)
+                        .putFloat("enhancer_saturation", preset.defaultSaturation)
+                        .putFloat("enhancer_line_clarity", preset.defaultLineClarity)
+                        .apply()
+                },
+                onSharpnessChanged = { v ->
+                    enhancerSharpness = v
+                    enhancerPreset = com.lagradost.cloudstream3.ui.animebox.enhancer.EnhancerPreset.CUSTOM
+                    prefs.edit()
+                        .putString("enhancer_preset_id", com.lagradost.cloudstream3.ui.animebox.enhancer.EnhancerPreset.CUSTOM.id)
+                        .putFloat("enhancer_sharpness", v)
+                        .apply()
+                },
+                onContrastChanged = { v ->
+                    enhancerContrast = v
+                    enhancerPreset = com.lagradost.cloudstream3.ui.animebox.enhancer.EnhancerPreset.CUSTOM
+                    prefs.edit()
+                        .putString("enhancer_preset_id", com.lagradost.cloudstream3.ui.animebox.enhancer.EnhancerPreset.CUSTOM.id)
+                        .putFloat("enhancer_contrast", v)
+                        .apply()
+                },
+                onSaturationChanged = { v ->
+                    enhancerSaturation = v
+                    enhancerPreset = com.lagradost.cloudstream3.ui.animebox.enhancer.EnhancerPreset.CUSTOM
+                    prefs.edit()
+                        .putString("enhancer_preset_id", com.lagradost.cloudstream3.ui.animebox.enhancer.EnhancerPreset.CUSTOM.id)
+                        .putFloat("enhancer_saturation", v)
+                        .apply()
+                },
+                onLineClarityChanged = { v ->
+                    enhancerLineClarity = v
+                    enhancerPreset = com.lagradost.cloudstream3.ui.animebox.enhancer.EnhancerPreset.CUSTOM
+                    prefs.edit()
+                        .putString("enhancer_preset_id", com.lagradost.cloudstream3.ui.animebox.enhancer.EnhancerPreset.CUSTOM.id)
+                        .putFloat("enhancer_line_clarity", v)
+                        .apply()
                 }
             )
 
@@ -2709,67 +4081,8 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                 }
             }
 
-            // ─── Non-intrusive Playback Issue & Report Pill (Top Floating) ───
-            AnimatedVisibility(
-                visible = !isOfflineMode && showStreamReportPill,
-                enter = fadeIn() + slideInVertically { -it },
-                exit = fadeOut() + slideOutVertically { -it },
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .statusBarsPadding()
-                    .padding(top = 12.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Color(0xE61A1A24))
-                        .border(0.5.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
-                        .padding(horizontal = 14.dp, vertical = 7.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(if (isEpisodeReported) Color(0xFF4ADE80) else Color(0xFFF87171))
-                        )
-                        Text(
-                            text = if (isEpisodeReported) "Issue Reported • Switching stream" else "Playback issue? Switching stream or",
-                            color = Color.White,
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        if (!isEpisodeReported) {
-                            Text(
-                                text = "Report",
-                                color = playerAccentColor,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier
-                                    .clickable {
-                                        isEpisodeReported = true
-                                        val act = context.findActivity()
-                                        val repIntent = Intent(context, AnimeBoxDetailActivity::class.java).apply {
-                                            putExtra("anilistId", anilistId)
-                                            putExtra("initialTitle", animeTitle)
-                                            putExtra("openReportDialog", true)
-                                            putExtra("reportEpisode", currentEpisodeNum)
-                                            putExtra("reportAnimeTitle", animeTitle)
-                                        }
-                                        context.startActivity(repIntent)
-                                        act?.finish()
-                                    }
-                                    .padding(horizontal = 4.dp)
-                            )
-                        }
-                    }
-                }
-            }
 
-            // ─── Resume Dialog (Drawn at the bottom of Main UI Box so it remains on top of everything) ───
+            // ─── Resume Dialog ───
             if (showResumeDialog && savedProgress > 0L) {
                 ResumeDialogContent(
                     savedProgress = savedProgress,
@@ -2777,7 +4090,7 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                     onDismiss = { showResumeDialog = false }
                 )
             }
-            
+
             // ─── Smart Fallback Dialog ───
             if (fallbackDialogData != null) {
                 val fData = fallbackDialogData!!
@@ -2795,36 +4108,318 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                 )
             }
 
-            // ─── Cast & Chromecast Dialog ───
-            if (showCastDialog) {
-                CastDialogContent(
-                    animeTitle = animeTitle,
-                    currentEpisodeNum = currentEpisodeNum,
-                    playerAccentColor = playerAccentColor,
-                    onDismiss = { showCastDialog = false }
-                )
-            }
+        // ─── Subtitle Auto-Translation Dialog ───
+        if (showTranslateSubDialog) {
+            TranslationDialogContent(
+                currentSubtitleUrl = currentSubtitleUrl,
+                subtitleUrl = subtitleUrl,
+                originalSubtitleUrl = originalSubtitleUrl,
+                selectedSub = selectedSub,
+                currentHlsUrl = currentHlsUrl,
+                currentReferer = currentReferer,
+                anilistId = anilistId,
+                currentEpisodeNum = currentEpisodeNum,
+                animeTitle = animeTitle,
+                coverUrl = showCoverUrl,
+                player = player,
+                prefs = prefs,
+                coroutineScope = coroutineScope,
+                onDismiss = { showTranslateSubDialog = false },
+                onTranslatingStateChanged = { isTranslatingSub = it },
+                onTranslatedSubMapChanged = { translatedSubMap = it },
+                translatedSubMap = translatedSubMap,
+                onSelectedSubChanged = { selectedSub = it },
+                onLiveStatusChanged = { liveTranslatingStatus = it },
+                onLiveCuesChanged = { liveSubtitleCues = it },
+                onRequestModelDownload = { info ->
+                    modelDownloadPrompt = info
+                },
+                onRequestLocalModelWarning = { info ->
+                    localModelWarningPrompt = info
+                },
+                isAudioMode = currentSubtitleUrl.isEmpty() && selectedSub != "Hard Sub",
+                publicSubtitlesList = publicSubtitlesList,
+                onTriggerSaveToPublic = { pending ->
+                    pendingPublicSubInfo = pending
+                    showSaveToPublicCard = true
+                }
+            )
+        }
 
-            // ─── Subtitle Auto-Translation Dialog ───
-            if (showTranslateSubDialog) {
-                TranslationDialogContent(
-                    currentSubtitleUrl = currentSubtitleUrl,
-                    subtitleUrl = subtitleUrl,
-                    selectedSub = selectedSub,
-                    currentHlsUrl = currentHlsUrl,
-                    player = player,
-                    prefs = prefs,
-                    coroutineScope = coroutineScope,
-                    onDismiss = { showTranslateSubDialog = false },
-                    onTranslatingStateChanged = { isTranslatingSub = it },
-                    onTranslatedSubMapChanged = { translatedSubMap = it },
-                    translatedSubMap = translatedSubMap,
-                    onSelectedSubChanged = { selectedSub = it }
-                )
-            }
+        // ─── Local AI Model High-End Device Warning Dialog (Persona Style UI) ───
+        localModelWarningPrompt?.let { modelInfo ->
+            LocalModelWarningDialog(
+                modelInfo = modelInfo,
+                onContinue = {
+                    val info = modelInfo
+                    localModelWarningPrompt = null
+                    com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.setSelectedSpeechModel(context, info.langCode)
+                    val isDl = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.isModelDownloaded(context, info.langCode)
+                    if (!isDl) {
+                        modelDownloadPrompt = info
+                    } else {
+                        android.widget.Toast.makeText(context, "Selected on-device ${info.langName}", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onDismiss = {
+                    localModelWarningPrompt = null
+                }
+            )
+        }
+
+        // ─── AI Model Download Prompt Dialog (Resume Style UI) ───
+        modelDownloadPrompt?.let { modelInfo ->
+            ModelDownloadPromptDialog(
+                modelInfo = modelInfo,
+                onConfirm = {
+                    val infoToDownload = modelInfo
+                    activeModelDownloadProgress = com.lagradost.cloudstream3.ui.animebox.api.ModelDownloadProgress(
+                        langName = infoToDownload.langName,
+                        langCode = infoToDownload.langCode,
+                        percent = 0,
+                        downloadedBytes = 0,
+                        totalBytes = infoToDownload.sizeBytes,
+                        speedBps = 0
+                    )
+                    modelDownloadPrompt = null
+                    val isSenseVoice = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.JAPANESE_SPEECH_MODELS.any { it.langCode.equals(infoToDownload.langCode, true) }
+                    activeModelDownloadJob?.cancel()
+                    activeModelDownloadJob = coroutineScope.launch {
+                        try {
+                            val savedFile = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.isCompleteSavedSubtitle(context, anilistId, currentEpisodeNum, "en")
+                            if (savedFile != null) {
+                                val existingCues = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.parseVttToCues(savedFile.readText())
+                                if (existingCues.size >= 5) {
+                                    liveSubtitleCues = existingCues
+                                    translatedSubMap = translatedSubMap + ("English (AI Translated)" to savedFile.absolutePath)
+                                    android.widget.Toast.makeText(context, "Loaded saved English subtitles", android.widget.Toast.LENGTH_SHORT).show()
+                                    return@launch
+                                }
+                            }
+                            val success = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.downloadModel(
+                                context,
+                                infoToDownload.langCode
+                            ) { progress ->
+                                activeModelDownloadProgress = progress
+                            }
+                            activeModelDownloadProgress = null
+                            if (success) {
+                                if (isSenseVoice) {
+                                    com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.setSelectedSpeechModel(context, infoToDownload.langCode)
+                                    val transLabel = "English (AI Translated)"
+                                    selectedSub = transLabel
+                                    prefs.edit().putString("selectedSub", transLabel).apply()
+                                    val savedFile = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.isCompleteSavedSubtitle(context, anilistId, currentEpisodeNum, "en")
+                                    if (savedFile != null) {
+                                        val existingCues = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.parseVttToCues(savedFile.readText())
+                                        if (existingCues.size >= 5) {
+                                            liveSubtitleCues = existingCues
+                                            translatedSubMap = translatedSubMap + (transLabel to savedFile.absolutePath)
+                                            android.widget.Toast.makeText(context, "Loaded saved English subtitles", android.widget.Toast.LENGTH_SHORT).show()
+                                            return@launch
+                                        }
+                                    }
+                                    isTranslatingSub = true
+                                    liveTranslatingStatus = "Transcribing Japanese audio with ${infoToDownload.langName}..."
+                                    liveSubtitleCues = emptyList()
+                                    val localFilePath = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.transcribeAndTranslateEpisodeAudio(
+                                        context = context,
+                                        hlsOrVideoUrl = currentHlsUrl,
+                                        referer = currentReferer,
+                                        targetLangCode = "en",
+                                        speechModelCode = infoToDownload.langCode,
+                                        anilistId = anilistId,
+                                        episodeNum = currentEpisodeNum,
+                                        animeTitle = animeTitle,
+                                        coverUrl = showCoverUrl,
+                                        knownSubtitleUrl = if (originalSubtitleUrl.isNotEmpty()) originalSubtitleUrl else subtitleUrl.ifEmpty { currentSubtitleUrl },
+                                        onProgress = { cur, total, tempPath, cues ->
+                                            liveTranslatingStatus = "Transcribing Japanese audio ($cur/$total)"
+                                            liveSubtitleCues = cues
+                                            if (!translatedSubMap.containsKey(transLabel)) {
+                                                translatedSubMap = translatedSubMap + (transLabel to tempPath)
+                                            }
+                                        }
+                                    )
+                                    isTranslatingSub = false
+                                    liveTranslatingStatus = null
+                                    if (localFilePath != null) {
+                                        translatedSubMap = translatedSubMap + (transLabel to localFilePath)
+                                        val f = java.io.File(localFilePath)
+                                        if (f.exists() && f.length() > 150) {
+                                            val vttTxt = f.readText()
+                                            liveSubtitleCues = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.parseVttToCues(vttTxt)
+                                            pendingPublicSubInfo = PendingPublicSubData(
+                                                anilistId = anilistId,
+                                                episodeNum = currentEpisodeNum,
+                                                animeTitle = animeTitle,
+                                                langCode = "en",
+                                                langName = infoToDownload.langName,
+                                                vttContent = vttTxt,
+                                                uploaderName = com.lagradost.cloudstream3.ui.animebox.api.PublicSubtitlesManager.getEffectiveUploaderName(context)
+                                            )
+                                            showSaveToPublicCard = true
+                                        }
+                                        android.widget.Toast.makeText(context, "Subtitles generated from Japanese audio with ${infoToDownload.langName}!", android.widget.Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        android.widget.Toast.makeText(context, "Failed to transcribe audio. Please try again.", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    val isEn = infoToDownload.langCode.equals("en", true)
+                                    val transLabel = if (isEn) "English (AI Translated)" else "${infoToDownload.langName} (AI Translated)"
+                                    selectedSub = transLabel
+                                    prefs.edit().putString("selectedSub", transLabel).apply()
+                                    val savedFile = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.isCompleteSavedSubtitle(context, anilistId, currentEpisodeNum, infoToDownload.langCode)
+                                    if (savedFile != null) {
+                                        val existingCues = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.parseVttToCues(savedFile.readText())
+                                        if (existingCues.size >= 5) {
+                                            liveSubtitleCues = existingCues
+                                            translatedSubMap = translatedSubMap + (transLabel to savedFile.absolutePath)
+                                            android.widget.Toast.makeText(context, "Loaded saved ${infoToDownload.langName} subtitles", android.widget.Toast.LENGTH_SHORT).show()
+                                            return@launch
+                                        }
+                                    }
+                                    val isAudioMode = currentSubtitleUrl.isEmpty() && selectedSub != "Hard Sub"
+                                    if (isAudioMode) {
+                                        isTranslatingSub = true
+                                        val activeSpeech = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.getSelectedSpeechModel(context)
+                                        liveTranslatingStatus = "Transcribing Japanese audio with ${activeSpeech.langName}..."
+                                        liveSubtitleCues = emptyList()
+                                        val localFilePath = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.transcribeAndTranslateEpisodeAudio(
+                                            context = context,
+                                            hlsOrVideoUrl = currentHlsUrl,
+                                            referer = currentReferer,
+                                            targetLangCode = infoToDownload.langCode,
+                                            speechModelCode = activeSpeech.langCode,
+                                            anilistId = anilistId,
+                                            episodeNum = currentEpisodeNum,
+                                            animeTitle = animeTitle,
+                                            coverUrl = showCoverUrl,
+                                            knownSubtitleUrl = if (originalSubtitleUrl.isNotEmpty()) originalSubtitleUrl else subtitleUrl.ifEmpty { currentSubtitleUrl },
+                                            onProgress = { cur, total, tempPath, cues ->
+                                                liveTranslatingStatus = "Transcribing Japanese audio ($cur/$total)"
+                                                liveSubtitleCues = cues
+                                                if (!translatedSubMap.containsKey(transLabel)) {
+                                                    translatedSubMap = translatedSubMap + (transLabel to tempPath)
+                                                }
+                                            }
+                                        )
+                                        isTranslatingSub = false
+                                        liveTranslatingStatus = null
+                                        if (localFilePath != null) {
+                                            translatedSubMap = translatedSubMap + (transLabel to localFilePath)
+                                            val f = java.io.File(localFilePath)
+                                            if (f.exists() && f.length() > 150) {
+                                                liveSubtitleCues = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.parseVttToCues(f.readText())
+                                            }
+                                            android.widget.Toast.makeText(context, "Subtitles translated to ${infoToDownload.langName}!", android.widget.Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            android.widget.Toast.makeText(context, "Failed to transcribe audio. Please try again.", android.widget.Toast.LENGTH_SHORT).show()
+                                        }
+                                    } else {
+                                        liveTranslatingStatus = "Translating subtitles to ${infoToDownload.langName}..."
+                                        liveSubtitleCues = emptyList()
+                                        val subToTranslate = when {
+                                            originalSubtitleUrl.isNotEmpty() -> originalSubtitleUrl
+                                            currentSubtitleUrl.isNotEmpty() -> currentSubtitleUrl
+                                            subtitleUrl.isNotEmpty() -> subtitleUrl
+                                            else -> ""
+                                        }
+                                        val localFilePath = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.translateSubtitleVtt(
+                                            context = context,
+                                            vttUrlOrPath = subToTranslate,
+                                            targetLangCode = infoToDownload.langCode,
+                                            hlsUrl = currentHlsUrl,
+                                            referer = currentReferer,
+                                            anilistId = anilistId,
+                                            episodeNum = currentEpisodeNum,
+                                            animeTitle = animeTitle,
+                                            coverUrl = showCoverUrl,
+                                            onProgress = { cur, total, tempPath, cues ->
+                                                liveTranslatingStatus = "Translating to ${infoToDownload.langName} ($cur/$total)"
+                                                liveSubtitleCues = cues
+                                                if (!translatedSubMap.containsKey(transLabel)) {
+                                                    translatedSubMap = translatedSubMap + (transLabel to tempPath)
+                                                }
+                                            }
+                                        )
+                                        isTranslatingSub = false
+                                        liveTranslatingStatus = null
+                                        if (localFilePath != null) {
+                                            translatedSubMap = translatedSubMap + (transLabel to localFilePath)
+                                            val f = java.io.File(localFilePath)
+                                            if (f.exists() && f.length() > 150) {
+                                                liveSubtitleCues = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.parseVttToCues(f.readText())
+                                            }
+                                            android.widget.Toast.makeText(context, "Subtitles translated to ${infoToDownload.langName}!", android.widget.Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            android.widget.Toast.makeText(context, "Failed to translate subtitles. Please try again.", android.widget.Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            } else {
+                                android.widget.Toast.makeText(context, "Download failed for ${infoToDownload.langName} AI model.", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        } catch (t: Throwable) {
+                            isTranslatingSub = false
+                            liveTranslatingStatus = null
+                            activeModelDownloadProgress = null
+                            android.widget.Toast.makeText(context, "Transcription error: ${t.localizedMessage ?: "Failed to process"}", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+                onDismiss = { modelDownloadPrompt = null }
+            )
+        }
+
+        // ─── AI Model Download Progress Overlay (App Updater Style UI) ───
+        activeModelDownloadProgress?.let { progress ->
+            ModelDownloadProgressOverlay(
+                progress = progress,
+                onCancel = {
+                    activeModelDownloadJob?.cancel()
+                    activeModelDownloadProgress = null
+                }
+            )
+        }
+
+        // ─── Floating Live Subtitle Translation Indicator (Top Right) ───
+        if (liveTranslatingStatus != null && !isInPipMode) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .padding(top = 16.dp, end = 20.dp),
+                contentAlignment = Alignment.TopEnd
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xE614141A))
+                        .padding(horizontal = 14.dp, vertical = 7.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(13.dp),
+                            color = playerAccentColor,
+                            strokeWidth = 2.dp
+                        )
+                        Text(
+                            text = liveTranslatingStatus ?: "",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
             }
         }
     }
+}
+}
 
     @Composable
     private fun AudioSubtitlesDrawerPanel(
@@ -2853,7 +4448,10 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
         onBgOpacityChanged: (Int) -> Unit,
         onEdgeTypeChanged: (Int) -> Unit,
         onPresetSelected: (presetName: String, fSize: Float, tColor: Int, bgOp: Int, edge: Int) -> Unit,
-        onRequestTranslate: () -> Unit
+        onRequestTranslate: () -> Unit,
+        isAudioMode: Boolean = false,
+        publicSubtitlesList: List<com.lagradost.cloudstream3.ui.animebox.api.PublicSubtitleItem> = emptyList(),
+        onPublicSubSelected: (com.lagradost.cloudstream3.ui.animebox.api.PublicSubtitleItem) -> Unit = {}
     ) {
         if (!show) return
         val context = LocalContext.current
@@ -2897,11 +4495,11 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                             Text("Back to Audio & Subs", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                         }
 
-                        // PRESET STYLES (Clean names, no emojis, Default at top)
+                        // PRESET STYLES (Matching Quality section box styling)
                         Text("PRESET STYLES", color = Color(0xFFAAAAAA), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
                         val presets = listOf(
                             Triple("Default", "Standard subtitles with balanced outline & background", Triple(24f, android.graphics.Color.WHITE, Pair(128, androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE))),
-                            Triple("Hardsub", "Solid bold white with crisp black outline", Triple(24f, android.graphics.Color.WHITE, Pair(0, androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE))),
+                            Triple("Hardsub", "Solid bold white with bold black anime outline", Triple(24f, android.graphics.Color.WHITE, Pair(0, androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE))),
                             Triple("Yellow", "Classic anime yellow with black outline", Triple(24f, android.graphics.Color.YELLOW, Pair(0, androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE))),
                             Triple("Cinema", "White text with drop shadow and tint", Triple(24f, android.graphics.Color.WHITE, Pair(76, androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW))),
                             Triple("Box", "High contrast with solid background box", Triple(24f, android.graphics.Color.WHITE, Pair(178, androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE))),
@@ -2912,9 +4510,9 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 3.5.dp)
+                                    .padding(vertical = 4.dp)
                                     .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isSel) Color(0xFF2C2C33) else Color(0xFF1B1B20))
+                                    .background(if (isSel) Color(0xFF2C2C33) else Color.Transparent)
                                     .clickable {
                                         val fSize = pConfig.first
                                         val tColor = pConfig.second
@@ -2922,18 +4520,19 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                                         val edge = pConfig.third.second
                                         onPresetSelected(pName, fSize, tColor, bgOp, edge)
                                     }
-                                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                                    .padding(horizontal = 16.dp, vertical = 12.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.Top) {
-                                    Box(modifier = Modifier.size(18.dp).padding(top = 2.dp), contentAlignment = Alignment.Center) {
+                                    Box(modifier = Modifier.size(20.dp).padding(top = 2.dp), contentAlignment = Alignment.Center) {
                                         if (isSel) {
-                                            Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = playerAccentColor, modifier = Modifier.size(16.dp))
+                                            Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = playerAccentColor, modifier = Modifier.size(18.dp))
                                         }
                                     }
-                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Spacer(modifier = Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(pName, color = if (isSel) Color.White else Color(0xFFE5E5EA), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium, fontSize = 13.5.sp)
-                                        Text(pDesc, color = if (isSel) Color(0xFFA5A5AD) else Color(0xFF7E7E8F), fontSize = 11.sp)
+                                        Text(pName, color = if (isSel) Color.White else Color(0xFFE5E5EA), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, fontSize = 15.sp)
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(pDesc, color = if (isSel) Color(0xFFA5A5AD) else Color(0xFF8E8E9F), fontSize = 12.sp)
                                     }
                                 }
                             }
@@ -2951,20 +4550,20 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 3.dp)
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .padding(vertical = 4.dp)
+                                    .clip(RoundedCornerShape(12.dp))
                                     .background(if (isSel) Color(0xFF2C2C33) else Color.Transparent)
                                     .clickable { onEdgeTypeChanged(edgeVal) }
-                                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                                    .padding(horizontal = 16.dp, vertical = 12.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(modifier = Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+                                    Box(modifier = Modifier.size(20.dp), contentAlignment = Alignment.Center) {
                                         if (isSel) {
-                                            Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = playerAccentColor, modifier = Modifier.size(16.dp))
+                                            Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = playerAccentColor, modifier = Modifier.size(18.dp))
                                         }
                                     }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(edgeLabel, color = if (isSel) Color.White else Color(0xFFE5E5EA), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, fontSize = 13.5.sp)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(edgeLabel, color = if (isSel) Color.White else Color(0xFFE5E5EA), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, fontSize = 15.sp)
                                 }
                             }
                         }
@@ -2977,20 +4576,20 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 3.dp)
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .padding(vertical = 4.dp)
+                                    .clip(RoundedCornerShape(12.dp))
                                     .background(if (isSel) Color(0xFF2C2C33) else Color.Transparent)
                                     .clickable { onFontSizeChanged(size) }
-                                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                                    .padding(horizontal = 16.dp, vertical = 12.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(modifier = Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+                                    Box(modifier = Modifier.size(20.dp), contentAlignment = Alignment.Center) {
                                         if (isSel) {
-                                            Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = playerAccentColor, modifier = Modifier.size(16.dp))
+                                            Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = playerAccentColor, modifier = Modifier.size(18.dp))
                                         }
                                     }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(label, color = if (isSel) Color.White else Color(0xFFE5E5EA), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, fontSize = 13.5.sp)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(label, color = if (isSel) Color.White else Color(0xFFE5E5EA), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, fontSize = 15.sp)
                                 }
                             }
                         }
@@ -3009,20 +4608,20 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 3.dp)
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .padding(vertical = 4.dp)
+                                    .clip(RoundedCornerShape(12.dp))
                                     .background(if (isSel) Color(0xFF2C2C33) else Color.Transparent)
                                     .clickable { onTextColorChanged(colorVal) }
-                                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                                    .padding(horizontal = 16.dp, vertical = 12.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(modifier = Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+                                    Box(modifier = Modifier.size(20.dp), contentAlignment = Alignment.Center) {
                                         if (isSel) {
-                                            Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = playerAccentColor, modifier = Modifier.size(16.dp))
+                                            Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = playerAccentColor, modifier = Modifier.size(18.dp))
                                         }
                                     }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(colorLabel, color = if (isSel) Color.White else Color(0xFFE5E5EA), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, fontSize = 13.5.sp)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(colorLabel, color = if (isSel) Color.White else Color(0xFFE5E5EA), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, fontSize = 15.sp)
                                 }
                             }
                         }
@@ -3041,20 +4640,20 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 3.dp)
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .padding(vertical = 4.dp)
+                                    .clip(RoundedCornerShape(12.dp))
                                     .background(if (isSel) Color(0xFF2C2C33) else Color.Transparent)
                                     .clickable { onBgOpacityChanged(opacityVal) }
-                                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                                    .padding(horizontal = 16.dp, vertical = 12.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(modifier = Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+                                    Box(modifier = Modifier.size(20.dp), contentAlignment = Alignment.Center) {
                                         if (isSel) {
-                                            Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = playerAccentColor, modifier = Modifier.size(16.dp))
+                                            Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = playerAccentColor, modifier = Modifier.size(18.dp))
                                         }
                                     }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(opacityLabel, color = if (isSel) Color.White else Color(0xFFE5E5EA), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, fontSize = 13.5.sp)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(opacityLabel, color = if (isSel) Color.White else Color(0xFFE5E5EA), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, fontSize = 15.sp)
                                 }
                             }
                         }
@@ -3080,18 +4679,27 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                                             .clip(RoundedCornerShape(8.dp))
                                             .background(if (audioSubTab == 0) Color(0xFF32323C) else Color.Transparent)
                                             .clickable { onTabChange(0) }
-                                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
                                     ) {
-                                        Text("Audio", color = if (audioSubTab == 0) Color.White else Color.Gray, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text("Audio", color = if (audioSubTab == 0) Color.White else Color.Gray, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
                                     }
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(8.dp))
                                             .background(if (audioSubTab == 1) Color(0xFF32323C) else Color.Transparent)
                                             .clickable { onTabChange(1) }
-                                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
                                     ) {
-                                        Text("Subtitles", color = if (audioSubTab == 1) Color.White else Color.Gray, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text("Subtitles", color = if (audioSubTab == 1) Color.White else Color.Gray, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (audioSubTab == 2) Color(0xFF32323C) else Color.Transparent)
+                                            .clickable { onTabChange(2) }
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        Text("Public Subs", color = if (audioSubTab == 2) Color.White else Color.Gray, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
                                     }
                                 }
                             } else {
@@ -3153,6 +4761,87 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                                         }
                                     }
                                 }
+                            } else if (!isExternalVideo && audioSubTab == 2) {
+                                Text(
+                                    text = "Community uploaded subtitles",
+                                    color = Color(0xFFE0E0E6),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Normal,
+                                    modifier = Modifier.padding(bottom = 16.dp, start = 2.dp)
+                                )
+
+                                if (publicSubtitlesList.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 32.dp, horizontal = 12.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Icon(
+                                                painter = painterResource(R.drawable.ic_baseline_translate_24),
+                                                contentDescription = null,
+                                                tint = Color(0xFF6B6B7A),
+                                                modifier = Modifier.size(38.dp)
+                                            )
+                                            Spacer(modifier = Modifier.height(10.dp))
+                                            Text(
+                                                text = "No public subtitles yet",
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp,
+                                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = "Transcribe Japanese audio to contribute the first community subtitle for this episode!",
+                                                color = Color(0xFF8E8E9F),
+                                                fontSize = 11.5.sp,
+                                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                                lineHeight = 16.sp
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    publicSubtitlesList.forEach { pubSub ->
+                                        val subKey = "${pubSub.langName} (Public)"
+                                        val isSel = selectedSub == subKey
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 4.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(if (isSel) Color(0xFF2C2C33) else Color.Transparent)
+                                                .clickable { onPublicSubSelected(pubSub) }
+                                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                                        ) {
+                                            Row(verticalAlignment = Alignment.Top) {
+                                                Box(modifier = Modifier.size(20.dp).padding(top = 2.dp), contentAlignment = Alignment.Center) {
+                                                    if (isSel) {
+                                                        Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = playerAccentColor, modifier = Modifier.size(18.dp))
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.width(12.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = "${pubSub.langName} Subtitles",
+                                                        color = if (isSel) Color.White else Color(0xFFE5E5EA),
+                                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                                        fontSize = 15.sp,
+                                                        maxLines = 1,
+                                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                                    )
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    Text(
+                                                        text = "Uploaded by ${pubSub.uploaderName}",
+                                                        color = if (isSel) Color(0xFFFFD54F) else Color(0xFF8E8E9F),
+                                                        fontSize = 12.sp
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             } else {
                                 Text(
                                     text = if (isExternalVideo) "Subtitles for external video" else "Subtitles for current video",
@@ -3210,7 +4899,12 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                                 } else {
                                     subOptions.add("Off" to "No subtitles displayed")
                                     subOptions.add("English (VTT)" to "Standard English soft subtitles")
-                                    subOptions.add("Hard Sub" to "Burned-in hardcoded subtitle stream")
+                                    if (selectedSub == "English (Soft Sub)" || subPreset.equals("Hardsub", ignoreCase = true)) {
+                                        subOptions.add("English (Soft Sub)" to "AniBD soft subtitles (Hardsub styled)")
+                                    }
+                                    if (selectedAudio != "English" && selectedAudio != "Hindi") {
+                                        subOptions.add("Hard Sub" to "Burned-in hardcoded subtitle stream")
+                                    }
                                     translatedSubMap.keys.forEach { transKey ->
                                         subOptions.add(transKey to "Auto AI translated subtitle track")
                                     }
@@ -3244,7 +4938,35 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        if (!isAudioMode || com.lagradost.cloudstream3.BuildConfig.ENABLE_TRANSCRIPTION) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF222228))
+                                    .clickable { onRequestTranslate() }
+                                    .padding(vertical = 12.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = AiSparklesIcon,
+                                    contentDescription = "Translate Subtitles with AI",
+                                    tint = playerAccentColor,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = if (isAudioMode) "Transcribe & Translate Audio with AI" else "Translate Subtitles with AI",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -3283,12 +5005,24 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
         currentQuality: String,
         videoTrackHeights: List<Int>,
         isGraphicsUpscalerEnabled: Boolean,
+        showShaderSettings: Boolean,
+        enhancerPreset: com.lagradost.cloudstream3.ui.animebox.enhancer.EnhancerPreset,
+        enhancerSharpness: Float,
+        enhancerContrast: Float,
+        enhancerSaturation: Float,
+        enhancerLineClarity: Float,
         deviceSpecs: Triple<Int, Int, String>,
         currentSpeed: Float,
         onClose: () -> Unit,
         onQualitySelected: (String) -> Unit,
         onSpeedSelected: (Float, String) -> Unit,
-        onUpscalerToggled: (Boolean) -> Unit
+        onUpscalerToggled: (Boolean) -> Unit,
+        onToggleShaderSettings: (Boolean) -> Unit,
+        onPresetSelected: (com.lagradost.cloudstream3.ui.animebox.enhancer.EnhancerPreset) -> Unit,
+        onSharpnessChanged: (Float) -> Unit,
+        onContrastChanged: (Float) -> Unit,
+        onSaturationChanged: (Float) -> Unit,
+        onLineClarityChanged: (Float) -> Unit
     ) {
         if (!show) return
         val context = LocalContext.current
@@ -3308,163 +5042,412 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                     .background(Color(0xFF141416).copy(alpha = 0.98f), RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp))
                     .align(Alignment.CenterEnd)
                     .clickable(enabled = false) {}
-                    .padding(horizontal = 24.dp, vertical = 20.dp)
+                    .padding(horizontal = 20.dp, vertical = 18.dp)
             ) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    // Header + Tab switcher
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .background(Color(0xFF222228), RoundedCornerShape(10.dp))
-                                .padding(3.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (speedQualityTab == 0) Color(0xFF32323C) else Color.Transparent)
-                                    .clickable { onTabChange(0) }
-                                    .padding(horizontal = 14.dp, vertical = 6.dp)
-                            ) {
-                                Text("Quality", color = if (speedQualityTab == 0) Color.White else Color.Gray, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (speedQualityTab == 1) Color(0xFF32323C) else Color.Transparent)
-                                    .clickable { onTabChange(1) }
-                                    .padding(horizontal = 14.dp, vertical = 6.dp)
-                            ) {
-                                Text("Speed", color = if (speedQualityTab == 1) Color.White else Color.Gray, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            }
-                        }
-                        IconButton(
-                            onClick = { onClose() },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.LightGray)
-                        }
-                    }
-
+                // ── Shader / Enhancer Settings Sub-Panel ──
+                if (showShaderSettings) {
                     Column(
                         modifier = Modifier
-                            .weight(1f)
+                            .fillMaxSize()
                             .verticalScroll(rememberScrollState())
                     ) {
-                        if (speedQualityTab == 0) {
-                            Text(
-                                text = "Quality for current video · ${if (currentQuality == "Auto") "Auto (${if (videoTrackHeights.isNotEmpty()) "${videoTrackHeights.first()}p" else "1080p"})" else currentQuality}",
-                                color = Color(0xFFE0E0E6),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Normal,
-                                modifier = Modifier.padding(bottom = 16.dp, start = 2.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clickable { onToggleShaderSettings(false) }
+                                .padding(bottom = 16.dp)
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_baseline_arrow_back_ios_24),
+                                contentDescription = "Back",
+                                tint = playerAccentColor,
+                                modifier = Modifier.size(18.dp)
                             )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Back to Quality", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        }
 
-                            val qualityOptions = remember(videoTrackHeights) {
-                                val list = mutableListOf<Pair<String, Pair<String, String>>>()
-                                list.add("Auto" to ("Auto (recommended)" to "Adjusts to give you the best experience for your conditions"))
-                                if (videoTrackHeights.isNotEmpty()) {
-                                    for (h in videoTrackHeights) {
-                                        val label = "${h}p"
-                                        list.add(label to (label to ""))
-                                    }
-                                } else {
-                                    listOf("1080p", "720p", "480p", "360p").forEach {
-                                        list.add(it to (it to ""))
-                                    }
+                        // Master Toggle (Matching Quality box styling)
+                        Text("AI GRAPHICS ENHANCER", color = Color(0xFFAAAAAA), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isGraphicsUpscalerEnabled) Color(0xFF2C2C33) else Color.Transparent)
+                                .clickable { onUpscalerToggled(!isGraphicsUpscalerEnabled) }
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = if (isGraphicsUpscalerEnabled) "Active · Real-time CAS Sharpening" else "Enhancer Disabled",
+                                        color = if (isGraphicsUpscalerEnabled) Color.White else Color(0xFFE5E5EA),
+                                        fontWeight = if (isGraphicsUpscalerEnabled) FontWeight.Bold else FontWeight.Normal,
+                                        fontSize = 13.5.sp,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "Hardware GPU edge sharpening & HDR color engine",
+                                        color = if (isGraphicsUpscalerEnabled) Color(0xFFA5A5AD) else Color(0xFF8E8E9F),
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
                                 }
-                                list
-                            }
-
-                            qualityOptions.forEach { (qualKey, details) ->
-                                val (title, subtitle) = details
-                                val isSel = currentQuality == qualKey
+                                Spacer(modifier = Modifier.width(12.dp))
                                 Box(
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 4.dp)
+                                        .size(width = 44.dp, height = 24.dp)
                                         .clip(RoundedCornerShape(12.dp))
-                                        .background(if (isSel) Color(0xFF2C2C33) else Color.Transparent)
-                                        .clickable { onQualitySelected(qualKey) }
-                                        .padding(horizontal = 16.dp, vertical = if (subtitle.isNotEmpty()) 12.dp else 14.dp)
+                                        .background(if (isGraphicsUpscalerEnabled) playerAccentColor else Color(0xFF3A3A44))
+                                        .padding(2.dp),
+                                    contentAlignment = if (isGraphicsUpscalerEnabled) Alignment.CenterEnd else Alignment.CenterStart
                                 ) {
-                                    Row(
-                                        verticalAlignment = if (subtitle.isNotEmpty()) Alignment.Top else Alignment.CenterVertically
-                                    ) {
-                                        Box(modifier = Modifier.size(20.dp).padding(top = if (subtitle.isNotEmpty()) 2.dp else 0.dp), contentAlignment = Alignment.Center) {
-                                            if (isSel) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Check,
-                                                    contentDescription = null,
-                                                    tint = playerAccentColor,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                            }
-                                        }
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(title, color = if (isSel) Color.White else Color(0xFFE5E5EA), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, fontSize = 15.sp)
-                                            if (subtitle.isNotEmpty()) {
-                                                Spacer(modifier = Modifier.height(2.dp))
-                                                Text(subtitle, color = if (isSel) Color(0xFFA5A5AD) else Color(0xFF8E8E9F), fontSize = 12.sp)
-                                            }
-                                        }
-                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(Color.White)
+                                    )
                                 }
                             }
+                        }
 
-                            Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(18.dp))
+                        Text("ENHANCER PRESET MODES", color = Color(0xFFAAAAAA), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+
+                        // Preset cards matching Quality section style
+                        val allPresets = listOf(
+                            com.lagradost.cloudstream3.ui.animebox.enhancer.EnhancerPreset.ULTRA_CLARITY,
+                            com.lagradost.cloudstream3.ui.animebox.enhancer.EnhancerPreset.INK_MASTER_HDR,
+                            com.lagradost.cloudstream3.ui.animebox.enhancer.EnhancerPreset.CAS_RAZOR_SHARP,
+                            com.lagradost.cloudstream3.ui.animebox.enhancer.EnhancerPreset.OLED_VIVID
+                        )
+
+                        allPresets.forEach { preset ->
+                            val isSelected = isGraphicsUpscalerEnabled && enhancerPreset == preset
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(0.5.dp)
-                                    .background(Color.White.copy(alpha = 0.1f))
-                            )
-                        } else {
-                            Text(
-                                text = "Playback Speed",
-                                color = Color(0xFFE0E0E6),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Normal,
-                                modifier = Modifier.padding(bottom = 16.dp, start = 2.dp)
-                            )
-                            val speedOptions = listOf(
-                                0.5f to "0.5x",
-                                0.75f to "0.75x",
-                                1.0f to "1.0x (Normal)",
-                                1.25f to "1.25x",
-                                1.5f to "1.5x",
-                                2.0f to "2.0x"
-                            )
-                            speedOptions.forEach { (spd, label) ->
-                                val isSel = currentSpeed == spd
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 4.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(if (isSel) Color(0xFF2C2C33) else Color.Transparent)
-                                        .clickable { onSpeedSelected(spd, label) }
-                                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                                    .padding(vertical = 4.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isSelected) Color(0xFF2C2C33) else Color.Transparent)
+                                    .clickable(enabled = isGraphicsUpscalerEnabled) { onPresetSelected(preset) }
+                                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.Top
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Box(modifier = Modifier.size(20.dp), contentAlignment = Alignment.Center) {
-                                            if (isSel) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Check,
-                                                    contentDescription = null,
-                                                    tint = playerAccentColor,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
+                                    Box(
+                                        modifier = Modifier.size(20.dp).padding(top = 2.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = playerAccentColor,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = preset.title,
+                                                color = if (!isGraphicsUpscalerEnabled) Color(0xFF6E6E7F) else if (isSelected) Color.White else Color(0xFFE5E5EA),
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                fontSize = 15.sp
+                                            )
+                                            if (preset == com.lagradost.cloudstream3.ui.animebox.enhancer.EnhancerPreset.ULTRA_CLARITY) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Box(
+                                                    modifier = Modifier
+                                                        .background(playerAccentColor.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                                                        .padding(horizontal = 5.dp, vertical = 1.dp)
+                                                ) {
+                                                    Text("BEST", color = playerAccentColor, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                }
                                             }
                                         }
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text(label, color = if (isSel) Color.White else Color(0xFFE5E5EA), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, fontSize = 15.sp)
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = preset.subtitle,
+                                            color = if (!isGraphicsUpscalerEnabled) Color(0xFF505060) else if (isSelected) Color(0xFFA5A5AD) else Color(0xFF8E8E9F),
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(18.dp))
+                        Text("FINE-TUNING CONTROLS", color = Color(0xFFAAAAAA), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+
+                        // Sliders for individual parameters
+                        val controls = listOf(
+                            Triple("Edge Sharpening (CAS)", enhancerSharpness to { v: Float -> onSharpnessChanged(v) }, "0.00" to "2.50"),
+                            Triple("Inked Line Clarity", enhancerLineClarity to { v: Float -> onLineClarityChanged(v) }, "0.0x" to "2.0x"),
+                            Triple("Color Vibrance Pop", enhancerSaturation to { v: Float -> onSaturationChanged(v) }, "1.0x" to "1.8x"),
+                            Triple("Dynamic HDR Contrast", enhancerContrast to { v: Float -> onContrastChanged(v) }, "1.0x" to "1.6x")
+                        )
+
+                        controls.forEach { (name, stateAndSetter, rangeLabels) ->
+                            val (currentVal, setter) = stateAndSetter
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.5.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFF19191E))
+                                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                            ) {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = name,
+                                            color = if (isGraphicsUpscalerEnabled) Color.White else Color(0xFF6E6E7F),
+                                            fontSize = 12.5.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = if (name == "Edge Sharpening (CAS)") String.format("%.2f", currentVal) else String.format("%.2fx", currentVal),
+                                            color = if (isGraphicsUpscalerEnabled) playerAccentColor else Color(0xFF6E6E7F),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    val (minV, maxV) = when (name) {
+                                        "Edge Sharpening (CAS)" -> 0.0f to 2.5f
+                                        "Inked Line Clarity" -> 0.0f to 2.0f
+                                        "Color Vibrance Pop" -> 1.0f to 1.8f
+                                        else -> 1.0f to 1.6f
+                                    }
+                                    Slider(
+                                        value = currentVal.coerceIn(minV, maxV),
+                                        onValueChange = { setter(it) },
+                                        valueRange = minV..maxV,
+                                        enabled = isGraphicsUpscalerEnabled,
+                                        colors = SliderDefaults.colors(
+                                            thumbColor = if (isGraphicsUpscalerEnabled) playerAccentColor else Color(0xFF505060),
+                                            activeTrackColor = if (isGraphicsUpscalerEnabled) playerAccentColor else Color(0xFF404050),
+                                            inactiveTrackColor = Color(0xFF282830)
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(28.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Text(
+                            text = "GPU Pipeline: AGSL / Vulkan Hardware Shaders · ${deviceSpecs.first} Cores · ${deviceSpecs.second}MB RAM · ${deviceSpecs.third}",
+                            color = Color(0xFF5A5A6A),
+                            fontSize = 9.5.sp,
+                            modifier = Modifier.padding(start = 2.dp)
+                        )
+                    }
+                } else {
+                    // ── Main Quality / Speed Panel ──
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        // Header + Tab switcher
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .background(Color(0xFF222228), RoundedCornerShape(10.dp))
+                                    .padding(3.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (speedQualityTab == 0) Color(0xFF32323C) else Color.Transparent)
+                                        .clickable { onTabChange(0) }
+                                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                                ) {
+                                    Text("Quality", color = if (speedQualityTab == 0) Color.White else Color.Gray, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (speedQualityTab == 1) Color(0xFF32323C) else Color.Transparent)
+                                        .clickable { onTabChange(1) }
+                                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                                ) {
+                                    Text("Speed", color = if (speedQualityTab == 1) Color.White else Color.Gray, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                            }
+                            IconButton(
+                                onClick = { onClose() },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.LightGray)
+                            }
+                        }
+
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            if (speedQualityTab == 0) {
+                                Text(
+                                    text = "Quality for current video · ${if (currentQuality == "Auto") "Auto (${if (videoTrackHeights.isNotEmpty()) "${videoTrackHeights.first()}p" else "1080p"})" else currentQuality}",
+                                    color = Color(0xFFE0E0E6),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Normal,
+                                    modifier = Modifier.padding(bottom = 16.dp, start = 2.dp)
+                                )
+
+                                val qualityOptions = remember(videoTrackHeights) {
+                                    val list = mutableListOf<Pair<String, Pair<String, String>>>()
+                                    list.add("Auto" to ("Auto (recommended)" to "Adjusts to give you the best experience for your conditions"))
+                                    if (videoTrackHeights.isNotEmpty()) {
+                                        for (h in videoTrackHeights) {
+                                            val label = "${h}p"
+                                            list.add(label to (label to ""))
+                                        }
+                                    } else {
+                                        listOf("1080p", "720p", "480p", "360p").forEach {
+                                            list.add(it to (it to ""))
+                                        }
+                                    }
+                                    list
+                                }
+
+                                qualityOptions.forEach { (qualKey, details) ->
+                                    val (title, subtitle) = details
+                                    val isSel = currentQuality == qualKey
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(if (isSel) Color(0xFF2C2C33) else Color.Transparent)
+                                            .clickable { onQualitySelected(qualKey) }
+                                            .padding(horizontal = 16.dp, vertical = if (subtitle.isNotEmpty()) 12.dp else 14.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = if (subtitle.isNotEmpty()) Alignment.Top else Alignment.CenterVertically
+                                        ) {
+                                            Box(modifier = Modifier.size(20.dp).padding(top = if (subtitle.isNotEmpty()) 2.dp else 0.dp), contentAlignment = Alignment.Center) {
+                                                if (isSel) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = null,
+                                                        tint = playerAccentColor,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(title, color = if (isSel) Color.White else Color(0xFFE5E5EA), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, fontSize = 15.sp)
+                                                if (subtitle.isNotEmpty()) {
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    Text(subtitle, color = if (isSel) Color(0xFFA5A5AD) else Color(0xFF8E8E9F), fontSize = 12.sp)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // ── Graphics Enhancer Button (same style as "Subtitle Appearance") ──
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color(0xFF222228))
+                                        .clickable { onToggleShaderSettings(true) }
+                                        .padding(vertical = 12.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = AiSparklesIcon,
+                                        contentDescription = "Graphics Enhancer",
+                                        tint = if (isGraphicsUpscalerEnabled) playerAccentColor else Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Graphics Enhancer",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                    if (isGraphicsUpscalerEnabled) {
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .background(playerAccentColor.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("ON", color = playerAccentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            } else {
+                                Text(
+                                    text = "Playback Speed",
+                                    color = Color(0xFFE0E0E6),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Normal,
+                                    modifier = Modifier.padding(bottom = 16.dp, start = 2.dp)
+                                )
+                                val speedOptions = listOf(
+                                    0.5f to "0.5x",
+                                    0.75f to "0.75x",
+                                    1.0f to "1.0x (Normal)",
+                                    1.25f to "1.25x",
+                                    1.5f to "1.5x",
+                                    2.0f to "2.0x"
+                                )
+                                speedOptions.forEach { (spd, label) ->
+                                    val isSel = currentSpeed == spd
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(if (isSel) Color(0xFF2C2C33) else Color.Transparent)
+                                            .clickable { onSpeedSelected(spd, label) }
+                                            .padding(horizontal = 16.dp, vertical = 14.dp)
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Box(modifier = Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+                                                if (isSel) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = null,
+                                                        tint = playerAccentColor,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Text(label, color = if (isSel) Color.White else Color(0xFFE5E5EA), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, fontSize = 15.sp)
+                                        }
                                     }
                                 }
                             }
@@ -3859,6 +5842,8 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                                     ) {
                                         val fallbackPoster = selectedRelatedAnime?.coverUrl?.ifEmpty { animePosterUrl } ?: animePosterUrl
                                         val isUsingFallbackPoster = imgUrl.isEmpty() && fallbackPoster.isNotEmpty() && !isMovieRel
+                                        val isSpoilerBlur = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isBlurEpisodeSpoilersEnabled(context) && !isMovieRel
+                                        val shouldBlurThumb = isUsingFallbackPoster || isSpoilerBlur
                                         val finalImg = if (isMovieRel) {
                                             selectedRelatedAnime!!.coverUrl
                                         } else if (imgUrl.isNotEmpty()) {
@@ -3873,9 +5858,25 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                                                 contentDescription = null,
                                                 modifier = Modifier
                                                     .fillMaxSize()
-                                                    .then(if (isUsingFallbackPoster) Modifier.blur(18.dp) else Modifier),
+                                                    .then(if (shouldBlurThumb) Modifier.blur(22.dp) else Modifier),
                                                 contentScale = androidx.compose.ui.layout.ContentScale.Crop
                                             )
+                                        }
+
+                                        if (isSpoilerBlur) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .background(Color.Black.copy(alpha = 0.38f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                androidx.compose.foundation.Image(
+                                                    painter = painterResource(id = R.drawable.ic_eye_spoiler),
+                                                    contentDescription = "Spoiler Hidden",
+                                                    modifier = Modifier.size(28.dp),
+                                                    colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(Color.White.copy(alpha = 0.9f))
+                                                )
+                                            }
                                         }
 
                                         // Dark gradient overlay on thumbnail bottom
@@ -4073,8 +6074,7 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                                                             val currentCover = selectedRelatedAnime?.coverUrl ?: animePosterUrl
                                                             val currentEpMeta = if (selectedRelatedAnime != null) relatedEpisodesMeta[epTarget] else episodeMetaMap[epTarget]
                                                             val currentEpTitle = if (selectedRelatedAnime != null) relatedEpisodesTitles[epTarget] else episodeTitles[epTarget]
-
-                                                            val chosenType = if (activeStreamType == "sub" || activeStreamType.isEmpty()) "hardsub" else activeStreamType
+                                                            val chosenType = if (activeStreamType.isEmpty()) "sub" else activeStreamType
                                                             val langTag = when (chosenType) {
                                                                 "hardsub" -> "HSub"
                                                                 "hindi" -> "Hindi Dub"
@@ -4085,14 +6085,14 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
 
                                                             downloadCoroutineScope.launch {
                                                                 var streamInfo = withContext(Dispatchers.IO) {
-                                                                    com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(context, currentAnimeId, epTarget, chosenType)
+                                                                    com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(context, currentAnimeId, epTarget, chosenType, currentAnimeName)
                                                                 }
                                                                 var directHls = (streamInfo?.get("hls") as? String) ?: ""
                                                                 var actualStreamType = chosenType
 
                                                                 if (directHls.isEmpty() && chosenType == "hardsub") {
                                                                     streamInfo = withContext(Dispatchers.IO) {
-                                                                        com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(context, currentAnimeId, epTarget, "sub")
+                                                                        com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(context, currentAnimeId, epTarget, "sub", currentAnimeName)
                                                                     }
                                                                     directHls = (streamInfo?.get("hls") as? String) ?: ""
                                                                     actualStreamType = "sub"
@@ -4447,11 +6447,445 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
     }
 
     @Composable
+    private fun LocalModelWarningDialog(
+        modelInfo: com.lagradost.cloudstream3.ui.animebox.api.AiModelInfo,
+        onContinue: () -> Unit,
+        onDismiss: () -> Unit
+    ) {
+        val context = LocalContext.current
+        val playerAccentColor = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.getPrimaryColor(context)
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.82f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onDismiss() }
+                .padding(horizontal = 20.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                modifier = Modifier
+                    .widthIn(max = 520.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {},
+                verticalAlignment = Alignment.Bottom
+            ) {
+                // 1. Chibi Character with glowing spot shadow
+                Box(
+                    modifier = Modifier
+                        .size(76.dp)
+                        .offset(y = 2.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_thank_chibi),
+                        contentDescription = "Chibi",
+                        modifier = Modifier
+                            .size(76.dp)
+                            .shadow(12.dp, shape = CircleShape, spotColor = Color(0xFFFFB300)),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+
+                // 2. Speech Bubble Tail
+                Canvas(
+                    modifier = Modifier
+                        .size(14.dp, 20.dp)
+                        .offset(x = 1.dp, y = (-18).dp)
+                ) {
+                    val path = Path().apply {
+                        moveTo(size.width, 0f)
+                        lineTo(0f, size.height * 0.5f)
+                        lineTo(size.width, size.height)
+                        close()
+                    }
+                    drawPath(path, color = Color(0xF5141522))
+                    drawPath(
+                        path,
+                        color = Color(0xFFFFB300),
+                        style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                    )
+                }
+
+                // 3. Persona Dialogue Bubble Body
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 16.dp))
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xF8151725),
+                                    Color(0xF20F101A)
+                                )
+                            )
+                        )
+                        .border(
+                            width = 1.8.dp,
+                            brush = Brush.horizontalGradient(
+                                colors = listOf(
+                                    Color(0xFFFFB300), // Amber
+                                    Color(0xFFFF5722), // Deep Orange
+                                    Color(0xFFFF4081)  // Neon Pink
+                                )
+                            ),
+                            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 16.dp)
+                        )
+                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                ) {
+                    // Top Bar with Angled Badge & Model Title
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(
+                                        Brush.horizontalGradient(
+                                            listOf(Color(0xFFFF9800), Color(0xFFFF5722))
+                                        )
+                                    )
+                                    .padding(horizontal = 7.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "AI DEVICE REQUIREMENT ⚡",
+                                    color = Color.White,
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Black,
+                                    letterSpacing = 0.8.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = modelInfo.langName,
+                                color = Color(0xFFFFD54F),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Text(
+                            text = "✕",
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable { onDismiss() }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "On-device AI speech models (${modelInfo.langName}) run 100% locally on your phone's processor.\n\n⚠️ Requires a capable processor (Snapdragon 8 / Dimensity 8000+) & 6GB+ RAM. On lower-end hardware, real-time generation may cause slight device warmth or processing delays.",
+                        color = Color(0xFFF1F3FF),
+                        fontSize = 11.5.sp,
+                        lineHeight = 16.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Button(
+                            onClick = onDismiss,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0x2AFFFFFF)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Cancel", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        Button(
+                            onClick = onContinue,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = playerAccentColor),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("I Understand", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun ModelDownloadPromptDialog(
+        modelInfo: com.lagradost.cloudstream3.ui.animebox.api.AiModelInfo,
+        onConfirm: () -> Unit,
+        onDismiss: () -> Unit
+    ) {
+        val context = LocalContext.current
+        val playerAccentColor = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.getPrimaryColor(context)
+        val sizeMb = modelInfo.sizeBytes / (1024 * 1024)
+        val isSpeechModel = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.JAPANESE_SPEECH_MODELS.any { it.langCode.equals(modelInfo.langCode, true) }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.82f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onDismiss() }
+                .padding(horizontal = 20.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                modifier = Modifier
+                    .widthIn(max = 520.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {},
+                verticalAlignment = Alignment.Bottom
+            ) {
+                // 1. Chibi Character with glowing spot shadow
+                Box(
+                    modifier = Modifier
+                        .size(76.dp)
+                        .offset(y = 2.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_thank_chibi),
+                        contentDescription = "Chibi",
+                        modifier = Modifier
+                            .size(76.dp)
+                            .shadow(14.dp, shape = CircleShape, spotColor = Color(0xFFFF4081)),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+
+                // 2. Speech Bubble Tail
+                Canvas(
+                    modifier = Modifier
+                        .size(14.dp, 20.dp)
+                        .offset(x = 1.dp, y = (-18).dp)
+                ) {
+                    val path = Path().apply {
+                        moveTo(size.width, 0f)
+                        lineTo(0f, size.height * 0.5f)
+                        lineTo(size.width, size.height)
+                        close()
+                    }
+                    drawPath(path, color = Color(0xF5141522))
+                    drawPath(
+                        path,
+                        color = Color(0xFFFF4081),
+                        style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                    )
+                }
+
+                // 3. Persona Dialogue Bubble Body
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 16.dp))
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xF8151725),
+                                    Color(0xF20F101A)
+                                )
+                            )
+                        )
+                        .border(
+                            width = 1.8.dp,
+                            brush = Brush.horizontalGradient(
+                                colors = listOf(
+                                    Color(0xFFFF4081), // Neon Pink
+                                    Color(0xFF9C27B0), // Persona Purple
+                                    Color(0xFF00E5FF)  // Electric Cyan
+                                )
+                            ),
+                            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 16.dp)
+                        )
+                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                ) {
+                    // Top Bar with Angled Badge & Model Title
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(
+                                        Brush.horizontalGradient(
+                                            listOf(
+                                                Color(0xFFFF4081),
+                                                Color(0xFF9C27B0)
+                                            )
+                                        )
+                                    )
+                                    .padding(horizontal = 7.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = if (isSpeechModel) "DOWNLOAD SPEECH AI" else "DOWNLOAD SUBTITLE AI",
+                                    color = Color(0xFFE2E4EE),
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Black,
+                                    letterSpacing = 0.8.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = modelInfo.langName,
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Text(
+                            text = "✕",
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable { onDismiss() }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = if (isSpeechModel) {
+                            "Download on-device ${modelInfo.langName} AI model (~$sizeMb MB)?\n\nRuns 100% locally on your device for high-precision Japanese speech recognition with frame-perfect timestamps."
+                        } else {
+                            "Download on-device AI translation model for ${modelInfo.langName} (~$sizeMb MB)?\n\nOnce downloaded, subtitle translation works at high speed and 100% offline without internet."
+                        },
+                        color = Color(0xFFF1F3FF),
+                        fontSize = 11.5.sp,
+                        lineHeight = 16.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Button(
+                            onClick = onDismiss,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0x2AFFFFFF)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Cancel", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        Button(
+                            onClick = onConfirm,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = playerAccentColor),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Download (~$sizeMb MB)", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun ModelDownloadProgressOverlay(
+        progress: com.lagradost.cloudstream3.ui.animebox.api.ModelDownloadProgress?,
+        onCancel: () -> Unit
+    ) {
+        if (progress == null) return
+        val context = LocalContext.current
+        val playerAccentColor = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.getPrimaryColor(context)
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.75f))
+                .clickable(enabled = false) {},
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier
+                    .width(320.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF1E1E22))
+                    .padding(24.dp)
+            ) {
+                Text(
+                    text = "Downloading Subtitle Model",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = "Downloading Subtitle model (${progress.langName})...",
+                    color = Color.White,
+                    fontSize = 14.5.sp
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(2.5.dp))
+                        .background(Color(0xFF33333E))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth((progress.percent / 100f).coerceIn(0f, 1f))
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(2.5.dp))
+                            .background(playerAccentColor)
+                    )
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                val dlMb = String.format(java.util.Locale.US, "%.1f", progress.downloadedBytes / (1024f * 1024f))
+                val totMb = String.format(java.util.Locale.US, "%.1f MB", progress.totalBytes / (1024f * 1024f))
+                val speedMb = String.format(java.util.Locale.US, "%.1f MB/s", progress.speedBps / (1024f * 1024f))
+                Text(
+                    text = "${progress.percent}% (${dlMb} MB / ${totMb}) • ${speedMb}",
+                    color = Color.LightGray,
+                    fontSize = 12.sp
+                )
+                Spacer(modifier = Modifier.height(18.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onCancel) {
+                        Text("CANCEL", color = playerAccentColor, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
     private fun TranslationDialogContent(
         currentSubtitleUrl: String,
         subtitleUrl: String,
+        originalSubtitleUrl: String = "",
         selectedSub: String,
         currentHlsUrl: String,
+        currentReferer: String = "",
+        anilistId: Int = 0,
+        currentEpisodeNum: Int = 0,
+        animeTitle: String = "",
+        coverUrl: String = "",
         player: ExoPlayer,
         prefs: SharedPreferences,
         coroutineScope: kotlinx.coroutines.CoroutineScope,
@@ -4459,28 +6893,39 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
         onTranslatingStateChanged: (Boolean) -> Unit,
         onTranslatedSubMapChanged: (Map<String, String>) -> Unit,
         translatedSubMap: Map<String, String>,
-        onSelectedSubChanged: (String) -> Unit
+        onSelectedSubChanged: (String) -> Unit,
+        onLiveStatusChanged: (String?) -> Unit = {},
+        onLiveCuesChanged: (List<com.lagradost.cloudstream3.ui.animebox.api.LiveSubtitleCue>) -> Unit = {},
+        onRequestModelDownload: (com.lagradost.cloudstream3.ui.animebox.api.AiModelInfo) -> Unit,
+        onRequestLocalModelWarning: (com.lagradost.cloudstream3.ui.animebox.api.AiModelInfo) -> Unit = {},
+        isAudioMode: Boolean = false,
+        publicSubtitlesList: List<com.lagradost.cloudstream3.ui.animebox.api.PublicSubtitleItem> = emptyList(),
+        onTriggerSaveToPublic: (PendingPublicSubData) -> Unit = {}
     ) {
         val context = LocalContext.current
-        val translationLanguages = listOf(
-            "Spanish" to "es",
-            "French" to "fr",
-            "German" to "de",
-            "Hindi" to "hi",
-            "Japanese" to "ja",
-            "Portuguese" to "pt",
-            "Arabic" to "ar",
-            "Italian" to "it",
-            "Russian" to "ru",
-            "Indonesian" to "id",
-            "Turkish" to "tr",
-            "Korean" to "ko",
-            "Vietnamese" to "vi",
-            "Chinese" to "zh",
-            "Polish" to "pl",
-            "Dutch" to "nl",
-            "Thai" to "th"
-        )
+        val playerAccentColor = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.getPrimaryColor(context)
+        var selectedTier by remember {
+            mutableStateOf(if (com.lagradost.cloudstream3.BuildConfig.SHOW_PRO_MODELS) com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.getSelectedTranslationTier(context) else "normal")
+        }
+        val speechModels = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.JAPANESE_SPEECH_MODELS
+        var activeSpeechModel by remember {
+            mutableStateOf(com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.getSelectedSpeechModel(context))
+        }
+
+        val targetLanguagesList = if (selectedTier == "pro") {
+            if (isAudioMode) {
+                listOf(com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.PRO_ENGLISH_MODEL) + com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.PRO_TRANSLATION_LANGUAGES
+            } else {
+                com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.PRO_TRANSLATION_LANGUAGES
+            }
+        } else {
+            if (isAudioMode) {
+                listOf(com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.ENGLISH_MODEL) + com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.NORMAL_TRANSLATION_LANGUAGES
+            } else {
+                com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.NORMAL_TRANSLATION_LANGUAGES
+            }
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -4490,13 +6935,13 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
         ) {
             Box(
                 modifier = Modifier
-                    .width(280.dp)
-                    .heightIn(max = 390.dp)
-                    .shadow(8.dp, RoundedCornerShape(12.dp))
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF282828))
+                    .width(310.dp)
+                    .heightIn(max = 470.dp)
+                    .shadow(10.dp, RoundedCornerShape(14.dp))
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF222226))
                     .clickable(enabled = false) {}
-                    .padding(vertical = 12.dp)
+                    .padding(vertical = 14.dp)
             ) {
                 Column {
                     Row(
@@ -4506,12 +6951,21 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Translate Subtitles",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = AiSparklesIcon,
+                                contentDescription = null,
+                                tint = playerAccentColor,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (isAudioMode) "AI Audio Subtitles" else "AI Subtitle Translation",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.5.sp
+                            )
+                        }
                         IconButton(
                             onClick = { onDismiss() },
                             modifier = Modifier.size(24.dp)
@@ -4526,79 +6980,480 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                     }
 
                     Text(
-                        text = "Select language to translate active subtitle",
+                        text = if (isAudioMode) "Transcribe Japanese audio directly with AI Speech recognition" else "Select language to translate active subtitle track with AI",
                         color = Color(0xFFA5A5AD),
                         fontSize = 11.5.sp,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                     )
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    if (com.lagradost.cloudstream3.BuildConfig.SHOW_PRO_MODELS) {
+                        // Tier Selector: Normal (Google ML Kit ~30MB) vs Pro (Deep Neural ~190MB)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 4.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF18181C))
+                                .padding(3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (selectedTier == "normal") playerAccentColor else Color.Transparent)
+                                    .clickable {
+                                        selectedTier = "normal"
+                                        com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.setSelectedTranslationTier(context, "normal")
+                                    }
+                                    .padding(vertical = 5.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Normal (Fast)",
+                                    color = if (selectedTier == "normal") Color.White else Color(0xFF9E9EA4),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (selectedTier == "normal") FontWeight.Bold else FontWeight.Medium
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (selectedTier == "pro") playerAccentColor else Color.Transparent)
+                                    .clickable {
+                                        selectedTier = "pro"
+                                        com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.setSelectedTranslationTier(context, "pro")
+                                    }
+                                    .padding(vertical = 5.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Pro (High Accuracy)",
+                                    color = if (selectedTier == "pro") Color.White else Color(0xFF9E9EA4),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (selectedTier == "pro") FontWeight.Bold else FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    if (isAudioMode) {
+                        // Speech Model Quality / Engine Selector (Cloud AI, SenseVoice, Whisper)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Speech Recognition Engine:",
+                            color = Color(0xFFA5A5AD),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            speechModels.forEach { sModel ->
+                                val isSelected = activeSpeechModel.langCode.equals(sModel.langCode, true)
+                                val isDl = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.isModelDownloaded(context, sModel.langCode)
+                                val isSense = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.SENSEVOICE_MODELS.any { it.langCode.equals(sModel.langCode, true) }
+                                val shortLabel = when (sModel.langCode) {
+                                    "sensevoice_pro_anime" -> "SenseVoice · CJK"
+                                    "whisper_base" -> "Whisper Base"
+                                    "whisper_small" -> "Whisper Small"
+                                    else -> sModel.langName.take(18)
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (isSelected) playerAccentColor else Color(0xFF1E1E22))
+                                        .clickable {
+                                            onDismiss()
+                                            onRequestLocalModelWarning(sModel)
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = if (isDl) "✓ $shortLabel" else shortLabel,
+                                            color = if (isSelected) Color.White else Color(0xFFB0B0B8),
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                        )
+                                        if (isSense) {
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(3.dp))
+                                                    .background(if (isSelected) Color.White.copy(alpha = 0.25f) else Color(0xFF2E7D32).copy(alpha = 0.35f))
+                                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                                            ) {
+                                                Text(
+                                                    text = "REC",
+                                                    color = if (isSelected) Color.White else Color(0xFFA5D6A7),
+                                                    fontSize = 8.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
 
                     LazyColumn(
                         modifier = Modifier.weight(1f)
                     ) {
-                        items(translationLanguages) { (langName, langCode) ->
+                        items(targetLanguagesList) { modelInfo ->
+                            val langName = modelInfo.langName
+                            val langCode = modelInfo.langCode
+                            val isEnglishTarget = langCode.startsWith("en", ignoreCase = true)
+                            val isModelDownloaded = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.isModelDownloaded(context, langCode)
                             val isCurrentTrans = selectedSub.contains(langName)
+                            val sizeMb = modelInfo.sizeBytes / (1024 * 1024)
+
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        onDismiss()
-                                        onTranslatingStateChanged(true)
-                                        coroutineScope.launch {
-                                            android.widget.Toast.makeText(context, "Translating subtitles to $langName...", android.widget.Toast.LENGTH_SHORT).show()
-                                            val subToTranslate = if (currentSubtitleUrl.isNotEmpty()) currentSubtitleUrl else subtitleUrl
-                                            val localFilePath = translateVttSubtitle(context, subToTranslate, langCode)
-                                            onTranslatingStateChanged(false)
-                                            if (localFilePath != null) {
-                                                val transLabel = "$langName (Translated)"
-                                                onTranslatedSubMapChanged(translatedSubMap + (transLabel to localFilePath))
+                                        try {
+                                            if (isAudioMode) {
+                                                // Check selected Japanese Speech Model first
+                                                val isSpeechDl = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.isSpeechModelDownloaded(context, activeSpeechModel.langCode)
+                                                if (!isSpeechDl) {
+                                                    onDismiss()
+                                                    onRequestLocalModelWarning(activeSpeechModel)
+                                                    return@clickable
+                                                }
+                                                // If language model not downloaded, request download
+                                                if (!isModelDownloaded) {
+                                                    onDismiss()
+                                                    onRequestModelDownload(modelInfo)
+                                                    return@clickable
+                                                }
+
+                                                onDismiss()
+                                                val transLabel = if (isEnglishTarget) "English (AI Translated)" else "$langName (Translated)"
                                                 onSelectedSubChanged(transLabel)
                                                 prefs.edit().putString("selectedSub", transLabel).apply()
 
-                                                val startPosition = player.currentPosition
-                                                val subConfig = MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(java.io.File(localFilePath)))
-                                                    .setMimeType(MimeTypes.TEXT_VTT)
-                                                    .setLanguage(langCode)
-                                                    .setLabel(transLabel)
-                                                    .setSelectionFlags(C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_FORCED)
-                                                    .setRoleFlags(C.ROLE_FLAG_SUBTITLE)
-                                                    .build()
+                                                val savedFile = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.isCompleteSavedSubtitle(context, anilistId, currentEpisodeNum, langCode)
+                                                if (savedFile != null) {
+                                                    val existingCues = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.parseVttToCues(savedFile.readText())
+                                                    if (existingCues.size >= 5) {
+                                                        onLiveCuesChanged(existingCues)
+                                                        if (!translatedSubMap.containsKey(transLabel)) {
+                                                            onTranslatedSubMapChanged(translatedSubMap + (transLabel to savedFile.absolutePath))
+                                                        }
+                                                        if (anilistId > 0 && currentEpisodeNum > 0 && !com.lagradost.cloudstream3.ui.animebox.api.PublicSubtitlesManager.hasSavedToPublic(context, anilistId, currentEpisodeNum, langCode)) {
+                                                            onTriggerSaveToPublic(
+                                                                PendingPublicSubData(
+                                                                    anilistId = anilistId,
+                                                                    episodeNum = currentEpisodeNum,
+                                                                    animeTitle = animeTitle,
+                                                                    langCode = langCode,
+                                                                    langName = modelInfo.langName,
+                                                                    vttContent = savedFile.readText(),
+                                                                    uploaderName = com.lagradost.cloudstream3.ui.animebox.api.PublicSubtitlesManager.getEffectiveUploaderName(context)
+                                                                )
+                                                            )
+                                                        }
+                                                        android.widget.Toast.makeText(context, "Loaded saved $langName subtitles", android.widget.Toast.LENGTH_SHORT).show()
+                                                        return@clickable
+                                                    }
+                                                }
 
-                                                val isMp4 = currentHlsUrl.contains(".mp4", ignoreCase = true)
-                                                val mimeType = if (isMp4) MimeTypes.VIDEO_MP4 else MimeTypes.APPLICATION_M3U8
-                                                val mediaItem = MediaItem.Builder()
-                                                    .setUri(currentHlsUrl)
-                                                    .setMimeType(mimeType)
-                                                    .setSubtitleConfigurations(listOf(subConfig))
-                                                    .build()
-                                                player.setMediaItem(mediaItem, startPosition)
-                                                player.prepare()
-                                                player.play()
-                                                android.widget.Toast.makeText(context, "Subtitles translated to $langName!", android.widget.Toast.LENGTH_SHORT).show()
+                                                onTranslatingStateChanged(true)
+                                                onLiveStatusChanged("Transcribing Japanese audio with ${activeSpeechModel.langName}...")
+                                                coroutineScope.launch {
+                                                    try {
+                                                        onLiveCuesChanged(emptyList())
+                                                        val localFilePath = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.transcribeAndTranslateEpisodeAudio(
+                                                            context = context,
+                                                            hlsOrVideoUrl = currentHlsUrl,
+                                                            referer = currentReferer,
+                                                            targetLangCode = langCode,
+                                                            speechModelCode = activeSpeechModel.langCode,
+                                                            anilistId = anilistId,
+                                                            episodeNum = currentEpisodeNum,
+                                                            animeTitle = animeTitle,
+                                                            coverUrl = coverUrl,
+                                                            knownSubtitleUrl = if (originalSubtitleUrl.isNotEmpty()) originalSubtitleUrl else subtitleUrl.ifEmpty { currentSubtitleUrl },
+                                                            onProgress = { cur, total, tempPath, cues ->
+                                                                onLiveStatusChanged("Transcribing Japanese audio ($cur/$total)")
+                                                                onLiveCuesChanged(cues)
+                                                                if (!translatedSubMap.containsKey(transLabel)) {
+                                                                    onTranslatedSubMapChanged(translatedSubMap + (transLabel to tempPath))
+                                                                }
+                                                            }
+                                                        )
+                                                        onTranslatingStateChanged(false)
+                                                        onLiveStatusChanged(null)
+                                                        if (localFilePath != null) {
+                                                            val updatedMap = translatedSubMap + (transLabel to localFilePath)
+                                                            onTranslatedSubMapChanged(updatedMap)
+                                                            val f = java.io.File(localFilePath)
+                                                            if (f.exists() && f.length() > 150) {
+                                                                val vttTxt = f.readText()
+                                                                onLiveCuesChanged(com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.parseVttToCues(vttTxt))
+                                                                onTriggerSaveToPublic(
+                                                                    PendingPublicSubData(
+                                                                        anilistId = anilistId,
+                                                                        episodeNum = currentEpisodeNum,
+                                                                        animeTitle = animeTitle,
+                                                                        langCode = langCode,
+                                                                        langName = modelInfo.langName,
+                                                                        vttContent = vttTxt,
+                                                                        uploaderName = com.lagradost.cloudstream3.ui.animebox.api.PublicSubtitlesManager.getEffectiveUploaderName(context)
+                                                                    )
+                                                                )
+                                                            }
+                                                            android.widget.Toast.makeText(context, "Subtitles generated from Japanese audio with ${activeSpeechModel.langName}!", android.widget.Toast.LENGTH_SHORT).show()
+                                                        } else {
+                                                            android.widget.Toast.makeText(context, "Failed to transcribe audio. Please try again.", android.widget.Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    } catch (t: Throwable) {
+                                                        onTranslatingStateChanged(false)
+                                                        onLiveStatusChanged(null)
+                                                        android.widget.Toast.makeText(context, "Transcription error: ${t.localizedMessage ?: "Unknown error"}", android.widget.Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
                                             } else {
-                                                android.widget.Toast.makeText(context, "Failed to translate subtitles. Please try again.", android.widget.Toast.LENGTH_SHORT).show()
+                                                // Subtitle file translation mode
+                                                if (!isModelDownloaded) {
+                                                    onDismiss()
+                                                    onRequestModelDownload(modelInfo)
+                                                } else {
+                                                    onDismiss()
+                                                    val transLabel = if (isEnglishTarget) "English (AI Translated)" else "$langName (AI Translated)"
+                                                    onSelectedSubChanged(transLabel)
+                                                    val savedFile = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.isCompleteSavedSubtitle(context, anilistId, currentEpisodeNum, langCode)
+                                                    if (savedFile != null) {
+                                                        val existingCues = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.parseVttToCues(savedFile.readText())
+                                                        if (existingCues.size >= 5) {
+                                                            onLiveCuesChanged(existingCues)
+                                                            val updatedMap = translatedSubMap + (transLabel to savedFile.absolutePath)
+                                                            onTranslatedSubMapChanged(updatedMap)
+                                                            android.widget.Toast.makeText(context, "Loaded saved $langName subtitles", android.widget.Toast.LENGTH_SHORT).show()
+                                                            return@clickable
+                                                        }
+                                                    }
+
+                                                    onTranslatingStateChanged(true)
+                                                    onLiveStatusChanged("Translating to $langName...")
+                                                    coroutineScope.launch {
+                                                        try {
+                                                            onLiveCuesChanged(emptyList())
+                                                            val subToTranslate = when {
+                                                                originalSubtitleUrl.isNotEmpty() -> originalSubtitleUrl
+                                                                currentSubtitleUrl.isNotEmpty() -> currentSubtitleUrl
+                                                                subtitleUrl.isNotEmpty() -> subtitleUrl
+                                                                else -> ""
+                                                            }
+                                                            val localFilePath = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.translateSubtitleVtt(
+                                                                context = context,
+                                                                vttUrlOrPath = subToTranslate,
+                                                                targetLangCode = langCode,
+                                                                hlsUrl = currentHlsUrl,
+                                                                referer = currentReferer,
+                                                                anilistId = anilistId,
+                                                                episodeNum = currentEpisodeNum,
+                                                                animeTitle = animeTitle,
+                                                                coverUrl = coverUrl,
+                                                                onProgress = { cur, total, tempPath, cues ->
+                                                                    onLiveStatusChanged("Translating to $langName ($cur/$total)")
+                                                                    onLiveCuesChanged(cues)
+                                                                    if (!translatedSubMap.containsKey(transLabel)) {
+                                                                        onTranslatedSubMapChanged(translatedSubMap + (transLabel to tempPath))
+                                                                    }
+                                                                }
+                                                            )
+                                                            onTranslatingStateChanged(false)
+                                                            onLiveStatusChanged(null)
+                                                            if (localFilePath != null) {
+                                                                val updatedMap = translatedSubMap + (transLabel to localFilePath)
+                                                                onTranslatedSubMapChanged(updatedMap)
+                                                                val f = java.io.File(localFilePath)
+                                                                if (f.exists() && f.length() > 150) {
+                                                                    onLiveCuesChanged(com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.parseVttToCues(f.readText()))
+                                                                }
+                                                                android.widget.Toast.makeText(context, "Subtitles translated to $langName!", android.widget.Toast.LENGTH_SHORT).show()
+                                                            } else {
+                                                                android.widget.Toast.makeText(context, "Failed to translate subtitles. Please try again.", android.widget.Toast.LENGTH_SHORT).show()
+                                                            }
+                                                        } catch (t: Throwable) {
+                                                            onTranslatingStateChanged(false)
+                                                            onLiveStatusChanged(null)
+                                                            android.widget.Toast.makeText(context, "Translation error: ${t.localizedMessage ?: "Unknown error"}", android.widget.Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
+                                                }
                                             }
+                                        } catch (t: Throwable) {
+                                            t.printStackTrace()
                                         }
                                     }
-                                    .background(if (isCurrentTrans) Color(0xFF383838) else Color.Transparent)
+                                    .background(if (isCurrentTrans) Color(0xFF33333A) else Color.Transparent)
                                     .padding(horizontal = 16.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text(
-                                    text = langName,
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = if (isCurrentTrans) FontWeight.Bold else FontWeight.Normal
-                                )
-                                if (isCurrentTrans) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(16.dp)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = if (isEnglishTarget && isAudioMode) "English (AI Audio Sub)" else langName,
+                                        color = Color.White,
+                                        fontSize = 14.sp,
+                                        fontWeight = if (isCurrentTrans) FontWeight.Bold else FontWeight.Normal
                                     )
+                                    if (isEnglishTarget && isAudioMode) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(playerAccentColor.copy(alpha = 0.2f))
+                                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                                        ) {
+                                            Text(
+                                                text = "PRIMARY",
+                                                color = playerAccentColor,
+                                                fontSize = 8.5.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (isModelDownloaded) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Color(0xFF2E7D32).copy(alpha = 0.25f))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = if (selectedTier == "pro") "PRO READY" else "READY",
+                                            color = Color(0xFF81C784),
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                } else {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Color(0xFF3A3A44))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = YtPopupDownloadIcon,
+                                            contentDescription = "Download Model",
+                                            tint = Color(0xFFE2E8F0),
+                                            modifier = Modifier.size(11.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text(
+                                            text = "${sizeMb}MB",
+                                            color = Color(0xFFE2E8F0),
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (publicSubtitlesList.isNotEmpty()) {
+                            item {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = "PUBLIC SUBTITLES (COMMUNITY)",
+                                    color = Color(0xFF00E5FF),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.sp,
+                                    modifier = Modifier.padding(vertical = 6.dp)
+                                )
+                            }
+
+                            items(publicSubtitlesList) { pubItem ->
+                                val pubLabel = "${pubItem.langName} (Public)"
+                                val isSelected = selectedSub == pubLabel
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable {
+                                            try {
+                                                onDismiss()
+                                                onSelectedSubChanged(pubLabel)
+                                                prefs.edit().putString("selectedSub", pubLabel).apply()
+                                                val cues = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.parseVttToCues(pubItem.vttContent)
+                                                if (cues.isNotEmpty()) {
+                                                    onLiveCuesChanged(cues)
+                                                    val safeLangCode = pubItem.langCode.replace(Regex("""[^a-zA-Z0-9_\-]"""), "_")
+                                                    val savedFile = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.getSavedSubtitleFile(context, anilistId, currentEpisodeNum, safeLangCode)
+                                                    try {
+                                                        savedFile.parentFile?.mkdirs()
+                                                        savedFile.writeText(pubItem.vttContent)
+                                                        onTranslatedSubMapChanged(translatedSubMap + (pubLabel to savedFile.absolutePath))
+                                                    } catch (_: Exception) {}
+                                                    android.widget.Toast.makeText(context, "Loaded ${pubItem.langName} public subtitles by ${pubItem.uploaderName}!", android.widget.Toast.LENGTH_SHORT).show()
+                                                }
+                                            } catch (t: Throwable) {
+                                                t.printStackTrace()
+                                            }
+                                        }
+                                        .background(if (isSelected) Color(0xFF33333A) else Color.Transparent)
+                                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            painter = painterResource(id = R.drawable.ic_baseline_translate_24),
+                                            contentDescription = null,
+                                            tint = Color(0xFF00E5FF),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            Text(
+                                                text = "${pubItem.langName} Subtitles",
+                                                color = Color.White,
+                                                fontSize = 14.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                            Text(
+                                                text = "Uploaded by ${pubItem.uploaderName}",
+                                                color = Color(0xFFFFD54F),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Color(0xFF00E5FF).copy(alpha = 0.2f))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "PUBLIC",
+                                            color = Color(0xFF00E5FF),
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -4608,145 +7463,229 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
         }
     }
 
-    @Composable
-    private fun CastDialogContent(
-        animeTitle: String,
-        currentEpisodeNum: Int,
-        playerAccentColor: Color,
-        onDismiss: () -> Unit
-    ) {
-        val context = LocalContext.current
+    private fun normalizePunctuationSpacing(text: String): String {
+        if (text.isBlank()) return text
+        return try {
+            var res = text
+            res = Regex("""([.!?])([A-Za-z\u3040-\u30ff\u4e00-\u9fff])""").replace(res, "$1 $2")
+            res = Regex("""([、。！？；：])([A-Za-z\u3040-\u30ff\u4e00-\u9fff])""").replace(res, "$1 $2")
+            res = Regex("""(\.\.\.)([A-Za-z])""").replace(res, "$1 $2")
+            res = Regex("""([.!?])\s{2,}([A-Za-z])""").replace(res, "$1 $2")
+            res = Regex("""\s+\.""").replace(res, ".")
+            res
+        } catch (_: Throwable) {
+            text
+        }
+    }
 
-        Dialog(onDismissRequest = onDismiss) {
+    private fun splitIntoSubtitleLines(text: String, maxCharsPerLine: Int = 42): List<String> {
+        if (text.isBlank()) return emptyList()
+        return try {
+            // Flatten any pre-existing artificial newlines into a continuous clean sentence
+            var clean = text.replace("\r", " ").replace("\n", " ").replace(Regex("""\s+"""), " ").trim()
+            clean = normalizePunctuationSpacing(clean)
+            if (clean.isEmpty()) return emptyList()
+
+            // Deduplicate repeated sentences (e.g. "Change the map. Change the map." -> "Change the map.")
+            val sentences = clean.split(Regex("""(?<=[.?!])\s+""")).map { it.trim() }.filter { it.isNotBlank() }
+            if (sentences.size >= 2 && sentences.distinct().size == 1) {
+                clean = sentences[0]
+            }
+
+            // If short enough for a single line, keep on 1 line
+            if (clean.length <= maxCharsPerLine) {
+                return listOf(clean)
+            }
+
+            val words = clean.split(" ").filter { it.isNotEmpty() }
+            if (words.size <= 2) return listOf(clean)
+
+            val totalChars = clean.length
+            val idealMidpoint = totalChars / 2
+
+            var bestIndex = -1
+            var bestScore = Double.MAX_VALUE
+
+            var runningLength = 0
+            for (i in 0 until words.size - 1) {
+                runningLength += words[i].length + (if (i > 0) 1 else 0)
+                val remainingLength = totalChars - runningLength - 1
+
+                // Length imbalance penalty (prefer line 1 and line 2 to have balanced width)
+                val diff = kotlin.math.abs(runningLength - idealMidpoint).toDouble()
+
+                // Punctuation bonuses: naturally break after commas, question marks, exclamation marks, periods, semicolons
+                val word = words[i]
+                val hasClausePunctuation = word.endsWith(",") || word.endsWith(";") || word.endsWith(":") || word.endsWith("—")
+                val hasSentencePunctuation = word.endsWith(".") || word.endsWith("?") || word.endsWith("!") || word.endsWith("...")
+
+                var penalty = diff
+                if (hasSentencePunctuation) {
+                    penalty -= 12.0
+                } else if (hasClausePunctuation) {
+                    penalty -= 8.0
+                }
+
+                // Strong penalty against dangling orphan words (< 6 chars or single word)
+                if (runningLength < 8 || remainingLength < 8) {
+                    penalty += 20.0
+                }
+                if (i == 0 || i == words.size - 2) {
+                    penalty += 10.0
+                }
+
+                if (penalty < bestScore) {
+                    bestScore = penalty
+                    bestIndex = i
+                }
+            }
+
+            if (bestIndex in 0 until words.size - 1) {
+                val line1 = words.subList(0, bestIndex + 1).joinToString(" ").trim()
+                val line2 = words.subList(bestIndex + 1, words.size).joinToString(" ").trim()
+                if (line1.equals(line2, ignoreCase = true)) {
+                    return listOf(line1)
+                }
+                return listOf(line1, line2)
+            }
+
+            listOf(clean)
+        } catch (_: Throwable) {
+            listOf(text)
+        }
+    }
+
+    @Composable
+    private fun LiveSubtitleOverlay(
+        cues: List<com.lagradost.cloudstream3.ui.animebox.api.LiveSubtitleCue>,
+        currentPositionMs: Long,
+        fontSize: Float,
+        textColor: Int,
+        bgOpacity: Int,
+        edgeType: Int = androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+        subPreset: String = "Default",
+        modifier: Modifier = Modifier
+    ) {
+        if (cues.isEmpty()) return
+        val activeCue = remember(currentPositionMs, cues) {
+            cues.firstOrNull { currentPositionMs in it.startMs..it.endMs }
+        } ?: return
+
+        val rawLines = remember(activeCue.translatedText) {
+            splitIntoSubtitleLines(activeCue.translatedText)
+        }
+        val lines = rawLines.filter { it.isNotBlank() }.distinct()
+        if (lines.isEmpty()) return
+
+        val context = LocalContext.current
+        val isHardsub = subPreset.equals("Hardsub", ignoreCase = true)
+        val googleSansFontFamily = remember {
+            try {
+                androidx.compose.ui.text.font.FontFamily(
+                    androidx.compose.ui.text.font.Font(R.font.google_sans, FontWeight.Normal),
+                    androidx.compose.ui.text.font.Font(R.font.google_sans, FontWeight.Medium),
+                    androidx.compose.ui.text.font.Font(R.font.google_sans, FontWeight.Bold),
+                    androidx.compose.ui.text.font.Font(R.font.google_sans, FontWeight.SemiBold)
+                )
+            } catch (_: Throwable) {
+                androidx.compose.ui.text.font.FontFamily.SansSerif
+            }
+        }
+        val activeFontFamily = if (isHardsub) androidx.compose.ui.text.font.FontFamily.SansSerif else googleSansFontFamily
+
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            val hasBg = !isHardsub && bgOpacity > 0
+            val bgColor = if (hasBg) Color.Black.copy(alpha = (bgOpacity / 255f).coerceIn(0f, 1f)) else Color.Transparent
+            val textToDisplay = lines.joinToString("\n")
+
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(0.92f)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Color(0xFF18181E))
-                    .border(1.dp, Color(0xFF2E2E38), RoundedCornerShape(20.dp))
-                    .padding(24.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(bgColor)
+                    .padding(
+                        horizontal = if (hasBg) 12.dp else 4.dp,
+                        vertical = if (hasBg) 6.dp else 2.dp
+                    ),
+                contentAlignment = Alignment.Center
             ) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    // Header
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(playerAccentColor.copy(alpha = 0.15f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.ic_player_010),
-                                    contentDescription = "Cast",
-                                    tint = playerAccentColor,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Cast to Device",
-                                    color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "$animeTitle • Ep $currentEpisodeNum",
-                                    color = Color(0xFFA0A0AB),
-                                    fontSize = 12.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-
-                        IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Close",
-                                tint = Color(0xFF8E8E93),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(22.dp))
-
-                    // Notice Card
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFF1E1E26))
-                            .border(1.dp, Color(0xFF2E2E3A), RoundedCornerShape(14.dp))
-                            .padding(18.dp)
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Box(
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(CircleShape)
-                                    .background(playerAccentColor.copy(alpha = 0.12f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.ic_player_010),
-                                    contentDescription = null,
-                                    tint = playerAccentColor,
-                                    modifier = Modifier.size(26.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = "Coming in Future Updates",
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = "Chromecast and Smart TV screen casting support will be enabled in upcoming releases of FireFly.",
-                                color = Color(0xFFA0A0AB),
-                                fontSize = 12.5.sp,
-                                lineHeight = 17.sp,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    Button(
-                        onClick = onDismiss,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = playerAccentColor,
-                            contentColor = Color.Black
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(44.dp)
-                    ) {
+                    if (isHardsub) {
+                        // Bold crisp vector stroke outline matching the user's hardsub reference screenshot
                         Text(
-                            text = "Got It",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
+                            text = textToDisplay,
+                            color = Color.Black,
+                            fontSize = fontSize.sp,
+                            fontFamily = activeFontFamily,
+                            fontWeight = FontWeight.Black,
+                            lineHeight = (fontSize * 1.32f).sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            style = androidx.compose.ui.text.TextStyle(
+                                drawStyle = androidx.compose.ui.graphics.drawscope.Stroke(
+                                    width = 11.5f,
+                                    join = androidx.compose.ui.graphics.StrokeJoin.Round,
+                                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                                )
+                            )
                         )
+                    } else if (edgeType == androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE) {
+                        // 4-direction stroke shadow for crisp, readable subtitle text contrast matching native ExoPlayer
+                        listOf(
+                            Offset(-1.8f, -1.8f),
+                            Offset(1.8f, -1.8f),
+                            Offset(-1.8f, 1.8f),
+                            Offset(1.8f, 1.8f),
+                            Offset(0f, -2.2f),
+                            Offset(0f, 2.2f),
+                            Offset(-2.2f, 0f),
+                            Offset(2.2f, 0f)
+                        ).forEach { shadowOffset ->
+                            Text(
+                                text = textToDisplay,
+                                color = Color.Black,
+                                fontSize = fontSize.sp,
+                                fontFamily = googleSansFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                lineHeight = (fontSize * 1.35f).sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                style = androidx.compose.ui.text.TextStyle(
+                                    shadow = androidx.compose.ui.graphics.Shadow(
+                                        color = Color.Black,
+                                        offset = shadowOffset,
+                                        blurRadius = 0f
+                                    )
+                                )
+                            )
+                        }
                     }
+
+                    // Main text layer matching native styling
+                    Text(
+                        text = textToDisplay,
+                        color = if (isHardsub) Color.White else Color(textColor),
+                        fontSize = fontSize.sp,
+                        fontFamily = activeFontFamily,
+                        fontWeight = if (isHardsub) FontWeight.Black else FontWeight.Bold,
+                        lineHeight = if (isHardsub) (fontSize * 1.32f).sp else (fontSize * 1.35f).sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        style = if (!isHardsub && edgeType == androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW) {
+                            androidx.compose.ui.text.TextStyle(
+                                shadow = androidx.compose.ui.graphics.Shadow(
+                                    color = Color.Black,
+                                    offset = Offset(2.5f, 2.5f),
+                                    blurRadius = 3f
+                                )
+                            )
+                        } else {
+                            androidx.compose.ui.text.TextStyle()
+                        }
+                    )
                 }
             }
         }
-    }
 
     @OptIn(UnstableApi::class)
     private fun buildPlayer(
@@ -4762,13 +7701,25 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
 
         // Configure data source based on local or remote playback
         val dataSourceFactory: androidx.media3.datasource.DataSource.Factory = if (isLocalFile) {
-            if (hlsUrl.startsWith("content://")) {
-                androidx.media3.datasource.DefaultDataSource.Factory(context)
-            } else {
-                androidx.media3.datasource.FileDataSource.Factory()
-            }
+            androidx.media3.datasource.DefaultDataSource.Factory(context)
         } else {
-            val cleanRef = if (referer.contains("?")) referer.substring(0, referer.indexOf("?")) else referer
+            val effectiveRef = when {
+                hlsUrl.contains("4animo", ignoreCase = true) -> "https://cdn.4animo.xyz/"
+                hlsUrl.contains("vidhawk", ignoreCase = true) -> "https://vidhawk.buzz/"
+                hlsUrl.contains("playeng", ignoreCase = true) || hlsUrl.contains("nukitashi", ignoreCase = true) || hlsUrl.contains("animeapps", ignoreCase = true) -> "https://playeng.animeapps.top/"
+                hlsUrl.contains("anidb", ignoreCase = true) || hlsUrl.contains("animex", ignoreCase = true) -> "https://animex.one/"
+                hlsUrl.contains("ok.ru", ignoreCase = true) || hlsUrl.contains("okcdn.ru", ignoreCase = true) || hlsUrl.contains("mycdn.me", ignoreCase = true) -> "https://ok.ru/"
+                hlsUrl.contains("sssrr.org", ignoreCase = true) || hlsUrl.contains("abyss", ignoreCase = true) -> "https://abyssplayer.com/"
+                hlsUrl.contains("vidmoly", ignoreCase = true) || hlsUrl.contains("vmnow", ignoreCase = true) -> "https://vidmoly.net/"
+                hlsUrl.contains("videas", ignoreCase = true) -> "https://app.videas.fr/"
+                hlsUrl.contains("animedekho", ignoreCase = true) -> "https://animedekho.app/"
+                hlsUrl.contains("vidcache", ignoreCase = true) || hlsUrl.contains("animegg", ignoreCase = true) -> "https://www.animegg.org/"
+                hlsUrl.contains("groovy.monster", ignoreCase = true) || hlsUrl.contains("razorshell", ignoreCase = true) -> "https://argon.razorshell.space/"
+                referer.isNotEmpty() -> referer
+                else -> ""
+            }
+
+            val cleanRef = if (effectiveRef.contains("?")) effectiveRef.substring(0, effectiveRef.indexOf("?")) else effectiveRef
             val refererHost = try {
                 val uri = Uri.parse(hlsUrl)
                 "${uri.scheme}://${uri.host}/"
@@ -4778,39 +7729,63 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                 "${refUri.scheme}://${refUri.host}"
             } catch (e: Exception) { "" }
 
-            val finalReferer = if (cleanRef.isNotEmpty()) cleanRef else refererHost
+            val isGroovyOrArgon = hlsUrl.contains("groovy.monster", ignoreCase = true) || hlsUrl.contains("razorshell", ignoreCase = true)
+            val isVidcacheOrAnimeGG = hlsUrl.contains("vidcache", ignoreCase = true) || hlsUrl.contains("animegg", ignoreCase = true)
+            val finalReferer = when {
+                isGroovyOrArgon -> if (cleanRef.contains("argon.razorshell.space")) cleanRef else "https://argon.razorshell.space/"
+                isVidcacheOrAnimeGG -> "https://www.animegg.org/"
+                cleanRef.isNotEmpty() -> cleanRef
+                else -> refererHost
+            }
             val requestProperties = mutableMapOf("Referer" to finalReferer)
-            if (originHeader.isNotEmpty()) requestProperties["Origin"] = originHeader
-
-            val sslContext = try {
-                javax.net.ssl.SSLContext.getInstance("TLS").apply {
-                    init(null, arrayOf(object : javax.net.ssl.X509TrustManager {
-                        override fun checkClientTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
-                        override fun checkServerTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
-                        override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = emptyArray()
-                    }), java.security.SecureRandom())
-                }
-            } catch (e: Exception) { null }
-
-            val okHttpClientBuilder = okhttp3.OkHttpClient.Builder()
-                .followRedirects(true)
-                .followSslRedirects(true)
-                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
-
-            if (sslContext != null) {
-                okHttpClientBuilder.sslSocketFactory(sslContext.socketFactory, object : javax.net.ssl.X509TrustManager {
-                    override fun checkClientTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
-                    override fun checkServerTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
-                    override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = emptyArray()
-                })
-                okHttpClientBuilder.hostnameVerifier { _, _ -> true }
+            if (isGroovyOrArgon) {
+                requestProperties["Origin"] = "https://argon.razorshell.space"
+                requestProperties["sec-ch-ua"] = """"Chromium";v="124", "Google Chrome";v="124""""
+                requestProperties["sec-ch-ua-mobile"] = "?0"
+                requestProperties["sec-ch-ua-platform"] = """"Windows""""
+            } else if (isVidcacheOrAnimeGG) {
+                requestProperties["Origin"] = "https://www.animegg.org"
+                requestProperties["sec-ch-ua"] = """"Chromium";v="124", "Google Chrome";v="124""""
+                requestProperties["sec-ch-ua-mobile"] = "?0"
+                requestProperties["sec-ch-ua-platform"] = """"Windows""""
+            } else if (originHeader.isNotEmpty()) {
+                requestProperties["Origin"] = originHeader
             }
 
-            val okHttpClient = okHttpClientBuilder.build()
-            val httpDataSourceFactory = OkHttpDataSource.Factory(okHttpClient)
-                .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
-                .setDefaultRequestProperties(requestProperties)
+            val userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+            val cronetEngine = try {
+                com.lagradost.cloudstream3.ui.player.CS3IPlayer.tryCreateEngine(context, 10L * 1024 * 1024)
+            } catch (_: Throwable) { null }
+
+            val httpDataSourceFactory: androidx.media3.datasource.HttpDataSource.Factory = if (cronetEngine != null) {
+                androidx.media3.datasource.cronet.CronetDataSource.Factory(cronetEngine, java.util.concurrent.Executors.newSingleThreadExecutor())
+                    .setUserAgent(userAgent)
+                    .setConnectionTimeoutMs(15000)
+                    .setReadTimeoutMs(20000)
+                    .setResetTimeoutOnRedirects(true)
+                    .setHandleSetCookieRequests(true)
+                    .setDefaultRequestProperties(requestProperties)
+            } else {
+                val okHttpClient = try {
+                    com.lagradost.cloudstream3.app.baseClient.newBuilder()
+                        .followRedirects(true)
+                        .followSslRedirects(true)
+                        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                        .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+                        .build()
+                } catch (_: Throwable) {
+                    val okHttpClientBuilder = okhttp3.OkHttpClient.Builder()
+                        .followRedirects(true)
+                        .followSslRedirects(true)
+                        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                        .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+                    okHttpClientBuilder.build()
+                }
+                OkHttpDataSource.Factory(okHttpClient)
+                    .setUserAgent(userAgent)
+                    .setDefaultRequestProperties(requestProperties)
+            }
 
             DefaultDataSource.Factory(context, httpDataSourceFactory)
         }
@@ -4823,6 +7798,14 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                 val passedSub = act?.intent?.getStringExtra("subtitleUrl") ?: ""
 
                 val candidates = mutableListOf<java.io.File>()
+                val downloadMgr = com.lagradost.cloudstream3.ui.animebox.download.AnimeDownloadManager.getInstance(context)
+                val dnEp = downloadMgr.getDownloadedEpisode(aId, ep)
+                if (dnEp != null && dnEp.localSubtitlePath.isNotEmpty() && (dnEp.localSubtitlePath.startsWith("/") || dnEp.localSubtitlePath.startsWith("file://"))) {
+                    val f = if (dnEp.localSubtitlePath.startsWith("file://")) java.io.File(java.net.URI(dnEp.localSubtitlePath).path) else java.io.File(dnEp.localSubtitlePath)
+                    candidates.add(f)
+                }
+                candidates.add(java.io.File(downloadMgr.baseDir, "subtitles/sub_${aId}_${ep}.vtt"))
+                candidates.add(java.io.File(downloadMgr.baseDir, "subtitles/sub_${aId}_${ep}.srt"))
                 if (passedSub.isNotEmpty() && (passedSub.startsWith("/") || passedSub.startsWith("file://"))) {
                     val f = if (passedSub.startsWith("file://")) java.io.File(java.net.URI(passedSub).path) else java.io.File(passedSub)
                     candidates.add(f)
@@ -4852,10 +7835,23 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                         val videoFile = if (hlsUrl.startsWith("file://")) java.io.File(java.net.URI(hlsUrl).path) else java.io.File(hlsUrl)
                         val parent = videoFile.parentFile
                         if (parent != null) {
+                            candidates.add(java.io.File(parent, "sub.vtt"))
+                            candidates.add(java.io.File(parent, "local.vtt"))
+                            candidates.add(java.io.File(parent, "sub.srt"))
+                            candidates.add(java.io.File(parent, "sub_${aId}_${ep}.vtt"))
+                            candidates.add(java.io.File(parent, "sub_${aId}_${ep}.srt"))
                             candidates.add(java.io.File(parent, "subtitles/sub_${aId}_${ep}.vtt"))
                             candidates.add(java.io.File(parent, "subtitles/sub_${aId}_${ep}.srt"))
                             candidates.add(java.io.File(parent, "${videoFile.nameWithoutExtension}.vtt"))
                             candidates.add(java.io.File(parent, "${videoFile.nameWithoutExtension}.srt"))
+                            val grandParent = parent.parentFile
+                            if (grandParent != null) {
+                                candidates.add(java.io.File(grandParent, "subtitles/sub_${aId}_${ep}.vtt"))
+                                candidates.add(java.io.File(grandParent, "subtitles/sub_${aId}_${ep}.srt"))
+                                val baseName = parent.name.removeSuffix("_bundle")
+                                candidates.add(java.io.File(grandParent, "$baseName.vtt"))
+                                candidates.add(java.io.File(grandParent, "$baseName.srt"))
+                            }
                         }
                     } catch (_: Exception) {}
                 }
@@ -4889,31 +7885,87 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                 effectiveSubtitle.endsWith(".ass", ignoreCase = true) || effectiveSubtitle.endsWith(".ssa", ignoreCase = true) -> MimeTypes.TEXT_SSA
                 else -> MimeTypes.TEXT_VTT
             }
+            val detectedSubLang = when {
+                effectiveSubtitle.contains("_es_") -> "es"
+                effectiveSubtitle.contains("_fr_") -> "fr"
+                effectiveSubtitle.contains("_de_") -> "de"
+                effectiveSubtitle.contains("_it_") -> "it"
+                effectiveSubtitle.contains("_pt_") -> "pt"
+                effectiveSubtitle.contains("_ru_") -> "ru"
+                effectiveSubtitle.contains("_hi_") -> "hi"
+                effectiveSubtitle.contains("_ja_") -> "ja"
+                effectiveSubtitle.contains("_ar_") -> "ar"
+                effectiveSubtitle.contains("_id_") -> "id"
+                else -> "en"
+            }
+
             MediaItem.SubtitleConfiguration.Builder(subUri)
                 .setMimeType(subMime)
-                .setLanguage("en")
-                .setLabel("English")
+                .setLanguage(detectedSubLang)
+                .setLabel("Subtitle")
                 .setSelectionFlags(C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_FORCED)
                 .setRoleFlags(C.ROLE_FLAG_SUBTITLE)
                 .build()
         } else null
 
+        val effectiveHlsUrl = try {
+            if (isLocalFile) {
+                val f = if (hlsUrl.startsWith("file://")) java.io.File(java.net.URI(hlsUrl).path) else java.io.File(hlsUrl)
+                if (f.exists() && f.length() < 1000) {
+                    val content = f.readText().trim()
+                    if (content.startsWith("#EXT-LOCAL-HLS:")) {
+                        content.substringAfter("#EXT-LOCAL-HLS:").trim()
+                    } else if (content.startsWith("#EXTM3U")) {
+                        f.absolutePath
+                    } else hlsUrl
+                } else {
+                    val bundleM3u8 = java.io.File(f.parentFile, "${f.nameWithoutExtension}_bundle/local.m3u8")
+                    if (bundleM3u8.exists()) bundleM3u8.absolutePath else hlsUrl
+                }
+            } else hlsUrl
+        } catch (_: Exception) { hlsUrl }
+
         val mediaUri = when {
-            hlsUrl.startsWith("/") -> Uri.fromFile(java.io.File(hlsUrl))
-            hlsUrl.startsWith("file://") -> try { Uri.fromFile(java.io.File(java.net.URI(hlsUrl).path)) } catch (_: Exception) { Uri.parse(hlsUrl) }
-            else -> Uri.parse(hlsUrl)
+            effectiveHlsUrl.startsWith("/") -> Uri.fromFile(java.io.File(effectiveHlsUrl))
+            effectiveHlsUrl.startsWith("file://") -> try { Uri.fromFile(java.io.File(java.net.URI(effectiveHlsUrl).path)) } catch (_: Exception) { Uri.parse(effectiveHlsUrl) }
+            else -> Uri.parse(effectiveHlsUrl)
         }
 
         val mediaItemBuilder = MediaItem.Builder().setUri(mediaUri)
 
+        val isLocalMpegTs = try {
+            if (isLocalFile) {
+                val f = if (effectiveHlsUrl.startsWith("file://")) java.io.File(java.net.URI(effectiveHlsUrl).path) else java.io.File(effectiveHlsUrl)
+                if (f.exists() && f.length() > 188) {
+                    val head = ByteArray(188)
+                    f.inputStream().use { it.read(head) }
+                    head[0] == 0x47.toByte()
+                } else false
+            } else false
+        } catch (_: Exception) { false }
+
         // Explicit MIME type eliminates slow sequential extractor sniffing for both local files & streams
         val detectedMime = when {
-            hlsUrl.contains(".m3u8", ignoreCase = true) -> MimeTypes.APPLICATION_M3U8
-            hlsUrl.contains(".mp4", ignoreCase = true) -> MimeTypes.VIDEO_MP4
-            hlsUrl.contains(".mkv", ignoreCase = true) -> MimeTypes.VIDEO_MATROSKA
-            hlsUrl.contains(".webm", ignoreCase = true) -> MimeTypes.VIDEO_WEBM
-            hlsUrl.contains(".ts", ignoreCase = true) -> MimeTypes.VIDEO_MP2T
-            isLocalFile -> MimeTypes.VIDEO_MP4
+            effectiveHlsUrl.contains(".m3u8", ignoreCase = true) ||
+            effectiveHlsUrl.contains("4animo", ignoreCase = true) ||
+            effectiveHlsUrl.contains("vidhawk", ignoreCase = true) ||
+            effectiveHlsUrl.contains("playeng", ignoreCase = true) ||
+            effectiveHlsUrl.contains("anidb", ignoreCase = true) ||
+            effectiveHlsUrl.contains("megaplay", ignoreCase = true) ||
+            effectiveHlsUrl.contains("kotocdn", ignoreCase = true) ||
+            effectiveHlsUrl.contains("miruro", ignoreCase = true) ||
+            effectiveHlsUrl.contains("bakayaro", ignoreCase = true) ||
+            effectiveHlsUrl.contains("anikage", ignoreCase = true) ||
+            effectiveHlsUrl.contains("pahe", ignoreCase = true) ||
+            effectiveHlsUrl.contains("groovy.monster", ignoreCase = true) ||
+            effectiveHlsUrl.contains("razorshell", ignoreCase = true) ||
+            effectiveHlsUrl.contains("kwik", ignoreCase = true) -> MimeTypes.APPLICATION_M3U8
+            isLocalMpegTs || effectiveHlsUrl.contains(".ts", ignoreCase = true) -> MimeTypes.VIDEO_MP2T
+            effectiveHlsUrl.contains(".mp4", ignoreCase = true) && !isLocalMpegTs -> MimeTypes.VIDEO_MP4
+            effectiveHlsUrl.contains(".mkv", ignoreCase = true) -> MimeTypes.VIDEO_MATROSKA
+            effectiveHlsUrl.contains(".webm", ignoreCase = true) -> MimeTypes.VIDEO_WEBM
+            effectiveHlsUrl.contains(".fd", ignoreCase = true) || effectiveHlsUrl.contains("sssrr.org", ignoreCase = true) -> MimeTypes.VIDEO_MP4
+            isLocalFile && !isLocalMpegTs && !effectiveHlsUrl.contains(".m3u8", ignoreCase = true) -> MimeTypes.VIDEO_MP4
             else -> null
         }
         if (detectedMime != null) {
@@ -4925,13 +7977,22 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
         }
         val mediaItem = mediaItemBuilder.build()
 
-        val extractorsFactory = androidx.media3.extractor.DefaultExtractorsFactory()
+        val extractorsFactory = com.lagradost.cloudstream3.ui.player.UpdatedDefaultExtractorsFactory()
             .setConstantBitrateSeekingEnabled(true)
+            .setFragmentedMp4ExtractorFlags(
+                androidx.media3.extractor.mp4.FragmentedMp4Extractor.FLAG_WORKAROUND_EVERY_VIDEO_FRAME_IS_SYNC_FRAME or
+                androidx.media3.extractor.mp4.FragmentedMp4Extractor.FLAG_WORKAROUND_IGNORE_TFDT_BOX or
+                androidx.media3.extractor.mp4.FragmentedMp4Extractor.FLAG_WORKAROUND_IGNORE_EDIT_LISTS
+            )
+            .setMp4ExtractorFlags(
+                androidx.media3.extractor.mp4.Mp4Extractor.FLAG_WORKAROUND_IGNORE_EDIT_LISTS
+            )
             .setTsExtractorFlags(
                 androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES or
                 androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS or
                 androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory.FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS
             )
+            .setTsExtractorTimestampSearchBytes(3000 * 188)
 
         val mediaSourceFactory = DefaultMediaSourceFactory(
             dataSourceFactory,
@@ -4957,10 +8018,12 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
             .build().apply {
                 setMediaSource(mediaSource)
                 val preferredLang = if (streamType == "hindi") "hi" else if (streamType == "dub") "en" else "ja"
+                val initialSubLang = if (subtitleConfig != null) subtitleConfig.language ?: "en" else "en"
                 trackSelectionParameters = trackSelectionParameters
                     .buildUpon()
                     .setPreferredAudioLanguage(preferredLang)
-                    .setPreferredTextLanguage("en")
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                    .setPreferredTextLanguage(initialSubLang)
                     .setSelectUndeterminedTextLanguage(true)
                     .setIgnoredTextSelectionFlags(0)
                     .build()
@@ -4987,7 +8050,24 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
     }
 
     private suspend fun fetchStreamInfo(anilistId: Int, episodeNum: Int, type: String): Map<String, Any?>? {
-        return com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(this, anilistId, episodeNum, type)
+        val okSpecialUrl = com.lagradost.cloudstream3.ui.animebox.extractors.PokemonHindiExtractor.POKEMON_OKRU_SPECIAL_URLS[anilistId]
+        val useOkRu = when {
+            com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.isShinChan(anilistId) -> (type == "sub" || type == "hardsub")
+            okSpecialUrl != null -> (type == "dub" || type == "sub" || type == "hardsub")
+            else -> false
+        }
+        if (useOkRu) {
+            val scStream = com.lagradost.cloudstream3.ui.animebox.extractors.ShinChanOkRuExtractor.extractShinChanStream(anilistId, episodeNum, explicitVideoUrl = okSpecialUrl)
+            if (scStream != null && scStream.hlsUrl.isNotEmpty()) {
+                return mapOf(
+                    "hls" to scStream.hlsUrl,
+                    "referer" to scStream.referer,
+                    "subtitle" to "",
+                    "subtitlesJson" to "[]"
+                )
+            }
+        }
+        return com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(this, anilistId, episodeNum, type, intent.getStringExtra("animeTitle"))
     }
 
     private fun parseStreamInfoFromJson(json: JSONObject, sType: String = "sub"): Map<String, Any?>? {
@@ -5142,6 +8222,7 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                 "outroEnd" to outroEnd,
                 "backupHls" to "",
                 "backupProvider" to "",
+                "provider" to json.optString("provider", ""),
                 "hlsStreams" to hlsList
             )
         }
@@ -5197,7 +8278,8 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                 "outroStart" to outroStart,
                 "outroEnd" to outroEnd,
                 "backupHls" to backupHls,
-                "backupProvider" to backupProvider
+                "backupProvider" to backupProvider,
+                "provider" to json.optString("provider", "")
             )
         } else null
     }
@@ -5217,34 +8299,55 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
         onLoadingStateChanged(true)
         val coroutineScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main)
         coroutineScope.launch {
-            val streamInfo = com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(
-                context, anilistId, prevEpNum, streamType
-            )
+            val isShinChan = com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.isShinChan(anilistId)
+            val useShinChanOkRu = isShinChan && (streamType == "sub" || streamType == "hardsub")
+            val streamInfo = if (useShinChanOkRu) {
+                val sc = withContext(Dispatchers.IO) { com.lagradost.cloudstream3.ui.animebox.extractors.ShinChanOkRuExtractor.extractShinChanStream(anilistId, prevEpNum) }
+                if (sc != null && sc.hlsUrl.isNotEmpty()) {
+                    mapOf(
+                        "hls" to sc.hlsUrl,
+                        "referer" to sc.referer,
+                        "subtitle" to "",
+                        "introStart" to 0L,
+                        "introEnd" to 0L,
+                        "outroStart" to 0L,
+                        "outroEnd" to 0L
+                    )
+                } else null
+            } else {
+                com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(
+                    context, anilistId, prevEpNum, streamType, animeTitle
+                )
+            }
 
             onLoadingStateChanged(false)
             if (streamInfo != null) {
                 val prevEpCover = withContext(Dispatchers.IO) {
-                    val tmdbId = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getLongRunningTmdbId(anilistId)
-                    if (tmdbId != null) {
-                        val allEps = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getTmdbAllEpisodes(tmdbId)
-                        val prevMeta = allEps[prevEpNum]
-                        prevMeta?.imageUrl ?: showCoverUrl
+                    if (isShinChan) {
+                        com.lagradost.cloudstream3.ui.animebox.api.ShinChanSupabaseManager.getAllEpisodeCovers(context)[prevEpNum] ?: showCoverUrl
                     } else {
-                        try {
-                            val mappingUrl = "https://api.ani.zip/mappings?anilist_id=$anilistId"
-                            val request = okhttp3.Request.Builder().url(mappingUrl).build()
-                            okhttp3.OkHttpClient().newCall(request).execute().use { response ->
-                                if (response.isSuccessful) {
-                                    val j = JSONObject(response.body?.string() ?: "")
-                                    if (j.has("episodes")) {
-                                        val episodes = j.getJSONObject("episodes")
-                                        if (episodes.has(prevEpNum.toString())) {
-                                            episodes.getJSONObject(prevEpNum.toString()).optString("image", showCoverUrl)
+                        val tmdbId = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getLongRunningTmdbId(anilistId)
+                        if (tmdbId != null) {
+                            val allEps = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getTmdbAllEpisodes(tmdbId)
+                            val prevMeta = allEps[prevEpNum]
+                            prevMeta?.imageUrl ?: showCoverUrl
+                        } else {
+                            try {
+                                val mappingUrl = "https://api.ani.zip/mappings?anilist_id=$anilistId"
+                                val request = okhttp3.Request.Builder().url(mappingUrl).build()
+                                okhttp3.OkHttpClient().newCall(request).execute().use { response ->
+                                    if (response.isSuccessful) {
+                                        val j = JSONObject(response.body?.string() ?: "")
+                                        if (j.has("episodes")) {
+                                            val episodes = j.getJSONObject("episodes")
+                                            if (episodes.has(prevEpNum.toString())) {
+                                                episodes.getJSONObject(prevEpNum.toString()).optString("image", showCoverUrl)
+                                            } else showCoverUrl
                                         } else showCoverUrl
                                     } else showCoverUrl
-                                } else showCoverUrl
-                            }
-                        } catch (e: Exception) { showCoverUrl }
+                                }
+                            } catch (e: Exception) { showCoverUrl }
+                        }
                     }
                 }
 
@@ -5252,10 +8355,10 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                     putExtra("hlsUrl", streamInfo["hls"] as String)
                     putExtra("referer", streamInfo["referer"] as String)
                     putExtra("subtitleUrl", (streamInfo["subtitle"] as? String) ?: "")
-                    putExtra("introStart", streamInfo["introStart"] as Long)
-                    putExtra("introEnd", streamInfo["introEnd"] as Long)
-                    putExtra("outroStart", streamInfo["outroStart"] as Long)
-                    putExtra("outroEnd", streamInfo["outroEnd"] as Long)
+                    putExtra("introStart", (streamInfo["introStart"] as? Long) ?: 0L)
+                    putExtra("introEnd", (streamInfo["introEnd"] as? Long) ?: 0L)
+                    putExtra("outroStart", (streamInfo["outroStart"] as? Long) ?: 0L)
+                    putExtra("outroEnd", (streamInfo["outroEnd"] as? Long) ?: 0L)
                     putExtra("anilistId", anilistId)
                     putExtra("episode", prevEpNum)
                     putExtra("animeTitle", animeTitle)
@@ -5294,34 +8397,55 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
         onLoadingStateChanged(true)
         val coroutineScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main)
         coroutineScope.launch {
-            val streamInfo = com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(
-                context, anilistId, nextEpNum, streamType
-            )
+            val isShinChan = com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.isShinChan(anilistId)
+            val useShinChanOkRu = isShinChan && (streamType == "sub" || streamType == "hardsub")
+            val streamInfo = if (useShinChanOkRu) {
+                val sc = withContext(Dispatchers.IO) { com.lagradost.cloudstream3.ui.animebox.extractors.ShinChanOkRuExtractor.extractShinChanStream(anilistId, nextEpNum) }
+                if (sc != null && sc.hlsUrl.isNotEmpty()) {
+                    mapOf(
+                        "hls" to sc.hlsUrl,
+                        "referer" to sc.referer,
+                        "subtitle" to "",
+                        "introStart" to 0L,
+                        "introEnd" to 0L,
+                        "outroStart" to 0L,
+                        "outroEnd" to 0L
+                    )
+                } else null
+            } else {
+                com.lagradost.cloudstream3.ui.animebox.extractors.AnimeStreamExtractorEngine.getStreamInfo(
+                    context, anilistId, nextEpNum, streamType, animeTitle
+                )
+            }
 
             onLoadingStateChanged(false)
             if (streamInfo != null) {
                 val nextEpCover = withContext(Dispatchers.IO) {
-                    val tmdbId = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getLongRunningTmdbId(anilistId)
-                    if (tmdbId != null) {
-                        val allEps = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getTmdbAllEpisodes(tmdbId)
-                        val nextMeta = allEps[nextEpNum]
-                        nextMeta?.imageUrl ?: showCoverUrl
+                    if (isShinChan) {
+                        com.lagradost.cloudstream3.ui.animebox.api.ShinChanSupabaseManager.getAllEpisodeCovers(context)[nextEpNum] ?: showCoverUrl
                     } else {
-                        try {
-                            val mappingUrl = "https://api.ani.zip/mappings?anilist_id=$anilistId"
-                            val request = okhttp3.Request.Builder().url(mappingUrl).build()
-                            okhttp3.OkHttpClient().newCall(request).execute().use { response ->
-                                if (response.isSuccessful) {
-                                    val j = JSONObject(response.body?.string() ?: "")
-                                    if (j.has("episodes")) {
-                                        val episodes = j.getJSONObject("episodes")
-                                        if (episodes.has(nextEpNum.toString())) {
-                                            episodes.getJSONObject(nextEpNum.toString()).optString("image", showCoverUrl)
+                        val tmdbId = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getLongRunningTmdbId(anilistId)
+                        if (tmdbId != null) {
+                            val allEps = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getTmdbAllEpisodes(tmdbId)
+                            val nextMeta = allEps[nextEpNum]
+                            nextMeta?.imageUrl ?: showCoverUrl
+                        } else {
+                            try {
+                                val mappingUrl = "https://api.ani.zip/mappings?anilist_id=$anilistId"
+                                val request = okhttp3.Request.Builder().url(mappingUrl).build()
+                                okhttp3.OkHttpClient().newCall(request).execute().use { response ->
+                                    if (response.isSuccessful) {
+                                        val j = JSONObject(response.body?.string() ?: "")
+                                        if (j.has("episodes")) {
+                                            val episodes = j.getJSONObject("episodes")
+                                            if (episodes.has(nextEpNum.toString())) {
+                                                episodes.getJSONObject(nextEpNum.toString()).optString("image", showCoverUrl)
+                                            } else showCoverUrl
                                         } else showCoverUrl
                                     } else showCoverUrl
-                                } else showCoverUrl
-                            }
-                        } catch (e: Exception) { showCoverUrl }
+                                }
+                            } catch (e: Exception) { showCoverUrl }
+                        }
                     }
                 }
 
@@ -5329,10 +8453,10 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
                     putExtra("hlsUrl", streamInfo["hls"] as String)
                     putExtra("referer", streamInfo["referer"] as String)
                     putExtra("subtitleUrl", (streamInfo["subtitle"] as? String) ?: "")
-                    putExtra("introStart", streamInfo["introStart"] as Long)
-                    putExtra("introEnd", streamInfo["introEnd"] as Long)
-                    putExtra("outroStart", streamInfo["outroStart"] as Long)
-                    putExtra("outroEnd", streamInfo["outroEnd"] as Long)
+                    putExtra("introStart", (streamInfo["introStart"] as? Long) ?: 0L)
+                    putExtra("introEnd", (streamInfo["introEnd"] as? Long) ?: 0L)
+                    putExtra("outroStart", (streamInfo["outroStart"] as? Long) ?: 0L)
+                    putExtra("outroEnd", (streamInfo["outroEnd"] as? Long) ?: 0L)
                     putExtra("anilistId", anilistId)
                     putExtra("episode", nextEpNum)
                     putExtra("animeTitle", animeTitle)
@@ -5406,14 +8530,17 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            try {
-                val params = android.app.PictureInPictureParams.Builder()
-                    .setActions(emptyList())
-                    .build()
-                setPictureInPictureParams(params)
-                enterPictureInPictureMode(params)
-            } catch (e: Exception) {
-                e.printStackTrace()
+            val p = exoPlayer
+            if (p != null && p.isPlaying && !isFinishing && !isCurrentlyInPip) {
+                try {
+                    val params = android.app.PictureInPictureParams.Builder()
+                        .setActions(emptyList())
+                        .build()
+                    setPictureInPictureParams(params)
+                    enterPictureInPictureMode(params)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
         }
     }
@@ -5431,7 +8558,7 @@ class AnimeBoxPlayerActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        if (isCurrentlyInPip) {
+        if (isCurrentlyInPip && !isInPictureInPictureMode) {
             // When PiP is dismissed / closed by the user, Android calls onStop().
             // Terminate task completely and release player so no extra window is left behind.
             isCurrentlyInPip = false
@@ -5593,3 +8720,4 @@ fun Skip10CircleButton(
         )
     }
 }
+

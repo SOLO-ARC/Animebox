@@ -30,13 +30,28 @@ object SupabaseReportManager {
         anilistId: Int?,
         episodeNumber: Int,
         issueType: String,
-        description: String
+        description: String = "",
+        userId: String? = null
     ): Boolean = withContext(Dispatchers.IO) {
         try {
+            val isValidUuid = try {
+                if (!userId.isNullOrBlank()) {
+                    java.util.UUID.fromString(userId.trim())
+                    true
+                } else false
+            } catch (_: Exception) { false }
+
+            val effectiveName = if (!userId.isNullOrBlank() && !isValidUuid && !userName.contains(userId)) {
+                "$userName ($userId)"
+            } else userName
+
             val json = JSONObject().apply {
                 put("target_id", java.util.UUID.randomUUID().toString())
                 put("type", "anime")
-                put("user_name", userName.ifBlank { "FireFly User" })
+                put("user_name", effectiveName.ifBlank { "FireFly User" })
+                if (isValidUuid) {
+                    put("user_id", userId!!.trim())
+                }
                 if (!email.isNullOrBlank()) {
                     put("email", email.trim())
                 }

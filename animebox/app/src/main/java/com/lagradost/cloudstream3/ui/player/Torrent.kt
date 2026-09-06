@@ -9,7 +9,6 @@ import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import torrServer.TorrServer
 import java.io.File
 import java.net.ConnectException
 import java.net.URLEncoder
@@ -199,39 +198,13 @@ object Torrent {
 
     /** Spins up the torrent server. */
     private suspend fun setup(dir: String): Boolean {
-        go.Seq.load()
-        if (echo()) {
-            return true
-        }
-        val port = TorrServer.startTorrentServer(dir, 0)
-        if(port < 0) {
-            return false
-        }
-        TORRENT_SERVER_URL = "http://127.0.0.1:$port"
-        TorrServer.addTrackers(trackers.joinToString(separator = ",\n"))
-        return echo()
+        return false
     }
 
     /** Transforms a torrent link into a streamable link via the server */
     @Throws
     suspend fun transformLink(link: ExtractorLink): Pair<ExtractorLink, TorrentStatus> {
-        val act = CommonActivity.activity ?: throw IllegalArgumentException("No activity")
-        val defaultDirectory = "${act.cacheDir.path}/$TORRENT_SERVER_PATH"
-        File(defaultDirectory).mkdir()
-        if (!setup(defaultDirectory)) {
-            throw ErrorLoadingException("Unable to setup the torrent server")
-        }
-        val status = add(link.url)
-
-        return newExtractorLink(
-            source = link.source,
-            name = link.name,
-            url = status.streamUrl(link.url),
-            type = ExtractorLinkType.VIDEO
-        ) {
-            this.referer = ""
-            this.quality = link.quality
-        } to status
+        throw ErrorLoadingException("Torrent streaming is not supported")
     }
 
     private val trackers = listOf(

@@ -11,12 +11,16 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.border
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import com.lagradost.cloudstream3.ui.animebox.api.AnimeStudioRepository
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -61,6 +65,8 @@ class AnimeBoxSearchActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val initialStudio = intent.getStringExtra("initialStudio") ?: ""
+        val initialMode = intent.getStringExtra("searchMode") ?: if (initialStudio.isNotEmpty()) "STUDIO" else "GENRE"
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
@@ -69,15 +75,18 @@ class AnimeBoxSearchActivity : ComponentActivity() {
                     surface = Color(0xFF1E1E22)
                 )
             ) {
-                SearchScreen()
+                SearchScreen(initialStudio = initialStudio, initialMode = initialMode)
             }
         }
     }
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    fun SearchScreen() {
+    fun SearchScreen(initialStudio: String = "", initialMode: String = "GENRE") {
         var query by remember { mutableStateOf("") }
+        var searchMode by remember { mutableStateOf(initialMode) }
+        var activeStudio by remember { mutableStateOf(initialStudio) }
+        var activeGenre by remember { mutableStateOf("") }
         var searchResults by remember { mutableStateOf<List<SearchAnimeBrief>>(emptyList()) }
         var isLoading by remember { mutableStateOf(false) }
         val coroutineScope = rememberCoroutineScope()
@@ -116,9 +125,53 @@ class AnimeBoxSearchActivity : ComponentActivity() {
 
         var searchJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
+        val filterByStudio: (String) -> Unit = { studioName ->
+            searchJob?.cancel()
+            focusManager.clearFocus()
+            query = ""
+            activeStudio = studioName
+            isLoading = true
+            searchJob = coroutineScope.launch {
+                val queryStudioName = com.lagradost.cloudstream3.ui.animebox.api.AnimeStudioRepository.getQueryForStudio(studioName)
+                var response = AniListClient.getAnimeByStudio(queryStudioName, 1)
+                if (response == null && queryStudioName != studioName) {
+                    response = AniListClient.getAnimeByStudio(studioName, 1)
+                }
+                if (response == null) {
+                    val stripped = studioName.replace(Regex("(?i)\\b(Studio|Films|Animation|Filmworks)\\b"), "").trim()
+                    if (stripped.isNotEmpty() && stripped != queryStudioName && stripped != studioName) {
+                        response = AniListClient.getAnimeByStudio(stripped, 1)
+                    }
+                }
+                if (response != null) {
+                    val list = parseStudioSearchResults(response)
+                    searchResults = list
+                } else {
+                    searchResults = emptyList()
+                }
+                isLoading = false
+            }
+        }
+
+        val filterByGenre: (String) -> Unit = { genreName ->
+            searchJob?.cancel()
+            focusManager.clearFocus()
+            query = ""
+            activeStudio = ""
+            activeGenre = genreName
+            isLoading = true
+            searchJob = coroutineScope.launch {
+                val response = AniListClient.getAnimeByGenre(genreName, 1)
+                searchResults = if (response != null) parseSearchResults(response) else emptyList()
+                isLoading = false
+            }
+        }
+
         val performSearch: (String) -> Unit = { targetQuery ->
             searchJob?.cancel()
             focusManager.clearFocus()
+            activeStudio = ""
+            activeGenre = ""
             if (targetQuery.isNotBlank()) {
                 isLoading = true
                 saveRecentQuery(targetQuery)
@@ -131,6 +184,13 @@ class AnimeBoxSearchActivity : ComponentActivity() {
             } else {
                 searchResults = emptyList()
                 isLoading = false
+            }
+        }
+
+        // Auto filter on initial load if studio is provided
+        LaunchedEffect(initialStudio) {
+            if (initialStudio.isNotEmpty()) {
+                filterByStudio(initialStudio)
             }
         }
 
@@ -233,7 +293,7 @@ class AnimeBoxSearchActivity : ComponentActivity() {
                                     ) {
                                         if (query.isEmpty()) {
                                             Text(
-                                                text = "Search shows, movies, games...",
+                                                text = if (searchMode == "STUDIO") "Search anime studios or titles..." else "Search shows, movies, games...",
                                                 color = Color(0xFF8E8E93),
                                                 fontSize = 15.sp,
                                                 fontWeight = FontWeight.Normal,
@@ -262,6 +322,83 @@ class AnimeBoxSearchActivity : ComponentActivity() {
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
+                            }
+                        }
+                    }
+                }
+
+                // Tags Horizontal Row directly below search bar
+                if (searchMode == "STUDIO") {
+                    // Studio Tags Horizontal Row (Matching genre tags UI, no borders)
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp)
+                    ) {
+                        items(AnimeStudioRepository.ALL_STUDIO_NAMES) { studioName ->
+                            val isSelected = activeStudio.equals(studioName, ignoreCase = true)
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(if (isSelected) Color(0xFFFF6B00) else Color(0xFF1E1E1E))
+                                    .clickable {
+                                        if (isSelected) {
+                                            activeStudio = ""
+                                            searchMode = "GENRE"
+                                            searchResults = emptyList()
+                                        } else {
+                                            filterByStudio(studioName)
+                                        }
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = studioName,
+                                    color = if (isSelected) Color.Black else Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    // Genre Tags Horizontal Row (Standard AniList Genres, no borders)
+                    val staticGenres = listOf(
+                        "Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy", "Hentai",
+                        "Horror", "Mahou Shoujo", "Mecha", "Music", "Mystery", "Psychological",
+                        "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller"
+                    )
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp)
+                    ) {
+                        items(staticGenres) { genreName ->
+                            val isSelected = activeGenre.equals(genreName, ignoreCase = true)
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(if (isSelected) Color(0xFFFF6B00) else Color(0xFF1E1E1E))
+                                    .clickable {
+                                        if (isSelected) {
+                                            activeGenre = ""
+                                            searchResults = emptyList()
+                                        } else {
+                                            filterByGenre(genreName)
+                                        }
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = genreName,
+                                    color = if (isSelected) Color.Black else Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                )
                             }
                         }
                     }
@@ -410,7 +547,7 @@ class AnimeBoxSearchActivity : ComponentActivity() {
                                     }
                                 )
                             }
-                        } else if (query.isNotEmpty() && !isLoading) {
+                        } else if ((query.isNotEmpty() || activeStudio.isNotEmpty() || activeGenre.isNotEmpty()) && !isLoading) {
                             item(span = { GridItemSpan(3) }) {
                                 Box(
                                     modifier = Modifier
@@ -418,8 +555,13 @@ class AnimeBoxSearchActivity : ComponentActivity() {
                                         .padding(top = 40.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
+                                    val emptyMsg = when {
+                                        activeStudio.isNotEmpty() -> "No anime found for \"$activeStudio\""
+                                        activeGenre.isNotEmpty() -> "No anime found in \"$activeGenre\""
+                                        else -> "No anime results found for \"$query\""
+                                    }
                                     Text(
-                                        text = "No anime results found for \"$query\"",
+                                        text = emptyMsg,
                                         color = Color.Gray,
                                         fontSize = 14.sp
                                     )
@@ -501,6 +643,45 @@ class AnimeBoxSearchActivity : ComponentActivity() {
                 if (isAdult) continue
 
                 val id = media.getInt("id")
+                val titleObj = media.getJSONObject("title")
+                val title = if (titleObj.has("english") && !titleObj.isNull("english")) {
+                    titleObj.getString("english")
+                } else {
+                    titleObj.getString("romaji")
+                }
+                val coverUrl = media.getJSONObject("coverImage").getString("large")
+                val score = if (media.has("averageScore") && !media.isNull("averageScore")) {
+                    media.getInt("averageScore").toString()
+                } else ""
+
+                list.add(SearchAnimeBrief(id, title, coverUrl, score))
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return list
+    }
+
+    private fun parseStudioSearchResults(jsonString: String): List<SearchAnimeBrief> {
+        val list = mutableListOf<SearchAnimeBrief>()
+        try {
+            val obj = JSONObject(jsonString)
+            val dataObj = obj.getJSONObject("data")
+            if (!dataObj.has("Studio") || dataObj.isNull("Studio")) return list
+            val studioObj = dataObj.getJSONObject("Studio")
+            val mediaObj = studioObj.getJSONObject("media")
+            val nodesArray = mediaObj.getJSONArray("nodes")
+            val seenIds = mutableSetOf<Int>()
+            for (i in 0 until nodesArray.length()) {
+                val media = nodesArray.getJSONObject(i)
+                if (AniListClient.isBlockedMedia(media)) continue
+                val isAdult = if (media.has("isAdult") && !media.isNull("isAdult")) {
+                    media.getBoolean("isAdult")
+                } else false
+                if (isAdult) continue
+
+                val id = media.getInt("id")
+                if (!seenIds.add(id)) continue
                 val titleObj = media.getJSONObject("title")
                 val title = if (titleObj.has("english") && !titleObj.isNull("english")) {
                     titleObj.getString("english")

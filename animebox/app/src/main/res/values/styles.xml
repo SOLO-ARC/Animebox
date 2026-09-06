@@ -13,6 +13,9 @@
         <item name="android:scrollbarThumbVertical">@null</item>
         <item name="android:scrollbarThumbHorizontal">@null</item>
 
+        <item name="fontFamily">@font/google_sans</item>
+        <item name="android:fontFamily">@font/google_sans</item>
+
         <item name="android:textViewStyle">@style/AppTextViewStyle</item>
         <item name="android:buttonStyle">@style/AppButtonStyle</item>
         <item name="android:editTextStyle">@style/AppEditStyle</item>
