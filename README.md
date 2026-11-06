@@ -12,7 +12,7 @@
   <a href="https://github.com/SOLO-ARC/Animebox/releases/latest"><b>Download Latest APK</b></a>
 </p>
 
-> **Note**: **AnimeBox** has officially been rebranded to **FireFly**!
+> **Note**: ** Will go fully shutdown in some weeks download any release you want as all will be removed in 1-2 week!**!
 
 FireFly is an Android application built for exploring and tracking anime on mobile devices. It fetches anime metadata, ratings, and series information directly from AniList, providing a clean interface, customizable video player controls, and multi-profile support.
 
