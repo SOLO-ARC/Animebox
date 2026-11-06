@@ -23,6 +23,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -53,7 +54,8 @@ data class ScheduleMedia(
     val bannerUrl: String,
     val format: String,
     val year: Int,
-    val status: String
+    val status: String,
+    val isAdult: Boolean = false
 )
 
 data class AiringScheduleItem(
@@ -75,10 +77,12 @@ data class ScheduleDay(
 
 class AnimeBoxScheduleActivity : ComponentActivity() {
 
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .build()
+    private val httpClient by lazy {
+        val builder = OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+        com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxDnsHelper.applyDns(builder, this).build()
+    }
 
     // Rich genre-matching colors for each day pill
     private val dayGenreColors = listOf(
@@ -109,6 +113,10 @@ class AnimeBoxScheduleActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
+            val scheduleThemeRevision by com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.themeRevisionFlow.collectAsState()
+            val schedulePrimary = remember(scheduleThemeRevision) {
+                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.getPrimaryColor(this@AnimeBoxScheduleActivity)
+            }
             val daysList = remember { generateScheduleDays() }
             var selectedDayIndex by remember { mutableIntStateOf(2) } // index 2 = Today
             val currentDay = daysList[selectedDayIndex]
@@ -116,9 +124,10 @@ class AnimeBoxScheduleActivity : ComponentActivity() {
             var schedules by remember(currentDay) { mutableStateOf<List<AiringScheduleItem>>(emptyList()) }
             var isLoading by remember(currentDay) { mutableStateOf(true) }
             var errorMsg by remember(currentDay) { mutableStateOf<String?>(null) }
+            var retryKey by remember(currentDay) { mutableIntStateOf(0) }
             var notifiedItems by remember { mutableStateOf(ScheduleAlertManager.getAlertIds(this@AnimeBoxScheduleActivity)) }
 
-            LaunchedEffect(currentDay) {
+            LaunchedEffect(currentDay, retryKey) {
                 isLoading = true
                 errorMsg = null
                 try {
@@ -237,18 +246,28 @@ class AnimeBoxScheduleActivity : ComponentActivity() {
                             modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center
                         ) {
-                            CircularProgressIndicator(
-                                color = Color.White,
-                                modifier = Modifier.size(36.dp),
-                                strokeWidth = 3.dp
-                            )
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                com.lagradost.cloudstream3.ui.animebox.components.ThemeDotCircularProgressIndicator(
+                                    color = schedulePrimary,
+                                    size = 38.dp
+                                )
+                                Text(
+                                    text = "Loading releases",
+                                    color = Color(0xFF9C9AA8),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
                         }
                     } else if (errorMsg != null) {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .clickable {
-                                    isLoading = true
+                                    retryKey++
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -352,6 +371,7 @@ class AnimeBoxScheduleActivity : ComponentActivity() {
                                                         putExtra("initialBannerUrl", item.media.bannerUrl)
                                                         putExtra("initialYear", item.media.year)
                                                         putExtra("initialFormat", item.media.format)
+                                                        putExtra("isAdult", item.media.isAdult)
                                                     }
                                                     startActivity(intent)
                                                 }
@@ -533,39 +553,53 @@ class AnimeBoxScheduleActivity : ComponentActivity() {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF121212))
-                .navigationBarsPadding()
-                .padding(vertical = 6.dp)
+                .navigationBarsPadding(),
+            contentAlignment = Alignment.BottomCenter
         ) {
+            val navBgColor = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.getNavbarBgColor(context)
+            val navOutlineColor = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxThemeHelper.getNavbarOutlineColor(context)
+
+            // Background bar with sleek rounded top (no thin border outline)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp)
+                    .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                    .background(navBgColor)
+            )
+
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp),
                 horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val unselectedColor = Color(0xFF8E8E93)
+                val unselectedColor = Color(0xFF9E9EA5)
 
                 // Tab 0: Home
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                     modifier = Modifier
+                        .weight(1f)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
                         ) { onTabSelected(0) }
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
                 ) {
                     Icon(
-                        imageVector = CustomHomeOutlineIcon,
+                        imageVector = CustomHomeSmileAngleOutlineIcon,
                         contentDescription = "Home",
                         tint = unselectedColor,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(24.5.dp)
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = "Home",
                         color = unselectedColor,
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -575,11 +609,12 @@ class AnimeBoxScheduleActivity : ComponentActivity() {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                     modifier = Modifier
+                        .weight(1f)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
                         ) { onTabSelected(1) }
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
                 ) {
                     Icon(
                         imageVector = CustomSearchIcon,
@@ -587,13 +622,62 @@ class AnimeBoxScheduleActivity : ComponentActivity() {
                         tint = unselectedColor,
                         modifier = Modifier.size(24.dp)
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = "Search",
                         color = unselectedColor,
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Medium
                     )
+                }
+
+                // Profile sits in middle - larger and naturally fills navbar without empty bottom space
+                val decUrl = activeProfileObj?.decorationUrl ?: ""
+                val hasAnimatedAvatar = (decUrl.isNotBlank() && !decUrl.equals("none", ignoreCase = true)) ||
+                    avatarUrl.endsWith(".gif", ignoreCase = true) ||
+                    avatarUrl.endsWith(".webp", ignoreCase = true) ||
+                    avatarUrl.contains("animated", ignoreCase = true)
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val profileBoxModifier = if (hasAnimatedAvatar) {
+                        Modifier
+                            .offset(y = (-5).dp)
+                            .size(54.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onTabSelected(4) }
+                    } else {
+                        Modifier
+                            .offset(y = (-5).dp)
+                            .size(52.dp)
+                            .shadow(10.dp, CircleShape)
+                            .clip(CircleShape)
+                            .background(navBgColor)
+                            .border(2.5.dp, navOutlineColor, CircleShape)
+                            .padding(3.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onTabSelected(4) }
+                    }
+
+                    Box(
+                        modifier = profileBoxModifier,
+                        contentAlignment = Alignment.Center
+                    ) {
+                        com.lagradost.cloudstream3.ui.animebox.profiles.DecoratedProfilePicture(
+                            avatarUrl = avatarUrl,
+                            decorationUrl = decUrl,
+                            size = if (hasAnimatedAvatar) 54.dp else 44.dp,
+                            fallbackInitial = activeProfileObj?.name ?: "Guest",
+                            forceCircle = true
+                        )
+                    }
                 }
 
                 // Tab 2: Downloads
@@ -601,23 +685,24 @@ class AnimeBoxScheduleActivity : ComponentActivity() {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                     modifier = Modifier
+                        .weight(1f)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
                         ) { onTabSelected(2) }
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
                 ) {
                     Icon(
                         imageVector = CustomDownloadsNavbarIcon,
                         contentDescription = "Downloads",
                         tint = unselectedColor,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(25.dp)
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = "Downloads",
                         color = unselectedColor,
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -627,11 +712,12 @@ class AnimeBoxScheduleActivity : ComponentActivity() {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                     modifier = Modifier
+                        .weight(1f)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
                         ) { onTabSelected(3) }
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
                 ) {
                     Icon(
                         imageVector = CustomMyListIcon,
@@ -639,63 +725,15 @@ class AnimeBoxScheduleActivity : ComponentActivity() {
                         tint = unselectedColor,
                         modifier = Modifier.size(24.dp)
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = "My List",
                         color = unselectedColor,
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Medium
                     )
                 }
 
-                // Tab 4: My Space
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                    modifier = Modifier
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { onTabSelected(4) }
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xFF222228))
-                    ) {
-                        if (avatarUrl.isNotEmpty()) {
-                            Image(
-                                painter = rememberAsyncImagePainter(model = profilePainter),
-                                contentDescription = "My Space",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color(0xFF8B5CF6)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = activeProfileObj?.name?.take(1)?.uppercase() ?: "U",
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "My Space",
-                        color = unselectedColor,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
             }
         }
     }
@@ -726,6 +764,8 @@ class AnimeBoxScheduleActivity : ComponentActivity() {
                     }
                     status
                     bannerImage
+                    isAdult
+                    genres
                   }
                 }
               }
@@ -744,7 +784,10 @@ class AnimeBoxScheduleActivity : ComponentActivity() {
             .url("https://graphql.anilist.co")
             .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
             .addHeader("Content-Type", "application/json")
-            .addHeader("User-Agent", "Mozilla/5.0")
+            .addHeader("Accept", "application/json")
+            .addHeader("Origin", "https://anilist.co")
+            .addHeader("Referer", "https://anilist.co/")
+            .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
             .build()
 
         val items = mutableListOf<AiringScheduleItem>()
@@ -791,6 +834,18 @@ class AnimeBoxScheduleActivity : ComponentActivity() {
                     val status = mObj.optString("status", "RELEASING")
                     val startObj = mObj.optJSONObject("startDate")
                     val year = startObj?.optInt("year", 0) ?: 0
+                    val isAdult = mObj.optBoolean("isAdult", false) || run {
+                        val genresArr = mObj.optJSONArray("genres")
+                        if (genresArr != null) {
+                            (0 until genresArr.length()).any { idx ->
+                                val g = genresArr.optString(idx, "")
+                                g.equals("Hentai", ignoreCase = true) || g.equals("Ecchi 18+", ignoreCase = true)
+                            }
+                        } else false
+                    }
+
+                    val adultEnabled = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAdultContentEnabled(this@AnimeBoxScheduleActivity)
+                    if (!adultEnabled && isAdult) continue
 
                     items.add(
                         AiringScheduleItem(
@@ -805,7 +860,8 @@ class AnimeBoxScheduleActivity : ComponentActivity() {
                                 bannerUrl = banner,
                                 format = format,
                                 year = year,
-                                status = status
+                                status = status,
+                                isAdult = isAdult
                             )
                         )
                     )

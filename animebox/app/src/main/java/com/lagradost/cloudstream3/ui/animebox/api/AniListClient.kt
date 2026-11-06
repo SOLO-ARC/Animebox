@@ -17,9 +17,10 @@ object AniListClient {
 
     private fun buildHttpClient(): OkHttpClient {
         val builder = OkHttpClient.Builder()
-            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-            .writeTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .connectTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+            .callTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
         return AnimeBoxDnsHelper.applyDns(builder, CloudStreamApp.context).build()
     }
@@ -38,14 +39,29 @@ object AniListClient {
     private val detailsCache = android.util.LruCache<Int, String>(100)
     private val queryCache = android.util.LruCache<String, String>(50)
 
+    private val adultAnimeIds = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
+
+    init {
+        adultAnimeIds.add(4731) // Hiiro ni Koku (The Time Colored Scarlet)
+    }
+
+    fun registerAdultAnimeId(id: Int) {
+        if (id > 0) adultAnimeIds.add(id)
+    }
+
     var lastErrorMessage: String? = null
         private set
 
     /**
      * Helper to perform raw GraphQL Query post request with retry handling, headers, and content filtering
      */
-    private suspend fun query(graphqlQuery: String, variables: JSONObject = JSONObject()): String? = withContext(Dispatchers.IO) {
-        val cacheKey = "${graphqlQuery.hashCode()}_${variables}"
+    private suspend fun query(
+        graphqlQuery: String,
+        variables: JSONObject = JSONObject(),
+        applyMediaFilters: Boolean = true
+    ): String? = withContext(Dispatchers.IO) {
+        val adultEnabled = CloudStreamApp.context?.let { com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAdultContentEnabled(it) } ?: false
+        val cacheKey = "${graphqlQuery.hashCode()}_${variables}_${applyMediaFilters}_${adultEnabled}"
         queryCache.get(cacheKey)?.let { return@withContext it }
 
         val bodyJson = JSONObject().apply {
@@ -55,9 +71,11 @@ object AniListClient {
         val requestBody = bodyJson.toString().toRequestBody(mediaType)
         val request = Request.Builder()
             .url(ANILIST_URL)
-            .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+            .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
             .addHeader("Accept", "application/json")
             .addHeader("Content-Type", "application/json")
+            .addHeader("Origin", "https://anilist.co")
+            .addHeader("Referer", "https://anilist.co/")
             .post(requestBody)
             .build()
 
@@ -80,12 +98,26 @@ object AniListClient {
                             }
                         }
                     } else if (response.code == 403 || response.code == 503) {
-                        lastErrorMessage = "The AniList API has been temporarily disabled due to severe stability issues (HTTP ${response.code})."
+                        lastErrorMessage = if (response.code == 403) {
+                            "AniList denied the request (HTTP 403). Check API availability and network access."
+                        } else {
+                            "AniList is temporarily unavailable (HTTP 503). Try again later."
+                        }
+                        retries = 2
                     } else if (response.code == 429) {
                         lastErrorMessage = "AniList rate limit reached. Please wait a moment."
                         kotlinx.coroutines.delay(500L)
+                    } else if (response.code == 400) {
+                        val detail = runCatching {
+                            JSONObject(body.orEmpty()).optJSONArray("errors")?.optJSONObject(0)?.optString("message")
+                                ?.takeIf { it.isNotBlank() }
+                        }.getOrNull()
+                        lastErrorMessage = detail?.let { "AniList rejected the query: $it" }
+                            ?: "AniList rejected the request (HTTP 400)."
+                        retries = 2
                     } else {
                         lastErrorMessage = "AniList server error: HTTP ${response.code}"
+                        retries = 2
                     }
                 }
             } catch (e: Exception) {
@@ -95,7 +127,7 @@ object AniListClient {
         }
 
         if (result != null) {
-            val filtered = filterAniListJson(result!!)
+            val filtered = if (applyMediaFilters) filterAniListJson(result!!) else result!!
             if (filtered.isNotEmpty()) {
                 queryCache.put(cacheKey, filtered)
                 return@withContext filtered
@@ -194,29 +226,47 @@ object AniListClient {
         }
     }
 
-    fun isBlockedMedia(media: JSONObject): Boolean {
-        // 0. Check Maturity Rating (Default: With restrictions -> Block 18+ / isAdult == true / Hentai)
+    fun isBlockedMedia(media: JSONObject, context: android.content.Context? = null): Boolean {
+        // 0. Check 18+ Adult Content Setting (Default: Off -> Block 18+ / isAdult == true / Hentai)
+        var isAdultAnime = false
         try {
-            val context = CloudStreamApp.context
-            if (context != null) {
-                val rating = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getMaturityRating(context)
-                val isAdult = media.optBoolean("isAdult", false)
-                val genres = media.optJSONArray("genres")
-                var isAdultGenre = false
-                if (genres != null) {
-                    for (i in 0 until genres.length()) {
-                        val g = genres.optString(i, "")
-                        if (g.equals("Hentai", ignoreCase = true) || g.equals("Ecchi 18+", ignoreCase = true)) {
-                            isAdultGenre = true
-                            break
-                        }
+            val ctx = context ?: CloudStreamApp.context
+            val isAdult = media.optBoolean("isAdult", false)
+            val genres = media.optJSONArray("genres")
+            var isAdultGenre = false
+            if (genres != null) {
+                for (i in 0 until genres.length()) {
+                    val g = genres.optString(i, "")
+                    if (g.equals("Hentai", ignoreCase = true) || g.equals("Ecchi 18+", ignoreCase = true)) {
+                        isAdultGenre = true
+                        break
                     }
                 }
-                if (rating != "No restrictions" && (isAdult || isAdultGenre)) {
+            }
+            isAdultAnime = isAdult || isAdultGenre
+            if (isAdultAnime) {
+                val mediaId = media.optInt("id", 0)
+                if (mediaId > 0) adultAnimeIds.add(mediaId)
+            }
+
+            if (ctx != null) {
+                val adultEnabled = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAdultContentEnabled(ctx)
+                if (!adultEnabled && isAdultAnime) {
                     return true
                 }
+                if (adultEnabled && isAdultAnime) {
+                    // When adult content is enabled, never block adult anime due to rating or scores
+                    return false
+                }
+            } else if (isAdultAnime) {
+                val adultFlowEnabled = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.adultContentEnabledFlow.value
+                return !adultFlowEnabled
             }
         } catch (_: Exception) {}
+
+        if (isAdultAnime) {
+            return false
+        }
 
         val averageScore = if (media.has("averageScore") && !media.isNull("averageScore")) {
             media.optInt("averageScore", 0)
@@ -255,7 +305,9 @@ object AniListClient {
         title {
           english
           romaji
+          native
         }
+        synonyms
         description
         coverImage {
           large
@@ -275,13 +327,19 @@ object AniListClient {
         }
         format
         averageScore
+        popularity
+        favourites
         episodes
+        duration
         status
         isAdult
         startDate {
-          year
-          month
-          day
+            year
+            month
+            day
+        }
+        nextAiringEpisode {
+            episode
         }
     """
 
@@ -296,7 +354,9 @@ object AniListClient {
         title {
           english
           romaji
+          native
         }
+        synonyms
         description
         coverImage {
           large
@@ -348,17 +408,42 @@ object AniListClient {
         return query(graphqlQuery)
     }
 
-    /**
-     * Search anime by title keyword
-     */
-    suspend fun searchAnime(searchQuery: String): String? {
+    private val SEARCH_ALIAS_MAP = mapOf(
+        "rezero" to "Re:Zero",
+        "re zero" to "Re:Zero",
+        "danmachi" to "Is It Wrong to Try to Pick Up Girls in a Dungeon?",
+        "konosuba" to "KonoSuba",
+        "oregairu" to "My Teen Romantic Comedy SNAFU",
+        "tensura" to "That Time I Got Reincarnated as a Slime",
+        "fmab" to "Fullmetal Alchemist: Brotherhood",
+        "fma" to "Fullmetal Alchemist",
+        "sao" to "Sword Art Online",
+        "aot" to "Attack on Titan",
+        "mha" to "My Hero Academia",
+        "jjk" to "Jujutsu Kaisen",
+        "csm" to "Chainsaw Man",
+        "ds" to "Demon Slayer",
+        "op" to "One Piece",
+        "hxh" to "Hunter x Hunter",
+        "steinsgate" to "Steins;Gate",
+        "steins gate" to "Steins;Gate",
+        "fatestaynight" to "Fate/stay night",
+        "fate stay night" to "Fate/stay night",
+        "saikik" to "The Disastrous Life of Saiki K.",
+        "saiki k" to "The Disastrous Life of Saiki K."
+    )
+
+    private suspend fun executeSearchQuery(queryStr: String): String? {
         val variables = JSONObject().apply {
-            put("search", searchQuery)
+            put("search", queryStr)
         }
+        val appContext = CloudStreamApp.context
+        val adultEnabled = if (appContext != null) com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAdultContentEnabled(appContext) else false
+        val adultArg = if (!adultEnabled) ", isAdult: false" else ""
         val graphqlQuery = """
             query (${'$'}search: String) {
               Page(page: 1, perPage: 25) {
-                media(type: ANIME, search: ${'$'}search) {
+                media(type: ANIME, search: ${'$'}search$adultArg) {
                   $MEDIA_FIELDS
                 }
               }
@@ -368,11 +453,53 @@ object AniListClient {
     }
 
     /**
+     * Search anime by title keyword with intelligent alias normalization
+     */
+    suspend fun searchAnime(searchQuery: String): String? {
+        val trimmed = searchQuery.trim()
+        if (trimmed.isEmpty()) return null
+
+        val cleanLower = trimmed.lowercase()
+        var normalizedQuery: String? = SEARCH_ALIAS_MAP[cleanLower]
+        if (normalizedQuery == null) {
+            for ((alias, replacement) in SEARCH_ALIAS_MAP) {
+                if (cleanLower.contains(alias)) {
+                    normalizedQuery = cleanLower.replace(alias, replacement)
+                    break
+                }
+            }
+        }
+
+        val primaryQuery = normalizedQuery ?: trimmed
+        val primaryRes = executeSearchQuery(primaryQuery)
+
+        if (normalizedQuery != null && primaryRes != null) {
+            return primaryRes
+        }
+
+        if (primaryRes != null && !primaryRes.contains("\"media\":[]")) {
+            return primaryRes
+        }
+
+        // Fallback: if search starts with 're' and has no punctuation/space (e.g. 'rezero')
+        if (cleanLower.startsWith("re") && cleanLower.length > 2 && !cleanLower.contains(" ")) {
+            val candidate = "re: " + cleanLower.substring(2)
+            val fallbackRes = executeSearchQuery(candidate)
+            if (fallbackRes != null && !fallbackRes.contains("\"media\":[]")) {
+                return fallbackRes
+            }
+        }
+
+        return primaryRes
+    }
+
+    /**
      * Fetch popular anime by animation studio name (via AniList GraphQL Studio relation / search)
      */
     suspend fun getAnimeByStudio(studioName: String, page: Int = 1): String? {
+        val resolvedStudio = com.lagradost.cloudstream3.ui.animebox.api.AnimeStudioRepository.getQueryForStudio(studioName)
         val variables = JSONObject().apply {
-            put("studioName", studioName)
+            put("studioName", resolvedStudio)
             put("page", page)
         }
         val graphqlQuery = """
@@ -417,7 +544,9 @@ object AniListClient {
                 title {
                   english
                   romaji
+                  native
                 }
+                synonyms
                 description
                 coverImage {
                   extraLarge
@@ -453,6 +582,9 @@ object AniListClient {
                 format
                 episodes
                 averageScore
+                meanScore
+                popularity
+                favourites
                 status
                 isAdult
                 startDate {
@@ -500,6 +632,82 @@ object AniListClient {
         return res
     }
 
+    /** Fetch relation graphs for a group of media IDs in one GraphQL request. */
+    suspend fun getAnimeDetailsBatch(anilistIds: List<Int>): List<JSONObject> = withContext(Dispatchers.IO) {
+        val ids = anilistIds.filter { it > 0 }.distinct().take(50)
+        if (ids.isEmpty()) return@withContext emptyList()
+        val query = """
+            query (${"$"}ids: [Int]) {
+              Page(perPage: 50) {
+                media(id_in: ${"$"}ids, type: ANIME) {
+                  id
+                  idMal
+                  title { english romaji }
+                  description
+                  coverImage { large extraLarge }
+                  bannerImage
+                  format
+                  episodes
+                  status
+                  isAdult
+                  averageScore
+                  startDate { year month day }
+                  relations {
+                    edges {
+                      relationType
+                      node {
+                        id
+                        idMal
+                        title { english romaji }
+                        description
+                        coverImage { large extraLarge }
+                        bannerImage
+                        format
+                        episodes
+                        status
+                        isAdult
+                        averageScore
+                        startDate { year month day }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+        """.trimIndent()
+        val variables = JSONObject().put("ids", org.json.JSONArray(ids))
+        val response = query(query, variables) ?: return@withContext emptyList()
+        try {
+            val media = JSONObject(response).optJSONObject("data")
+                ?.optJSONObject("Page")?.optJSONArray("media") ?: return@withContext emptyList()
+            (0 until media.length()).mapNotNull { media.optJSONObject(it) }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    suspend fun getAnimeReviews(anilistId: Int): String? {
+        if (anilistId <= 0) return null
+        val variables = JSONObject().put("id", anilistId)
+        val graphql = """
+            query (${"$"}id: Int) {
+              Media(id: ${"$"}id, type: ANIME) {
+                reviews(sort: RATING_DESC, perPage: 20) {
+                  nodes {
+                    id
+                    summary
+                    body
+                    score
+                    user { name avatar { large } }
+                  }
+                }
+              }
+            }
+        """.trimIndent()
+        // Reviews are user-generated text, not media recommendations. Do not run the catalog
+        // score/status filter over this Media object: it has no averageScore/status fields and
+        // would otherwise discard the entire response before the review dialog can parse it.
+        return query(graphql, variables, applyMediaFilters = false)
+    }
+
     /**
      * Extracts official anime title (English/Romaji) and main/supporting character names
      * to enhance subtitle transcription, spelling, and grammar without errors.
@@ -541,18 +749,73 @@ object AniListClient {
     /**
      * Fetch popular anime filtered by genre
      */
+    fun isAdultAnimeCached(anilistId: Int): Boolean {
+        if (anilistId <= 0) return false
+        if (adultAnimeIds.contains(anilistId)) return true
+        val cached = detailsCache.get(anilistId) ?: return false
+        return try {
+            val root = JSONObject(cached)
+            val media = root.optJSONObject("data")?.optJSONObject("Media") ?: return false
+            if (media.optBoolean("isAdult", false)) {
+                adultAnimeIds.add(anilistId)
+                return true
+            }
+            val genres = media.optJSONArray("genres")
+            if (genres != null) {
+                for (i in 0 until genres.length()) {
+                    val g = genres.optString(i, "")
+                    if (g.equals("Hentai", ignoreCase = true) || g.equals("Ecchi 18+", ignoreCase = true)) {
+                        adultAnimeIds.add(anilistId)
+                        return true
+                    }
+                }
+            }
+            false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun isAdultAnime(anilistId: Int, title: String? = null): Boolean = withContext(Dispatchers.IO) {
+        if (anilistId <= 0) return@withContext false
+        if (adultAnimeIds.contains(anilistId)) return@withContext true
+        try {
+            val jsonStr = getAnimeDetails(anilistId) ?: return@withContext false
+            val root = JSONObject(jsonStr)
+            val media = root.optJSONObject("data")?.optJSONObject("Media") ?: return@withContext false
+            if (media.optBoolean("isAdult", false)) {
+                adultAnimeIds.add(anilistId)
+                return@withContext true
+            }
+            val genres = media.optJSONArray("genres")
+            if (genres != null) {
+                for (i in 0 until genres.length()) {
+                    val g = genres.optString(i, "")
+                    if (g.equals("Hentai", ignoreCase = true) || g.equals("Ecchi 18+", ignoreCase = true)) {
+                        adultAnimeIds.add(anilistId)
+                        return@withContext true
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return@withContext false
+    }
+
     suspend fun getAnimeByGenre(genre: String, page: Int = 1): String? {
         val variables = JSONObject().apply {
             put("genre", genre)
             put("page", page)
         }
+        val appContext = CloudStreamApp.context
+        val adultEnabled = if (appContext != null) com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAdultContentEnabled(appContext) else false
+        val adultArg = if (!adultEnabled) ", isAdult: false" else if (genre.equals("Hentai", ignoreCase = true)) ", isAdult: true" else ""
         val graphqlQuery = """
             query (${'$'}genre: String, ${'$'}page: Int) {
               Page(page: ${'$'}page, perPage: 50) {
                 pageInfo {
                   hasNextPage
                 }
-                media(type: ANIME, genre: ${'$'}genre, sort: POPULARITY_DESC) {
+                media(type: ANIME, genre: ${'$'}genre$adultArg, sort: POPULARITY_DESC) {
                   $MEDIA_FIELDS
                 }
               }
@@ -560,6 +823,133 @@ object AniListClient {
         """.trimIndent()
         return query(graphqlQuery, variables)
     }
+
+    /**
+     * Fetch popular anime filtered by keyword tag (via AniList GraphQL tag_in)
+     */
+    suspend fun getAnimeByTag(tag: String, page: Int = 1): String? {
+        val variables = JSONObject().apply {
+            put("tag", tag)
+            put("page", page)
+        }
+        val appContext = CloudStreamApp.context
+        val adultEnabled = if (appContext != null) com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAdultContentEnabled(appContext) else false
+        val adultArg = if (!adultEnabled) ", isAdult: false" else ""
+        val graphqlQuery = """
+            query (${'$'}tag: String, ${'$'}page: Int) {
+              Page(page: ${'$'}page, perPage: 50) {
+                pageInfo {
+                  hasNextPage
+                }
+                media(type: ANIME, tag: ${'$'}tag$adultArg, sort: POPULARITY_DESC) {
+                  $MEDIA_FIELDS
+                }
+              }
+            }
+        """.trimIndent()
+        return query(graphqlQuery, variables)
+    }
+
+    /**
+     * Advanced multi-filter search on AniList with caching
+     */
+    suspend fun advancedSearch(
+        queryText: String? = null,
+        genres: List<String> = emptyList(),
+        tags: List<String> = emptyList(),
+        seasonYear: Int? = null,
+        season: String? = null,
+        format: String? = null,
+        status: String? = null,
+        sort: String? = null,
+        page: Int = 1
+    ): String? {
+        val variables = JSONObject().apply {
+            put("page", page)
+            if (!queryText.isNullOrBlank()) put("search", queryText.trim())
+            if (genres.isNotEmpty()) {
+                val gArr = org.json.JSONArray()
+                genres.forEach { gArr.put(it) }
+                put("genres", gArr)
+            }
+            if (tags.isNotEmpty()) {
+                val tArr = org.json.JSONArray()
+                tags.forEach { tArr.put(it) }
+                put("tags", tArr)
+            }
+            if (seasonYear != null && seasonYear > 1960) put("seasonYear", seasonYear)
+            if (!season.isNullOrBlank()) put("season", season.uppercase())
+            if (!format.isNullOrBlank()) put("format", format.uppercase())
+            if (!status.isNullOrBlank()) put("status", status.uppercase())
+            if (!sort.isNullOrBlank()) {
+                val sArr = org.json.JSONArray()
+                sArr.put(sort)
+                put("sort", sArr)
+            }
+        }
+
+        val paramDefs = mutableListOf("\$page: Int")
+        val mediaArgs = mutableListOf("type: ANIME")
+
+        val appContext = CloudStreamApp.context
+        val adultEnabled = if (appContext != null) com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAdultContentEnabled(appContext) else false
+        if (!adultEnabled) {
+            mediaArgs.add("isAdult: false")
+        }
+
+        if (!queryText.isNullOrBlank()) {
+            paramDefs.add("\$search: String")
+            mediaArgs.add("search: \$search")
+        }
+        if (genres.isNotEmpty()) {
+            paramDefs.add("\$genres: [String]")
+            mediaArgs.add("genre_in: \$genres")
+        }
+        if (tags.isNotEmpty()) {
+            paramDefs.add("\$tags: [String]")
+            mediaArgs.add("tag_in: \$tags")
+        }
+        if (seasonYear != null && seasonYear > 1960) {
+            paramDefs.add("\$seasonYear: Int")
+            mediaArgs.add("seasonYear: \$seasonYear")
+        }
+        if (!season.isNullOrBlank()) {
+            paramDefs.add("\$season: MediaSeason")
+            mediaArgs.add("season: \$season")
+        }
+        if (!format.isNullOrBlank()) {
+            paramDefs.add("\$format: MediaFormat")
+            mediaArgs.add("format: \$format")
+        }
+        if (!status.isNullOrBlank()) {
+            paramDefs.add("\$status: MediaStatus")
+            mediaArgs.add("status: \$status")
+        }
+        if (!sort.isNullOrBlank()) {
+            paramDefs.add("\$sort: [MediaSort]")
+            mediaArgs.add("sort: \$sort")
+        } else {
+            mediaArgs.add("sort: POPULARITY_DESC")
+        }
+
+        val paramStr = paramDefs.joinToString(", ")
+        val mediaArgsStr = mediaArgs.joinToString(", ")
+
+        val graphqlQuery = """
+            query ($paramStr) {
+              Page(page: ${'$'}page, perPage: 40) {
+                pageInfo {
+                  hasNextPage
+                }
+                media($mediaArgsStr) {
+                  $MEDIA_FIELDS
+                }
+              }
+            }
+        """.trimIndent()
+        return query(graphqlQuery, variables)
+    }
+
 
     /**
      * Batch-fetch anime by a list of AniList IDs (for fixed spotlight items)
@@ -700,4 +1090,54 @@ object AniListClient {
         } catch (_: Exception) {}
         ""
     }
+
+    /**
+     * Search an anime character by name and return their verified image from AniList
+     */
+    suspend fun searchCharacter(characterName: String): AniListCharacterData? = withContext(Dispatchers.IO) {
+        val trimmed = characterName.trim()
+        if (trimmed.isEmpty()) return@withContext null
+        try {
+            val graphqlQuery = """
+                query (${'$'}search: String) {
+                    Character(search: ${'$'}search) {
+                        id
+                        name {
+                            full
+                            native
+                        }
+                        image {
+                            large
+                            medium
+                        }
+                    }
+                }
+            """.trimIndent()
+            val vars = JSONObject().apply { put("search", trimmed) }
+            val raw = query(graphqlQuery, vars)
+            if (raw != null) {
+                val charObj = JSONObject(raw).optJSONObject("data")?.optJSONObject("Character")
+                if (charObj != null) {
+                    val id = charObj.optInt("id", 0)
+                    val nameObj = charObj.optJSONObject("name")
+                    val fullName = nameObj?.optString("full") ?: nameObj?.optString("native") ?: trimmed
+                    val imageObj = charObj.optJSONObject("image")
+                    val img = imageObj?.optString("large")?.takeIf { it.isNotBlank() }
+                        ?: imageObj?.optString("medium")?.takeIf { it.isNotBlank() }
+                        ?: ""
+                    // Only return if verified character image is available
+                    if (img.isNotBlank() && id > 0) {
+                        return@withContext AniListCharacterData(id = id, name = fullName, imageUrl = img)
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        null
+    }
 }
+
+data class AniListCharacterData(
+    val id: Int,
+    val name: String,
+    val imageUrl: String
+)

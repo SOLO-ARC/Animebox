@@ -1,5 +1,7 @@
 package com.lagradost.cloudstream3.ui.animebox
 
+import com.lagradost.cloudstream3.ui.animebox.components.ThemeDotCircularProgressIndicator
+
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
@@ -19,6 +21,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.input.pointer.pointerInput
@@ -41,6 +44,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
@@ -57,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.paint
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
@@ -125,6 +130,28 @@ data class SubtitleAnimeGroup(
     val totalSizeBytes: Long
 )
 
+data class ScreenshotItem(
+    val file: File,
+    val animeTitle: String,
+    val episodeNum: Int,
+    val timestamp: Long
+)
+
+data class AnimeScreenshotGroup(
+    val animeTitle: String,
+    val folder: File,
+    val screenshots: List<ScreenshotItem>,
+    val anilistId: Int = 0,
+    val backdropUrl: String = "",
+    val logoUrl: String = ""
+)
+
+fun formatAnimeFolderTitle(name: String): String {
+    return name.replace('_', ' ')
+        .trim()
+        .replace(Regex("""\s+"""), " ")
+}
+
 fun resolveImageModel(urlOrPath: String): Any {
     if (urlOrPath.isBlank()) return ""
     if (urlOrPath.startsWith("/") && !urlOrPath.startsWith("file://")) {
@@ -133,6 +160,47 @@ fun resolveImageModel(urlOrPath: String): Any {
     }
     return urlOrPath
 }
+
+private val cachedStudioFontFamily: androidx.compose.ui.text.font.FontFamily by lazy {
+    try {
+        androidx.compose.ui.text.font.FontFamily(
+            androidx.compose.ui.text.font.Font(R.font.futura, FontWeight.Normal),
+            androidx.compose.ui.text.font.Font(R.font.futura, FontWeight.Bold)
+        )
+    } catch (_: Throwable) {
+        try {
+            androidx.compose.ui.text.font.FontFamily(
+                androidx.compose.ui.text.font.Font(R.font.netflix_sans, FontWeight.Bold)
+            )
+        } catch (_: Throwable) {
+            AnimeBoxThemeHelper.MotoGoogleSansFontFamily
+        }
+    }
+}
+
+private val cachedNetflixSansFontFamily: androidx.compose.ui.text.font.FontFamily by lazy {
+    try {
+        androidx.compose.ui.text.font.FontFamily(
+            androidx.compose.ui.text.font.Font(R.font.netflix_sans, FontWeight.Normal),
+            androidx.compose.ui.text.font.Font(R.font.netflix_sans_black, FontWeight.Black),
+            androidx.compose.ui.text.font.Font(R.font.netflix_sans, FontWeight.Bold)
+        )
+    } catch (_: Throwable) {
+        AnimeBoxThemeHelper.MotoGoogleSansFontFamily
+    }
+}
+
+private val cachedBebasNeueFontFamily: androidx.compose.ui.text.font.FontFamily by lazy {
+    try {
+        androidx.compose.ui.text.font.FontFamily(
+            androidx.compose.ui.text.font.Font(R.font.bebas_neue, FontWeight.Normal),
+            androidx.compose.ui.text.font.Font(R.font.bebas_neue, FontWeight.Bold)
+        )
+    } catch (_: Throwable) {
+        cachedNetflixSansFontFamily
+    }
+}
+
 
 fun getReleaseTimeAgo(year: Int, month: Int, day: Int): String {
     if (year <= 0) return "Recently"
@@ -199,11 +267,13 @@ fun saveCategoryOrder(context: Context, order: List<String>) {
 }
 
 fun getSavedGenreOrder(context: Context): List<String> {
-    val defaultList = listOf(
+    val adultEnabled = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAdultContentEnabled(context)
+    val defaultList = listOfNotNull(
         "Action", "Adventure", "Comedy", "Drama", "Fantasy", 
         "Mystery", "Psychological", "Romance", "Sci-Fi", 
         "Slice of Life", "Sports", "Supernatural", "Thriller",
-        "Ecchi", "Horror", "Mahou Shoujo", "Mecha", "Music"
+        "Ecchi", "Horror", "Mahou Shoujo", "Mecha", "Music",
+        if (adultEnabled) "Hentai" else null
     )
     val prefs = context.getSharedPreferences("AnimeBox_Tag_Orders", Context.MODE_PRIVATE)
     val savedJson = prefs.getString("search_genre_order", null) ?: return defaultList
@@ -215,6 +285,11 @@ fun getSavedGenreOrder(context: Context): List<String> {
             if (!list.contains(item)) list.add(item)
         }
         defaultList.forEach { if (!list.contains(it)) list.add(it) }
+        if (!adultEnabled) {
+            list.remove("Hentai")
+        } else if (!list.contains("Hentai")) {
+            list.add("Hentai")
+        }
         list
     } catch (e: Exception) {
         defaultList
@@ -339,8 +414,402 @@ data class AnimeBrief(
     val releaseMonth: Int = 0,
     val releaseDay: Int = 0,
     val customListCategory: String = "Planning",
-    val hasRecentEpisode: Boolean = false
+    val hasRecentEpisode: Boolean = false,
+    val nextEpisode: Int = 0,
+    val format: String = "",
+    val isAdult: Boolean = false
 )
+
+@Composable
+private fun FullscreenDialogSystemBars() {
+    val view = androidx.compose.ui.platform.LocalView.current
+    val dialogWindow = remember(view) {
+        var parent = view.parent
+        while (parent != null && parent !is androidx.compose.ui.window.DialogWindowProvider) {
+            parent = parent.parent
+        }
+        (parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
+    }
+    DisposableEffect(dialogWindow) {
+        dialogWindow?.let { window ->
+            androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN)
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            window.setLayout(android.view.WindowManager.LayoutParams.MATCH_PARENT, android.view.WindowManager.LayoutParams.MATCH_PARENT)
+            window.decorView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                window.attributes = window.attributes.apply {
+                    layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+            }
+            androidx.core.view.WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightStatusBars = false
+            androidx.core.view.WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightNavigationBars = false
+        }
+        onDispose { }
+    }
+}
+
+
+// Exact AniDash Broken Play Button from Iconsax.play5
+val CustomAniDashBrokenPlayIcon: androidx.compose.ui.graphics.vector.ImageVector
+    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "AniDashBrokenPlay",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M17.49 9.6l-11.89 7.17c-0.7 0.42-1.6-0.08-1.6-0.9v-8.0c0-3.49 3.77-5.67 6.8-3.93l6.68 3.84c0.69 0.41 0.7 1.41 0.01 1.82zM18.089 15.461l-8.09 4.67c-1.45 0.83-3.09 0.66-4.28-0.18-0.58-0.4-0.51-1.29 0.1-1.65l12.71-7.62c0.6-0.36 1.39-0.02 1.5 0.67 0.25 1.55-0.39 3.22-1.94 4.11z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(androidx.compose.ui.graphics.Color.White)
+    ).build()
+
+// Solar home-smile-angle outline (linear)
+val CustomHomeSmileAngleOutlineIcon: androidx.compose.ui.graphics.vector.ImageVector
+    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarHomeSmileLinear",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M2.364 12.958C1.985 10.321 1.795 9.002 2.335 7.875C2.876 6.748 4.026 6.062 6.327 4.692L7.712 3.867C9.801 2.622 10.846 2 12 2C13.154 2 14.199 2.622 16.288 3.867L17.673 4.692C19.974 6.062 21.124 6.748 21.665 7.875C22.205 9.002 22.015 10.321 21.636 12.958L21.357 14.895C20.87 18.283 20.626 19.976 19.451 20.988C18.276 22 16.553 22 13.106 22H10.894C7.447 22 5.724 22 4.549 20.988C3.374 19.976 3.13 18.283 2.643 14.895L2.364 12.958Z"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(androidx.compose.ui.graphics.Color.White),
+        strokeLineWidth = 1.6f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M9 16C9.85 16.63 10.885 17 12 17C13.115 17 14.15 16.63 15 16"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(androidx.compose.ui.graphics.Color.White),
+        strokeLineWidth = 1.6f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round
+    ).build()
+
+// Solar home-smile-angle filled with cutout smile (PathFillType.EvenOdd prevents smile from filling)
+val CustomHomeSmileAngleFilledIcon: androidx.compose.ui.graphics.vector.ImageVector
+    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarHomeSmileBoldCutout",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M13.1061 22H10.8939C7.44737 22 5.72409 22 4.54903 20.9882C3.37396 19.9764 3.13025 18.2827 2.64284 14.8952L2.36407 12.9579C1.98463 10.3208 1.79491 9.00229 2.33537 7.87495C2.87583 6.7476 4.02619 6.06234 6.32691 4.69181L7.71175 3.86687C9.80104 2.62229 10.8457 2 12 2C13.1543 2 14.199 2.62229 16.2882 3.86687L17.6731 4.69181C19.9738 6.06234 21.1242 6.7476 21.6646 7.87495C22.2051 9.00229 22.0154 10.3208 21.6359 12.9579L21.3572 14.8952C20.8697 18.2827 20.626 19.9764 19.451 20.9882C18.2759 22 16.5526 22 13.1061 22ZM8.39757 15.5532C8.64423 15.2204 9.11395 15.1506 9.44671 15.3973C10.1751 15.9371 11.0542 16.2498 12.0001 16.2498C12.946 16.2498 13.8251 15.9371 14.5535 15.3973C14.8863 15.1506 15.356 15.2204 15.6026 15.5532C15.8493 15.8859 15.7795 16.3557 15.4467 16.6023C14.4743 17.3231 13.2851 17.7498 12.0001 17.7498C10.7151 17.7498 9.5259 17.3231 8.55349 16.6023C8.22072 16.3557 8.15092 15.8859 8.39757 15.5532Z"
+        ).toNodes(),
+        pathFillType = androidx.compose.ui.graphics.PathFillType.EvenOdd,
+        fill = androidx.compose.ui.graphics.SolidColor(androidx.compose.ui.graphics.Color.White)
+    ).build()
+
+
+
+val SolarSmartSpeakerBoldIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarSmartSpeakerBold",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M5 10C5 6.22876 5 4.34315 6.17157 3.17157C7.34315 2 9.22876 2 13 2H14C17.7712 2 19.6569 2 20.8284 3.17157C22 4.34315 22 6.22876 22 10V14C22 17.7712 22 19.6569 20.8284 20.8284C19.6569 22 17.7712 22 14 22H13C9.22876 22 7.34315 22 6.17157 20.8284C5 19.6569 5 17.7712 5 14V10ZM13.5 6C11.567 6 10 7.567 10 9.5C10 11.433 11.567 13 13.5 13C15.433 13 17 11.433 17 9.5C17 7.567 15.433 6 13.5 6ZM13.5 15C12.1193 15 11 16.1193 11 17.5C11 18.8807 12.1193 20 13.5 20C14.8807 20 16 18.8807 16 17.5C16 16.1193 14.8807 15 13.5 15ZM2 8C2.55228 8 3 8.44772 3 9V15C3 15.5523 2.55228 16 2 16C1.44772 16 1 15.5523 1 15V9C1 8.44772 1.44772 8 2 8Z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White)
+    ).build()
+}
+
+val SolarSquareDoubleAltArrowRightLinearIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarSquareDoubleAltArrowRightLinear",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M2 12c0-4.714 0-7.071 1.464-8.536C4.93 2 7.286 2 12 2c4.714 0 7.071 0 8.535 1.464C22 4.93 22 7.286 22 12c0 4.714 0 7.071-1.465 8.535C19.072 22 16.714 22 12 22s-7.071 0-8.536-1.465C2 19.072 2 16.714 2 12z"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.6f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M9 8.5L12.5 12L9 15.5M13.5 8.5L17 12L13.5 15.5"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.8f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
+        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round
+    ).build()
+}
+
+val SolarWifiRouterMinimalisticBoldIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarWifiRouterMinimalisticBold",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M7 7.5V3M17 7.5V3"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 2.2f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M2 13.5c0-2.828 0-4.243.879-5.121C3.757 7.5 5.172 7.5 8 7.5h8c2.828 0 4.243 0 5.121.879C22 9.257 22 10.672 22 13.5v1c0 2.828 0 4.243-.879 5.121C20.243 20.5 18.828 20.5 16 20.5H8c-2.828 0-4.243 0-5.121-.879C2 18.743 2 17.328 2 14.5v-1z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White)
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M6.5 14a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM10.5 14a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM14.5 14a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM18.5 14a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.Black)
+    ).build()
+}
+
+val SolarStopwatchPauseBrokenIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarStopwatchPauseBroken",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M8 10.5C8 10.0341 8 9.80109 8.07612 9.61732C8.17761 9.37229 8.37229 9.17761 8.61732 9.07612C8.80109 9 9.03406 9 9.5 9C9.96594 9 10.1989 9 10.3827 9.07612C10.6277 9.17761 10.8224 9.37229 10.9239 9.61732C11 9.80109 11 10.0341 11 10.5V15.5C11 15.9659 11 16.1989 10.9239 16.3827C10.8224 16.6277 10.6277 16.8224 10.3827 16.9239C10.1989 17 9.96594 17 9.5 17C9.03406 17 8.80109 17 8.61732 16.9239C8.37229 16.8224 8.17761 16.6277 8.07612 16.3827C8 16.1989 8 15.9659 8 15.5V10.5Z"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.6f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M13 10.5C13 10.0341 13 9.80109 13.0761 9.61732C13.1776 9.37229 13.3723 9.17761 13.6173 9.07612C13.8011 9 14.0341 9 14.5 9C14.9659 9 15.1989 9 15.3827 9.07612C15.6277 9.17761 15.8224 9.37229 15.9239 9.61732C16 9.80109 16 10.0341 16 10.5V15.5C16 15.9659 16 16.1989 15.9239 16.3827C15.8224 16.6277 15.6277 16.8224 15.3827 16.9239C15.1989 17 14.9659 17 14.5 17C14.0341 17 13.8011 17 13.6173 16.9239C13.3723 16.8224 13.1776 16.6277 13.0761 16.3827C13 16.1989 13 15.9659 13 15.5V10.5Z"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.6f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M10 2H14"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.6f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M7.5 5.20404C8.82378 4.43827 10.3607 4 12 4C16.9706 4 21 8.02944 21 13C21 17.9706 16.9706 22 12 22C7.02944 22 3 17.9706 3 13C3 11.3607 3.43827 9.82378 4.20404 8.5"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.6f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round
+    ).build()
+}
+
+val SolarSpeedometerMaxBrokenIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarSpeedometerMaxBroken",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M19 19L17.5 17.5M19 5L17.5 6.5M5 19L6.5 17.5M5 5L6.5 6.5M2 12H4M19.9998 12L21.9998 12M12 4.00021L12 2.00021"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.6f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M10.1214 14.3635C8.94978 13.1919 8.94978 11.2924 10.1214 10.1209C11.2929 8.94929 13.1924 8.94929 14.364 10.1209C14.8096 10.5665 15.1209 11.4916 15.3355 12.467C15.6564 13.9255 15.8169 14.6548 15.2361 15.2356C14.6553 15.8164 13.926 15.6559 12.4675 15.335C11.4921 15.1204 10.567 14.8092 10.1214 14.3635Z"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.6f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
+        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M9 21.5422C4.94289 20.2679 2 16.4776 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12C22 16.4776 19.0571 20.2679 15 21.5422"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.6f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round
+    ).build()
+}
+
+val SolarWifiLinearIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarWifiLinear",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M8.66699 15.8931C10.5079 13.9061 13.4927 13.9061 15.3337 15.8931M5.33301 12.2948C9.01491 8.32068 14.9844 8.32068 18.6663 12.2948M2 8.69718C7.52285 2.73603 16.4772 2.73603 22 8.69718"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.6f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M12.0176 19.4641H12.0177"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.6f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
+        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round
+    ).build()
+}
+
+val SolarHistory2BoldIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarHistory2Bold",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M12 2C6.477 2 2 6.477 2 12c0 2.052.624 3.96 1.7 5.545L2.247 19.01a1 1 0 0 0 .707 1.707H7a1 1 0 0 0 1-1v-4.045a1 1 0 0 0-1.707-.708L4.854 16.39A7.962 7.962 0 0 1 4 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8a7.96 7.96 0 0 1-4.707-1.528 1 1 0 1 0-1.172 1.623A9.957 9.957 0 0 0 12 22c5.523 0 10-4.477 10-10S17.523 2 12 2z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White)
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M12 7a1 1 0 0 0-1 1v4.414l2.793 2.793a1 1 0 0 0 1.414-1.414L13 11.586V8a1 1 0 0 0-1-1z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White)
+    ).build()
+}
+
+val SolarWifiRouterLinearIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarWifiRouterLinear",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M2 13c0-2.828 0-4.243.879-5.121C3.757 7 5.172 7 8 7h8c2.828 0 4.243 0 5.121.879C22 8.757 22 10.172 22 13v2c0 2.828 0 4.243-.879 5.121C20.243 21 18.828 21 16 21H8c-2.828 0-4.243 0-5.121-.879C2 19.243 2 17.828 2 15v-2z"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.6f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M6 7V3M18 7V3M6 14h.01M10 14h.01M14 14h.01M18 14h.01"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.8f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round
+    ).build()
+}
+
+val SolarSpeedometerMaxLinearIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarSpeedometerMaxLinear",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M3.055 13C3.559 7.915 7.829 4 13 4c5.172 0 9.441 3.915 9.945 9M12 15l4.5-4.5M12 16.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM12 4V2M5.636 6.636L4.222 5.222M20.364 6.636l1.414-1.414"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.6f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
+        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round
+    ).build()
+}
+
+val SolarPlaybackSpeedLinearIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarPlaybackSpeedLinear",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.6f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M9.5 8.5v7l6-3.5-6-3.5z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White)
+    ).build()
+}
+
+val SolarHistoryLinearIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarHistoryLinear",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M12 8v4l3 3M3.055 11A9 9 0 1 1 5 17.5M3 11H8M3 11V6"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.6f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
+        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round
+    ).build()
+}
+
+
+val SolarFourKLinearIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarFourKLinear",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M2 12C2 7.28595 2 4.92893 3.46447 3.46447C4.92893 2 7.28595 2 12 2C16.714 2 19.0711 2 20.5355 3.46447C22 4.92893 22 7.28595 22 12C22 16.714 22 19.0711 20.5355 20.5355C19.0711 22 16.714 22 12 22C7.28595 22 4.92893 22 3.46447 20.5355C2 19.0711 2 16.714 2 12Z"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.6f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M6.5 8.5V13H10.5M10.5 8.5V15.5M14 8.5V15.5M14 12L17.5 8.5M14.5 12.5L18 15.5"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.8f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
+        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round
+    ).build()
+}
+
+val SolarDisplayBoldIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarDisplayBold",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M2 6C2 4.11438 2 3.17157 2.58579 2.58579C3.17157 2 4.11438 2 6 2H18C19.8856 2 20.8284 2 21.4142 2.58579C22 3.17157 22 4.11438 22 6V14C22 15.8856 22 16.8284 21.4142 17.4142C20.8284 18 19.8856 18 18 18H6C4.11438 18 3.17157 18 2.58579 17.4142C2 16.8284 2 15.8856 2 14V6ZM10 19.5C10 19.2239 10.2239 19 10.5 19H13.5C13.7761 19 14 19.2239 14 19.5V21H16.5C16.7761 21 17 21.2239 17 21.5C17 21.7761 16.7761 22 16.5 22H7.5C7.22386 22 7 21.7761 7 21.5C7 21.2239 7.22386 21 7.5 21H10V19.5Z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White)
+    ).build()
+}
 
 class AnimeBoxMainActivity : ComponentActivity() {
 
@@ -363,12 +832,15 @@ class AnimeBoxMainActivity : ComponentActivity() {
         private const val SUMMER_TIME_RENDERING_ID = 129201
         private const val SUMMER_TIME_RENDERING_BACKDROP = "https://image.tmdb.org/t/p/original/1czz0r7urqCPP0CZTAEkCk4TZY1.jpg"
 
+        var cachedSpotlightAnimes: List<AnimeBrief> = emptyList()
+        var cachedTrendingList: List<AnimeBrief> = emptyList()
+
         val STATIC_FIXED_SPOTLIGHT_ANIMES = listOf(
             AnimeBrief(
                 id = 99423,
                 title = "Darling in the FranXX",
                 coverUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/nx99423-8KyKcaR8KGb0.jpg",
-                bannerUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/banner/99423-4Q12qYjDkJ78.jpg",
+                bannerUrl = "https://image.tmdb.org/t/p/original/tKh3pc5MEjCIGV7hSJX76qi8aGA.jpg",
                 description = "In the distant future, humanity has been driven to the brink of extinction by giant beasts known as Klaxosaurs...",
                 genres = listOf("Action", "Drama", "Mecha", "Romance", "Sci-Fi"),
                 averageScore = 72,
@@ -378,7 +850,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 id = 129201,
                 title = "Summer Time Rendering",
                 coverUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx129201-NqL99Y2qG3g5.jpg",
-                bannerUrl = "",
+                bannerUrl = SUMMER_TIME_RENDERING_BACKDROP,
                 description = "Upon hearing of Ushio's death, Shinpei returns to his hometown of Wakayama city on Hitogashima...",
                 genres = listOf("Action", "Drama", "Mystery", "Supernatural", "Suspense"),
                 averageScore = 84,
@@ -388,7 +860,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 id = 127230,
                 title = "Chainsaw Man",
                 coverUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx127230-FloCoAS2zjh4.png",
-                bannerUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/banner/127230-f4qTzpwbQpZs.jpg",
+                bannerUrl = "https://image.tmdb.org/t/p/original/5DUMPBSnHOZsbBv81GFXZXvDpo6.jpg",
                 description = "Denji is a young man living a life of poverty, working as a Devil Hunter alongside Pochita...",
                 genres = listOf("Action", "Drama", "Horror", "Supernatural"),
                 averageScore = 84,
@@ -398,7 +870,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 id = 150672,
                 title = "Oshi no Ko",
                 coverUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx150672-6GFbJqA9wz8L.png",
-                bannerUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/banner/150672-3yD5V7vK9L7J.jpg",
+                bannerUrl = "https://image.tmdb.org/t/p/original/s76eYQi6hcAcOVYpVd9hofdyt11.jpg",
                 description = "Sixteen-year-old Ai Hoshino is a talented and beautiful idol adored by her fans...",
                 genres = listOf("Drama", "Mystery", "Supernatural"),
                 averageScore = 85,
@@ -408,7 +880,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 id = 151807,
                 title = "Solo Leveling",
                 coverUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx151807-31faFprP1Akg.png",
-                bannerUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/banner/151807-3Z7s5W20aM7k.jpg",
+                bannerUrl = "https://image.tmdb.org/t/p/original/xMNH87maNLt9n2bMDYeI6db5VFm.jpg",
                 description = "They say whatever doesn't kill you makes you stronger, but that's not the case for the world's weakest hunter Sung Jinwoo...",
                 genres = listOf("Action", "Adventure", "Fantasy"),
                 averageScore = 83,
@@ -418,7 +890,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 id = 98659,
                 title = "Classroom of the Elite",
                 coverUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/nx98659-15Gk5i2wG8P7.jpg",
-                bannerUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/banner/98659-0Z1s8xL9p5W3.jpg",
+                bannerUrl = "https://image.tmdb.org/t/p/original/d3yNn379emGP8xztqeOsB9oLNG2.jpg",
                 description = "Koudo Ikusei Senior High School is a leading prestigious school with state-of-the-art facilities...",
                 genres = listOf("Drama", "Mystery", "Psychological"),
                 averageScore = 78,
@@ -428,7 +900,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 id = 137822,
                 title = "Blue Lock",
                 coverUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx137822-4D3G9p8k9L8M.jpg",
-                bannerUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/banner/137822-7qL8w9P5x3Z1.jpg",
+                bannerUrl = "https://image.tmdb.org/t/p/original/seMRyWVwIVBWbC9xaMzDMZJ8fUH.jpg",
                 description = "After a disastrous defeat at the 2018 World Cup, Japan's team struggles to regroup...",
                 genres = listOf("Action", "Drama", "Sports"),
                 averageScore = 80,
@@ -438,7 +910,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 id = 21234,
                 title = "Erased",
                 coverUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21234-7s7Rk38K69P0.jpg",
-                bannerUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/banner/21234-9L3p5W8x2Z1M.jpg",
+                bannerUrl = "https://image.tmdb.org/t/p/original/rRGnjRCHdDl3m3oCVSvo5z2E5c5.jpg",
                 description = "Satoru Fujinuma is a 29-year-old manga artist who possesses an involuntary ability called Revival...",
                 genres = listOf("Drama", "Mystery", "Psychological", "Supernatural", "Suspense"),
                 averageScore = 82,
@@ -488,11 +960,19 @@ class AnimeBoxMainActivity : ComponentActivity() {
     }
 
     private val activeNavTab = mutableStateOf(0)
+    private val pendingSearchTag = mutableStateOf("")
+    private val pendingCategoryMode = mutableStateOf("")
+    private val pendingAniListConnect = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.lagradost.cloudstream3.ui.animebox.api.AnililiDubManager.init(this)
         val initialTab = intent?.getIntExtra("selectTab", 0) ?: 0
         activeNavTab.value = initialTab
+        pendingAniListConnect.value = intent?.getBooleanExtra("openAniListConnect", false) == true
+        if (pendingAniListConnect.value) activeNavTab.value = 4
+        pendingCategoryMode.value = intent?.getStringExtra("searchCategoryMode") ?: ""
+        pendingSearchTag.value = intent?.getStringExtra("activeSearchTag") ?: (intent?.getStringExtra("activeSearchGenre") ?: "")
 
         setContent {
             HomeScreen(activeNavTab)
@@ -512,6 +992,23 @@ class AnimeBoxMainActivity : ComponentActivity() {
         val reqTab = intent.getIntExtra("selectTab", -1)
         if (reqTab >= 0) {
             activeNavTab.value = reqTab
+        }
+        if (intent.getBooleanExtra("openAniListConnect", false)) {
+            pendingAniListConnect.value = true
+            activeNavTab.value = 4
+        }
+        val catMode = intent.getStringExtra("searchCategoryMode")
+        if (!catMode.isNullOrEmpty()) {
+            pendingCategoryMode.value = catMode
+        }
+        val sTag = intent.getStringExtra("activeSearchTag")
+        if (!sTag.isNullOrEmpty()) {
+            pendingSearchTag.value = sTag
+        }
+        val sGenre = intent.getStringExtra("activeSearchGenre")
+        if (!sGenre.isNullOrEmpty()) {
+            pendingSearchTag.value = sGenre
+            pendingCategoryMode.value = "GENRE"
         }
     }
     private fun isNetworkAvailable(context: Context): Boolean {
@@ -533,6 +1030,28 @@ class AnimeBoxMainActivity : ComponentActivity() {
         val profileRevision by ProfileManager.profileRevisionFlow.collectAsState()
         var currentProfileId by remember(profileRevision) { mutableStateOf(ProfileManager.getActiveProfile(this@AnimeBoxMainActivity)) }
         val primaryColor = remember(themeRevision, currentProfileId) { AnimeBoxThemeHelper.getPrimaryColor(this@AnimeBoxMainActivity) }
+        val adultModeInitial = remember {
+            com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAdultContentEnabled(this@AnimeBoxMainActivity)
+        }
+        val adultModeEnabled by com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.adultContentEnabledFlow.collectAsState(initial = adultModeInitial)
+        val visibleStudioCards = remember(adultModeEnabled) {
+            val standard = com.lagradost.cloudstream3.ui.animebox.api.AnimeStudioRepository.STUDIO_CARDS
+            if (!adultModeEnabled) standard else buildList {
+                var adultIndex = 0
+                standard.forEach { studio ->
+                    add(studio)
+                    if (studio.name.equals("Bones", ignoreCase = true) && adultIndex < com.lagradost.cloudstream3.ui.animebox.api.AnimeStudioRepository.ADULT_STUDIO_CARDS.size) {
+                        add(com.lagradost.cloudstream3.ui.animebox.api.AnimeStudioRepository.ADULT_STUDIO_CARDS[adultIndex++])
+                    }
+                    if (adultIndex > 0 && studio.name != "Bones" && adultIndex < com.lagradost.cloudstream3.ui.animebox.api.AnimeStudioRepository.ADULT_STUDIO_CARDS.size) {
+                        add(com.lagradost.cloudstream3.ui.animebox.api.AnimeStudioRepository.ADULT_STUDIO_CARDS[adultIndex++])
+                    }
+                }
+                while (adultIndex < com.lagradost.cloudstream3.ui.animebox.api.AnimeStudioRepository.ADULT_STUDIO_CARDS.size) {
+                    add(com.lagradost.cloudstream3.ui.animebox.api.AnimeStudioRepository.ADULT_STUDIO_CARDS[adultIndex++])
+                }
+            }
+        }
         MaterialTheme(
             colorScheme = darkColorScheme(
                 primary = primaryColor,
@@ -557,18 +1076,63 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 displaySmall = androidx.compose.ui.text.TextStyle(fontFamily = AnimeBoxThemeHelper.MotoGoogleSansFontFamily)
             )
         ) {
-            Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+            Box(modifier = Modifier.fillMaxSize().background(Color(0xFF181A20))) {
             var showProfileSelector by remember { mutableStateOf(false) }
             var showSettingsDialog by remember { mutableStateOf(false) }
             val historyRevision by WatchHistoryManager.revisionFlow.collectAsState()
             val historyFlowMap by WatchHistoryManager.historyFlowMap.collectAsState()
+            val libraryRevision by com.lagradost.cloudstream3.ui.animebox.library.LibraryManager.libraryRevisionFlow.collectAsState()
+            var screenshotEventRevision by remember { mutableStateOf(0L) }
 
-        var trendingList by remember { mutableStateOf<List<AnimeBrief>>(emptyList()) }
+            LaunchedEffect(Unit) {
+                com.lagradost.cloudstream3.ui.animebox.AnimeScreenshotEvents.refreshFlow.collect {
+                    screenshotEventRevision = System.currentTimeMillis()
+                }
+            }
+
+        val initialSpotlight = remember {
+            if (cachedSpotlightAnimes.isNotEmpty()) {
+                cachedSpotlightAnimes
+            } else {
+                try {
+                    val json = getSharedPreferences("AnimeBoxHomeCache", Context.MODE_PRIVATE)
+                        .getString("cached_spotlight", null)
+                    if (!json.isNullOrBlank()) {
+                        com.lagradost.cloudstream3.utils.AppUtils.tryParseJson<Array<AnimeBrief>>(json)?.toList()?.ifEmpty { STATIC_FIXED_SPOTLIGHT_ANIMES } ?: STATIC_FIXED_SPOTLIGHT_ANIMES
+                    } else {
+                        STATIC_FIXED_SPOTLIGHT_ANIMES
+                    }
+                } catch (_: Exception) {
+                    STATIC_FIXED_SPOTLIGHT_ANIMES
+                }
+            }
+        }
+
+        val initialTrending = remember {
+            if (cachedTrendingList.isNotEmpty()) {
+                cachedTrendingList
+            } else {
+                try {
+                    val json = getSharedPreferences("AnimeBoxHomeCache", Context.MODE_PRIVATE)
+                        .getString("cached_trending", null)
+                    if (!json.isNullOrBlank()) {
+                        com.lagradost.cloudstream3.utils.AppUtils.tryParseJson<Array<AnimeBrief>>(json)?.toList()?.ifEmpty { STATIC_FIXED_SPOTLIGHT_ANIMES.take(10) } ?: STATIC_FIXED_SPOTLIGHT_ANIMES.take(10)
+                    } else {
+                        STATIC_FIXED_SPOTLIGHT_ANIMES.take(10)
+                    }
+                } catch (_: Exception) {
+                    STATIC_FIXED_SPOTLIGHT_ANIMES.take(10)
+                }
+            }
+        }
+
+        var trendingList by remember { mutableStateOf<List<AnimeBrief>>(initialTrending) }
         var continueWatchingList by remember(currentProfileId) { mutableStateOf<List<WatchHistoryItem>>(emptyList()) }
         var libraryItemsList by remember(currentProfileId) { mutableStateOf<List<AnimeBrief>>(emptyList()) }
+        val libraryItemIds = remember(libraryItemsList) { libraryItemsList.map { it.id }.toSet() }
 
-        // Reactively update continue watching and library when profile or history changes
-        LaunchedEffect(currentProfileId, historyRevision) {
+        // Reactively update continue watching and library when profile, history, or library changes
+        LaunchedEffect(currentProfileId, historyRevision, screenshotEventRevision, libraryRevision) {
             val hMgr = WatchHistoryManager(this@AnimeBoxMainActivity, currentProfileId)
             val lMgr = LibraryManager(this@AnimeBoxMainActivity, currentProfileId)
             continueWatchingList = historyFlowMap[currentProfileId] ?: hMgr.getWatchHistory()
@@ -588,9 +1152,9 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 onResumeRefresh = null
             }
         }
-        var spotlightAnimes by remember { mutableStateOf<List<AnimeBrief>>(emptyList()) }
+        var spotlightAnimes by remember { mutableStateOf<List<AnimeBrief>>(initialSpotlight) }
         var spotlightIndex by remember { mutableStateOf(0) }
-        var isLoading by remember { mutableStateOf(true) }
+        var isLoading by remember { mutableStateOf(false) }
         var continueLaunchLoading by remember { mutableStateOf(false) }
 
         // Extra Home sections
@@ -609,6 +1173,30 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
         // Navigation state
         var selectedTab by navTabState // 0: Home, 1: Search, 2: Library
+        var hasVisitedMySpace by remember { mutableStateOf(false) }
+        if (selectedTab == 4) {
+            hasVisitedMySpace = true
+        }
+        LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(800)
+            hasVisitedMySpace = true
+        }
+        var hasVisitedMyList by remember { mutableStateOf(false) }
+        if (selectedTab == 3) {
+            hasVisitedMyList = true
+        }
+        LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(600)
+            hasVisitedMyList = true
+        }
+        var hasVisitedDownloads by remember { mutableStateOf(false) }
+        if (selectedTab == 2) {
+            hasVisitedDownloads = true
+        }
+        LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(500)
+            hasVisitedDownloads = true
+        }
         var initialProfileForEditing by remember { mutableStateOf<UserProfile?>(null) }
         var showNotificationsDialog by remember { mutableStateOf(false) }
         var supabaseNotifications by remember { mutableStateOf<List<SupabaseNotification>>(emptyList()) }
@@ -642,9 +1230,6 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     showScheduleAlertChibi = true
                 }
                 ScheduleAlertManager.markAlertNotified(this@AnimeBoxMainActivity, due.scheduleId)
-                // Auto dismiss after 15s if not interacted
-                kotlinx.coroutines.delay(15_000L)
-                showScheduleAlertChibi = false
             }
         }
 
@@ -769,15 +1354,20 @@ class AnimeBoxMainActivity : ComponentActivity() {
         var searchQuery by remember { mutableStateOf("") }
         var activeSearchGenre by remember { mutableStateOf("") }
         var activeSearchStudio by remember { mutableStateOf("") }
-        var searchCategoryMode by remember { mutableStateOf("GENRE") } // "GENRE" or "STUDIO"
+        var activeSearchTag by remember { mutableStateOf("") }
+        var searchCategoryMode by remember { mutableStateOf("GENRE") } // "GENRE", "STUDIO", or "TAG"
         var searchResults by remember { mutableStateOf<List<AnimeBrief>>(emptyList()) }
         var isSearchLoading by remember { mutableStateOf(false) }
         var recommendedAnimes by remember { mutableStateOf<List<AnimeBrief>>(emptyList()) }
+        var showAdvanceSearchDialog by remember { mutableStateOf(false) }
+        var isAdvanceFilterActive by remember { mutableStateOf(false) }
 
         LaunchedEffect(selectedTab) {
             if (selectedTab != 1) {
                 searchCategoryMode = "GENRE"
                 activeSearchStudio = ""
+                activeSearchTag = ""
+                isAdvanceFilterActive = false
             }
         }
 
@@ -793,11 +1383,90 @@ class AnimeBoxMainActivity : ComponentActivity() {
         // My List category filter state & Add to List Dialog state
         var selectedMyListCategory by remember { mutableStateOf("All") }
         var showAddToListDialogForAnime by remember { mutableStateOf<AnimeBrief?>(null) }
+        var quickOverviewAnime by remember { mutableStateOf<AnimeBrief?>(null) }
+        var myListSection by remember { mutableStateOf("All") }
+        var selectedPublicFranchise by remember { mutableStateOf("") }
+        var publicMovies by remember { mutableStateOf<List<AnimeBrief>>(emptyList()) }
+        var publicMoviesLoading by remember { mutableStateOf(false) }
+        val publicFranchises = remember {
+            listOf(
+                "Doraemon",
+                "Crayon Shin-chan",
+                "Pokemon",
+                "Detective Conan",
+                "Dragon Ball",
+                "Naruto",
+                "Demon Slayer",
+                "That Time I Got Reincarnated as a Slime",
+                "Inuyasha",
+                "One Piece",
+                "Bleach",
+                "My Hero Academia",
+                "Fate",
+                "Sword Art Online",
+                "Attack on Titan",
+                "Jujutsu Kaisen",
+                "Hunter x Hunter",
+                "Fairy Tail",
+                "Neon Genesis Evangelion",
+                "Studio Ghibli"
+            )
+        }
+        LaunchedEffect(myListSection, selectedPublicFranchise) {
+            if (myListSection == "Public Collection" && selectedPublicFranchise.isNotBlank()) {
+                publicMoviesLoading = true
+                val queryTerm = when (selectedPublicFranchise) {
+                    "Demon Slayer" -> "Demon Slayer: Kimetsu no Yaiba"
+                    "Pokemon" -> "Pokemon"
+                    "That Time I Got Reincarnated as a Slime" -> "That Time I Got Reincarnated as a Slime"
+                    "Studio Ghibli" -> "Hayao Miyazaki"
+                    "Neon Genesis Evangelion" -> "Evangelion"
+                    else -> selectedPublicFranchise
+                }
+                publicMovies = withContext(Dispatchers.IO) {
+                    runCatching {
+                        AniListClient.advancedSearch(
+                            queryText = queryTerm,
+                            format = "MOVIE",
+                            sort = "POPULARITY_DESC",
+                            page = 1
+                        )?.let { response -> parseTrending(response) }.orEmpty()
+                    }.getOrDefault(emptyList())
+                }
+                publicMoviesLoading = false
+            }
+        }
+        var activeCustomCollectionId by remember { mutableStateOf<String?>(null) }
+        var isAddingToCustomCollection by remember { mutableStateOf(false) }
+        var newCustomCollectionName by remember { mutableStateOf("") }
+        var myListBackgroundUri by remember { mutableStateOf(LibraryManager(this@AnimeBoxMainActivity).getMyListBackground()) }
+        val customCollections = remember(libraryRevision) { LibraryManager(this@AnimeBoxMainActivity, currentProfileId).getCollections() }
+        val publicCollections = remember(libraryRevision) { LibraryManager(this@AnimeBoxMainActivity, currentProfileId).getPublicCollections() }
+        val myListBackgroundPicker = rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) {
+                runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                myListBackgroundUri = uri.toString()
+                LibraryManager(this@AnimeBoxMainActivity, currentProfileId).saveMyListBackground(uri.toString())
+            }
+        }
 
         // Downloads Management states
         val downloadManager = remember { AnimeDownloadManager.getInstance(this@AnimeBoxMainActivity) }
-        var downloadedAnimeGroups by remember { mutableStateOf(downloadManager.getDownloadedAnimeGroups()) }
-        var storageStats by remember { mutableStateOf(downloadManager.getStorageStats()) }
+        var downloadedAnimeGroups by remember { mutableStateOf<List<DownloadedAnimeGroup>>(emptyList()) }
+        var storageStats by remember { mutableStateOf(StorageStats(128.0, 45.0, 0.0, 83.0)) }
+
+        LaunchedEffect(Unit) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val groups = downloadManager.getDownloadedAnimeGroups()
+                    val stats = downloadManager.getStorageStats()
+                    withContext(Dispatchers.Main) {
+                        downloadedAnimeGroups = groups
+                        storageStats = stats
+                    }
+                } catch (_: Exception) {}
+            }
+        }
         var selectedDrilldownAnime by remember { mutableStateOf<DownloadedAnimeGroup?>(null) }
         val focusManager = LocalFocusManager.current
         val context = LocalContext.current
@@ -826,11 +1495,13 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 comingSoonAlertAnime != null -> {
                     comingSoonAlertAnime = null
                 }
-                selectedTab == 1 && (searchQuery.isNotEmpty() || searchResults.isNotEmpty() || activeSearchGenre.isNotEmpty() || activeSearchStudio.isNotEmpty() || searchCategoryMode == "STUDIO") -> {
+                selectedTab == 1 && (searchQuery.isNotEmpty() || searchResults.isNotEmpty() || activeSearchGenre.isNotEmpty() || activeSearchStudio.isNotEmpty() || activeSearchTag.isNotEmpty() || isAdvanceFilterActive || searchCategoryMode != "GENRE") -> {
                     searchQuery = ""
                     searchResults = emptyList()
                     activeSearchGenre = ""
                     activeSearchStudio = ""
+                    activeSearchTag = ""
+                    isAdvanceFilterActive = false
                     searchCategoryMode = "GENRE"
                     focusManager.clearFocus()
                 }
@@ -866,6 +1537,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
             }
             activeSearchGenre = "" // clear active genre
             activeSearchStudio = "" // clear active studio
+            activeSearchTag = ""
+            isAdvanceFilterActive = false
             if (queryText.isNotBlank()) {
                 isSearchLoading = true
                 searchJob = coroutineScope.launch {
@@ -879,7 +1552,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                         if (response != null) {
                             searchResults = parseTrending(response) // Reuse parseTrending since schema matches
                         } else {
-                            searchResults = emptyList()
+                            searchResults = com.lagradost.cloudstream3.ui.animebox.api.KitsuClient.searchAnime(queryText)
                         }
                     }
                     isSearchLoading = false
@@ -897,6 +1570,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
             searchQuery = "" // clear text query
             activeSearchGenre = genreName
             activeSearchStudio = ""
+            activeSearchTag = ""
+            isAdvanceFilterActive = false
             searchCategoryMode = "GENRE"
             genrePage = 1
             genreHasMore = false
@@ -911,7 +1586,9 @@ class AnimeBoxMainActivity : ComponentActivity() {
                         searchResults = parseTrending(response)
                         genreHasMore = parseHasNextPage(response)
                     } else {
-                        searchResults = emptyList()
+                        val kitsuList = com.lagradost.cloudstream3.ui.animebox.api.KitsuClient.getAnimeByGenre(genreName, 1)
+                        searchResults = kitsuList
+                        genreHasMore = kitsuList.size >= 20
                     }
                 }
                 isSearchLoading = false
@@ -925,6 +1602,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
             searchQuery = "" // clear text query
             activeSearchGenre = ""
             activeSearchStudio = studioName
+            activeSearchTag = ""
+            isAdvanceFilterActive = false
             searchCategoryMode = "STUDIO"
             genrePage = 1
             genreHasMore = false
@@ -952,6 +1631,108 @@ class AnimeBoxMainActivity : ComponentActivity() {
             }
         }
 
+        // Filter search by keyword tag (resets to page 1)
+        val filterByTag = { tagName: String ->
+            isSearchLoading = true
+            focusManager.clearFocus()
+            searchQuery = "" // clear text query
+            activeSearchGenre = ""
+            activeSearchStudio = ""
+            activeSearchTag = tagName
+            isAdvanceFilterActive = false
+            searchCategoryMode = "TAG"
+            genrePage = 1
+            genreHasMore = false
+            coroutineScope.launch {
+                val tagStudioQuery = com.lagradost.cloudstream3.ui.animebox.api.AnimeStudioRepository.getQueryForStudio(tagName)
+                var response = AniListClient.getAnimeByTag(tagName, 1)
+                var list = if (response != null) parseTrending(response).distinctBy { it.id } else emptyList()
+                if (list.isEmpty()) {
+                    var studioResp = AniListClient.getAnimeByStudio(tagStudioQuery, 1)
+                    if (studioResp == null && tagStudioQuery != tagName) {
+                        studioResp = AniListClient.getAnimeByStudio(tagName, 1)
+                    }
+                    if (studioResp != null) {
+                        val studioList = parseTrending(studioResp).distinctBy { it.id }
+                        if (studioList.isNotEmpty()) {
+                            response = studioResp
+                            list = studioList
+                        }
+                    }
+                }
+                if (list.isNotEmpty()) {
+                    searchResults = list
+                    genreHasMore = parseHasNextPage(response!!)
+                } else {
+                    val hmResults = try {
+                        com.lagradost.cloudstream3.ui.animebox.extractors.HentaiMamaExtractor.search(tagName)
+                    } catch (_: Exception) { emptyList() }
+                    if (hmResults.isNotEmpty()) {
+                        val parsed = hmResults.mapIndexed { idx, res ->
+                            AnimeBrief(
+                                id = 90000000 + idx,
+                                title = res.title,
+                                coverUrl = res.poster,
+                                bannerUrl = res.poster,
+                                description = "",
+                                episodes = 1,
+                                isAdult = true
+                            )
+                        }
+                        searchResults = parsed
+                        genreHasMore = false
+                    } else {
+                        val hhResults = try {
+                            com.lagradost.cloudstream3.ui.animebox.extractors.HentaiHavenExtractor.search(tagName)
+                        } catch (_: Exception) { emptyList() }
+                        if (hhResults.isNotEmpty()) {
+                            val parsed = hhResults.mapIndexed { idx, res ->
+                                AnimeBrief(
+                                    id = 91000000 + idx,
+                                    title = res.title,
+                                    coverUrl = res.poster,
+                                    bannerUrl = res.poster,
+                                    description = "",
+                                    episodes = 1,
+                                    isAdult = true
+                                )
+                            }
+                            searchResults = parsed
+                            genreHasMore = false
+                        } else {
+                            searchResults = emptyList()
+                            genreHasMore = false
+                        }
+                    }
+                }
+                isSearchLoading = false
+            }
+        }
+
+        // Auto-switch to tag or genre mode when navigated from Detail screen keyword tags
+        LaunchedEffect(pendingCategoryMode.value, pendingSearchTag.value) {
+            if (pendingCategoryMode.value == "TAG") {
+                searchCategoryMode = "TAG"
+                val tagToFilter = pendingSearchTag.value
+                if (tagToFilter.isNotEmpty()) {
+                    activeSearchTag = tagToFilter
+                    filterByTag(tagToFilter)
+                }
+                pendingCategoryMode.value = ""
+                pendingSearchTag.value = ""
+            } else if (pendingCategoryMode.value == "GENRE") {
+                searchCategoryMode = "GENRE"
+                val genreToFilter = pendingSearchTag.value
+                if (genreToFilter.isNotEmpty()) {
+                    activeSearchGenre = genreToFilter
+                    filterByGenre(genreToFilter)
+                }
+                pendingCategoryMode.value = ""
+                pendingSearchTag.value = ""
+            }
+        }
+
+
         // Function to load Kitsu fallback home data
         val loadKitsuHomeData: () -> Unit = {
             isLoading = true
@@ -971,13 +1752,16 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     val kitsuPopular = popularDeferred.await()
 
                     if (kitsuTrending.isNotEmpty()) {
-                        trendingList = kitsuTrending.take(9)
+                        trendingList = kitsuTrending.take(10)
                     }
                     if (kitsuPopular.isNotEmpty()) {
                         recommendedAnimes = kitsuPopular
                         if (trendingList.isEmpty()) {
-                            trendingList = kitsuPopular.take(9)
+                            trendingList = kitsuPopular.take(10)
                         }
+                    }
+                    if (trendingList.isEmpty()) {
+                        trendingList = STATIC_FIXED_SPOTLIGHT_ANIMES.take(10)
                     }
 
                     // Spotlight in Kitsu mode: resolve TMDB backdrops and logos for fixed spotlight
@@ -992,13 +1776,17 @@ class AnimeBoxMainActivity : ComponentActivity() {
                         }
                     }.awaitAll()
                     spotlightAnimes = resolvedFixed.ifEmpty { STATIC_FIXED_SPOTLIGHT_ANIMES }
-
-                    // Populate all remaining home sections in background
-                    recentlyAddedList = recentDeferred.await()
-                    thisSeasonList = thisSeasonDeferred.await()
-                    moviesListData = moviesDeferred.await()
-                    comingSoonList = comingSoonDeferred.await()
                     suggestionList = (kitsuTrending + kitsuPopular).distinctBy { it.id }.filter { it.bannerUrl.isNotEmpty() }
+                    isLoading = false
+
+                    // Let each secondary section appear as soon as its already-parallel request completes.
+                    coroutineScope.launch { recentlyAddedList = recentDeferred.await() }
+                    coroutineScope.launch { thisSeasonList = thisSeasonDeferred.await() }
+                    coroutineScope.launch { moviesListData = moviesDeferred.await() }
+                    coroutineScope.launch {
+                        val upcoming = comingSoonDeferred.await()
+                        comingSoonList = upcoming
+                    }
                 } catch (e: Exception) {
                     spotlightAnimes = STATIC_FIXED_SPOTLIGHT_ANIMES
                 } finally {
@@ -1008,7 +1796,9 @@ class AnimeBoxMainActivity : ComponentActivity() {
         }
 
         val loadHomeData: () -> Unit = {
-            isLoading = true
+            if (spotlightAnimes.isEmpty()) {
+                isLoading = true
+            }
             showOutageBanner = false
             anilistErrorMessage = null
             coroutineScope.launch {
@@ -1036,41 +1826,11 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
                     val fixedResponse = fixedDeferred.await()
                     val trendingResponse = trendingDeferred.await()
-                    val popularResponse = popularDeferred.await()
 
                     if (trendingResponse == null && fixedResponse == null) {
                         anilistErrorMessage = AniListClient.lastErrorMessage ?: "The AniList API has been temporarily disabled due to severe stability issues (HTTP 403)."
                         showOutageBanner = true
-                        spotlightAnimes = STATIC_FIXED_SPOTLIGHT_ANIMES
-                        trendingList = emptyList()
-                        recentlyAddedList = emptyList()
-                        thisSeasonList = emptyList()
-                        moviesListData = emptyList()
-                        comingSoonList = emptyList()
-                        suggestionList = emptyList()
-
-                        if (retryCount > 0) {
-                            showKitsuFallbackPromptDialog = true
-                        }
-
-                        // Asynchronously resolve TMDB backdrops and logos from AniZip for the fixed spotlight anime
-                        coroutineScope.launch {
-                            try {
-                                val resolvedFixed = STATIC_FIXED_SPOTLIGHT_ANIMES.map { anime ->
-                                    coroutineScope.async {
-                                        val logo = AniZipClient.getAnimeLogoUrl(anime.id).ifEmpty { anime.logoUrl }
-                                        val tmdbBackdrop = when (anime.id) {
-                                            SUMMER_TIME_RENDERING_ID -> SUMMER_TIME_RENDERING_BACKDROP
-                                            else -> AniZipClient.getTmdbBackdropUrl(anime.id).ifEmpty { anime.bannerUrl }
-                                        }
-                                        anime.copy(logoUrl = logo, bannerUrl = tmdbBackdrop)
-                                    }
-                                }.awaitAll()
-                                if (resolvedFixed.isNotEmpty()) {
-                                    spotlightAnimes = resolvedFixed
-                                }
-                            } catch (_: Exception) {}
-                        }
+                        loadKitsuHomeData()
                         return@launch
                     } else {
                         showOutageBanner = false
@@ -1081,17 +1841,26 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
                     // Parse trending and show carousel immediately
                     val rawTrending = if (trendingResponse != null) parseTrending(trendingResponse) else emptyList()
-                    trendingList = rawTrending.take(9)
+                    trendingList = (if (rawTrending.isNotEmpty()) rawTrending else STATIC_FIXED_SPOTLIGHT_ANIMES).take(10)
 
-                    // Popular for search recommendations
-                    if (popularResponse != null) {
-                        recommendedAnimes = parseTrending(popularResponse)
+                    // Popular recommendations are independent of the first paint; don't hold the home screen for them.
+                    coroutineScope.launch {
+                        val popularResponse = popularDeferred.await()
+                        if (popularResponse != null) recommendedAnimes = parseTrending(popularResponse)
                     }
 
-                    // Parse fixed anime, preserve the requested order
+                    // Parse fixed anime, preserve the requested order with pre-loaded high-res backdrops
                     val fixedParsed = if (fixedResponse != null) parseTrending(fixedResponse) else emptyList()
-                    val sortedFixed = FIXED_SPOTLIGHT_IDS.mapNotNull { id -> fixedParsed.find { it.id == id } }
-                        .ifEmpty { STATIC_FIXED_SPOTLIGHT_ANIMES }
+                    val sortedFixed = FIXED_SPOTLIGHT_IDS.mapNotNull { id ->
+                        val match = fixedParsed.find { it.id == id }
+                        val staticDefault = STATIC_FIXED_SPOTLIGHT_ANIMES.find { it.id == id }
+                        if (match != null) {
+                            val staticBd = staticDefault?.bannerUrl?.takeIf { it.isNotBlank() }
+                            match.copy(bannerUrl = staticBd ?: match.bannerUrl)
+                        } else {
+                            staticDefault
+                        }
+                    }.ifEmpty { STATIC_FIXED_SPOTLIGHT_ANIMES }
 
                     // Find candidates from top 10 trending that aren't already in the fixed list (and not Re:Zero)
                     val dynamicCandidates = mutableListOf<AnimeBrief>()
@@ -1101,32 +1870,49 @@ class AnimeBoxMainActivity : ComponentActivity() {
                             !t.title.contains("Re:Zero", ignoreCase = true) && 
                             !t.title.contains("Re: ZERO", ignoreCase = true)
                         ) {
-                            val tmdbBd = AniZipClient.getTmdbBackdropUrl(t.id)
-                            val candidateBd = if (tmdbBd.isNotEmpty()) tmdbBd else t.bannerUrl
-                            if (candidateBd.isNotEmpty()) {
-                                dynamicCandidates.add(t.copy(bannerUrl = candidateBd))
-                            }
+                            // Use AniList's image immediately; TMDB artwork is resolved after the first paint.
+                            dynamicCandidates.add(t)
                         }
                     }
 
-                    // PHASE 2: Resolve logos + TMDB backdrops in parallel for all spotlight items
-                    val allSpotlightRaw = sortedFixed + dynamicCandidates
-                    val resolvedDefs = allSpotlightRaw.map { anime ->
-                        coroutineScope.async {
-                            val logo = AniZipClient.getAnimeLogoUrl(anime.id).ifEmpty { anime.logoUrl }
-                            val tmdbBackdrop = when (anime.id) {
-                                SUMMER_TIME_RENDERING_ID -> SUMMER_TIME_RENDERING_BACKDROP
-                                else -> AniZipClient.getTmdbBackdropUrl(anime.id)
-                                    .ifEmpty { anime.bannerUrl.ifEmpty { anime.coverUrl } }
+                    // PHASE 2: Display spotlight immediately and stop loading, then enhance in background
+                    val allSpotlightRaw = (sortedFixed + dynamicCandidates).ifEmpty { STATIC_FIXED_SPOTLIGHT_ANIMES }
+                    spotlightAnimes = allSpotlightRaw
+                    cachedSpotlightAnimes = spotlightAnimes
+                    cachedTrendingList = trendingList
+                    isLoading = false
+
+                    // Asynchronously enhance logos + TMDB backdrops in background without blocking UI
+                    coroutineScope.launch(Dispatchers.IO) {
+                        try {
+                            val resolved = allSpotlightRaw.map { anime ->
+                                val logo = AniZipClient.getAnimeLogoUrl(anime.id).ifEmpty { anime.logoUrl }
+                                val tmdbBackdrop = when (anime.id) {
+                                    SUMMER_TIME_RENDERING_ID -> SUMMER_TIME_RENDERING_BACKDROP
+                                    else -> AniZipClient.getTmdbBackdropUrl(anime.id)
+                                        .ifEmpty { anime.bannerUrl.ifEmpty { anime.coverUrl } }
+                                }
+                                anime.copy(logoUrl = logo, bannerUrl = tmdbBackdrop)
                             }
-                            anime.copy(logoUrl = logo, bannerUrl = tmdbBackdrop)
-                        }
+                            withContext(Dispatchers.Main) {
+                                spotlightAnimes = resolved
+                                cachedSpotlightAnimes = resolved
+                                try {
+                                    getSharedPreferences("AnimeBoxHomeCache", Context.MODE_PRIVATE).edit()
+                                        .putString("cached_spotlight", resolved.toJson())
+                                        .putString("cached_trending", trendingList.toJson())
+                                        .apply()
+                                } catch (_: Exception) {}
+                            }
+                        } catch (_: Exception) {}
                     }
-                    spotlightAnimes = resolvedDefs.awaitAll().ifEmpty { STATIC_FIXED_SPOTLIGHT_ANIMES }
                 } catch (e: Exception) {
                     anilistErrorMessage = "Failed to load feed: ${e.localizedMessage ?: "Unknown error"}"
                     showOutageBanner = true
                     spotlightAnimes = STATIC_FIXED_SPOTLIGHT_ANIMES
+                    if (trendingList.isEmpty()) {
+                        trendingList = STATIC_FIXED_SPOTLIGHT_ANIMES.take(10)
+                    }
                 } finally {
                     isLoading = false
                 }
@@ -1195,6 +1981,19 @@ class AnimeBoxMainActivity : ComponentActivity() {
         // Initial Data Fetching
         LaunchedEffect(Unit) {
             loadHomeData()
+            // Proactively preload starting spotlight backdrops into Coil memory/disk cache
+            withContext(Dispatchers.IO) {
+                STATIC_FIXED_SPOTLIGHT_ANIMES.forEach { anime ->
+                    if (anime.bannerUrl.isNotBlank()) {
+                        try {
+                            val req = coil3.request.ImageRequest.Builder(this@AnimeBoxMainActivity)
+                                .data(anime.bannerUrl)
+                                .build()
+                            coil3.SingletonImageLoader.get(this@AnimeBoxMainActivity).enqueue(req)
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
             // Check for updates in background only after HomeScreen data has finished loading
             lifecycleScope.launch(Dispatchers.IO) {
                 try {
@@ -1210,10 +2009,21 @@ class AnimeBoxMainActivity : ComponentActivity() {
         DisposableEffect(lifecycleOwner) {
             val observer = LifecycleEventObserver { _, event ->
                 if (event == Lifecycle.Event.ON_RESUME) {
-                    continueWatchingList = WatchHistoryManager(this@AnimeBoxMainActivity).getWatchHistory()
-                    libraryItemsList = LibraryManager(this@AnimeBoxMainActivity).getLibraryItems()
-                    downloadedAnimeGroups = downloadManager.getDownloadedAnimeGroups()
-                    storageStats = downloadManager.getStorageStats()
+                    com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAdultContentEnabled(this@AnimeBoxMainActivity)
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        try {
+                            val cw = WatchHistoryManager(this@AnimeBoxMainActivity).getWatchHistory()
+                            val lib = LibraryManager(this@AnimeBoxMainActivity).getLibraryItems()
+                            val groups = downloadManager.getDownloadedAnimeGroups()
+                            val stats = downloadManager.getStorageStats()
+                            withContext(Dispatchers.Main) {
+                                continueWatchingList = cw
+                                libraryItemsList = lib
+                                downloadedAnimeGroups = groups
+                                storageStats = stats
+                            }
+                        } catch (_: Exception) {}
+                    }
                 }
             }
             lifecycleOwner.lifecycle.addObserver(observer)
@@ -1222,9 +2032,10 @@ class AnimeBoxMainActivity : ComponentActivity() {
             }
         }
 
-        // Spotlight auto-cycling (changes every 6 seconds)
+        // Spotlight auto-cycling (changes every 6 seconds, paused when off Home)
         if (spotlightAnimes.isNotEmpty()) {
-            LaunchedEffect(spotlightAnimes) {
+            LaunchedEffect(spotlightAnimes, selectedTab) {
+                if (selectedTab != 0) return@LaunchedEffect
                 while (true) {
                     kotlinx.coroutines.delay(6000)
                     spotlightIndex = (spotlightIndex + 1) % spotlightAnimes.size
@@ -1232,9 +2043,10 @@ class AnimeBoxMainActivity : ComponentActivity() {
             }
         }
 
-        // Suggestion auto-cycling (changes every 12 seconds)
+        // Suggestion auto-cycling (changes every 12 seconds, paused when off Home)
         if (suggestionList.isNotEmpty()) {
-            LaunchedEffect(suggestionList) {
+            LaunchedEffect(suggestionList, selectedTab) {
+                if (selectedTab != 0) return@LaunchedEffect
                 while (true) {
                     kotlinx.coroutines.delay(12000)
                     suggestionIndex = (suggestionIndex + 1) % suggestionList.size
@@ -1271,26 +2083,33 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(bottom = paddingValues.calculateBottomPadding())
-                    .background(Color.Black)
+                    .background(Color(0xFF090A0D))
             ) {
                 if (isLoading) {
                     AnimeBoxHomeSkeletonLoading()
                 } else {
-                    when (selectedTab) {
-                        0 -> {
-                            // HOME TAB
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .verticalScroll(homeScrollState)
-                            ) {
+                    // Retain Home screen in memory to provide 100% instant, buttery-smooth tab switching
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                alpha = if (selectedTab == 0) 1f else 0f
+                                translationX = if (selectedTab == 0) 0f else 20000f
+                            }
+                    ) {
+                        // HOME TAB
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(homeScrollState)
+                        ) {
                                 // 1. Netflix Spotlight Hero Section (top 3 from trending / fixed fallback)
                                 if (spotlightAnimes.isNotEmpty()) {
                                     val safeIndex = if (spotlightIndex in spotlightAnimes.indices) spotlightIndex else 0
                                     val spotlight = spotlightAnimes[safeIndex]
                                     SpotlightSection(
                                         spotlight = spotlight,
-                                        inLibrary = libraryItemsList.any { it.id == spotlight.id },
+                                        inLibrary = libraryItemIds.contains(spotlight.id),
                                         onToggleLibrary = {
                                             if (isKitsuMode) {
                                                 showKitsuMyListRestrictionDialog = true
@@ -1318,7 +2137,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     modifier = Modifier.padding(top = 10.dp, bottom = 8.dp)
                                 ) {
-                                    items(STATIC_HOME_GENRES) { genreItem ->
+                                    items(STATIC_HOME_GENRES, key = { it.id }) { genreItem ->
                                         HomeGenreCard(
                                             genre = genreItem,
                                             onClick = {
@@ -1331,27 +2150,16 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
                                 // 3. Continue Watching (isolated by profile) - Netflix Style
                                 if (continueWatchingList.isNotEmpty()) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "Continue Watching",
-                                            fontSize = 17.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White
-                                        )
-                                    }
+                                    SectionHeader(title = "Continue Watching")
 
                                     LazyRow(
                                         contentPadding = PaddingValues(horizontal = 16.dp),
                                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        items(continueWatchingList) { item ->
+                                        items(continueWatchingList, key = { "${it.anilistId}_${it.episodeNumber}" }) { item ->
                                             ContinueWatchingCard(
                                                 item = item,
+                                                screenshotRevision = screenshotEventRevision,
                                                 onDeleteClick = {
                                                     val histManager = WatchHistoryManager(this@AnimeBoxMainActivity)
                                                     val list = histManager.getWatchHistory().toMutableList()
@@ -1394,8 +2202,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .padding(horizontal = 16.dp, vertical = 12.dp)
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .background(Color(0xFF282828))
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color(0xFF141418))
                                             .padding(18.dp)
                                     ) {
                                         Column {
@@ -1406,14 +2214,14 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                 Box(
                                                     modifier = Modifier
                                                         .size(42.dp)
-                                                        .clip(CircleShape)
-                                                        .background(Color(0xFF383838)),
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(Color(0xFF222228)),
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     Icon(
                                                         imageVector = if (isOffline) CustomWifiOffIcon else CustomCloudOffIcon,
                                                         contentDescription = null,
-                                                        tint = primaryColor,
+                                                        tint = Color.White,
                                                         modifier = Modifier.size(22.dp)
                                                     )
                                                 }
@@ -1428,7 +2236,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                     Spacer(modifier = Modifier.height(2.dp))
                                                     Text(
                                                         text = if (isOffline) "No internet connection detected" else "Upstream servers unreachable",
-                                                        color = Color(0xFF9E9E9E),
+                                                        color = Color(0xFF8E8E93),
                                                         fontSize = 11.5.sp
                                                     )
                                                 }
@@ -1440,7 +2248,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                 } else {
                                                     anilistErrorMessage ?: "The AniList API has been temporarily disabled due to severe stability issues (HTTP 403)."
                                                 },
-                                                color = Color(0xFFC4C4C4),
+                                                color = Color(0xFFB0B0B8),
                                                 fontSize = 12.5.sp,
                                                 lineHeight = 18.sp
                                             )
@@ -1454,8 +2262,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                         retryCount++
                                                         loadHomeData()
                                                     },
-                                                    colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
-                                                    shape = RoundedCornerShape(8.dp),
+                                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                                    shape = RoundedCornerShape(4.dp),
                                                     modifier = Modifier.weight(1f),
                                                     contentPadding = PaddingValues(vertical = 10.dp)
                                                 ) {
@@ -1475,21 +2283,21 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                 }
                                                 Button(
                                                     onClick = { selectedTab = 2 },
-                                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF383838)),
-                                                    shape = RoundedCornerShape(8.dp),
+                                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF24242A)),
+                                                    shape = RoundedCornerShape(4.dp),
                                                     modifier = Modifier.weight(1f),
                                                     contentPadding = PaddingValues(vertical = 10.dp)
                                                 ) {
                                                     Icon(
                                                         painter = painterResource(id = R.drawable.netflix_download),
                                                         contentDescription = "Downloads",
-                                                        tint = primaryColor,
+                                                        tint = Color.White,
                                                         modifier = Modifier.size(16.dp)
                                                     )
                                                     Spacer(modifier = Modifier.width(6.dp))
                                                     Text(
                                                         "Downloads",
-                                                        color = primaryColor,
+                                                        color = Color.White,
                                                         fontWeight = FontWeight.Bold,
                                                         fontSize = 13.sp
                                                     )
@@ -1499,66 +2307,37 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                     }
                                 }
 
-                                if (!showOutageBanner) {
-                                    Spacer(modifier = Modifier.height(0.dp))
+                                Spacer(modifier = Modifier.height(0.dp))
 
-                                    // 4. Trending Now - Netflix Outline Numbers Section
-                                    if (trendingList.isNotEmpty()) {
-                                        SectionHeader(title = "Top 10 Trending Shows")
-                                        LazyRow(
-                                            contentPadding = PaddingValues(horizontal = 16.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(195.dp)
-                                                .padding(bottom = 4.dp)
-                                        ) {
-                                            itemsIndexed(trendingList) { index, anime ->
+                                // Only show remaining sections when AniList is up and online (or Kitsu mode is active)
+                                if (!showOutageBanner && !isOffline) {
+                                // 4. Trending Now - Netflix Outline Numbers Section (Theme Locked Numbers 1-9)
+                                val top10Items = (if (trendingList.isNotEmpty()) trendingList else STATIC_FIXED_SPOTLIGHT_ANIMES).take(9)
+                                if (top10Items.isNotEmpty()) {
+                                    SectionHeader(title = "Top 10 Trending Shows")
+                                    LazyRow(
+                                        contentPadding = PaddingValues(horizontal = 16.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(195.dp)
+                                            .padding(bottom = 4.dp)
+                                    ) {
+                                        itemsIndexed(top10Items, key = { _, anime -> anime.id }) { index, anime ->
                                                 Box(
                                                     modifier = Modifier
                                                         .width(160.dp)
                                                         .fillMaxHeight()
                                                 ) {
-                                                    Text(
-                                                        text = "${index + 1}",
-                                                        style = androidx.compose.ui.text.TextStyle(
-                                                            fontSize = 120.sp,
-                                                            fontWeight = FontWeight.Black,
-                                                            color = Color(0xFF161616),
-                                                            drawStyle = androidx.compose.ui.graphics.drawscope.Stroke(
-                                                                width = 8f,
-                                                                join = androidx.compose.ui.graphics.StrokeJoin.Round
+                                                    com.lagradost.cloudstream3.ui.animebox.components.NetflixRankNumber(
+                                                        rank = index + 1,
+                                                        modifier = Modifier
+                                                            .align(Alignment.BottomStart)
+                                                            .size(
+                                                                width = if (index + 1 == 10) 115.dp else 78.dp,
+                                                                height = 145.dp
                                                             )
-                                                        ),
-                                                        modifier = Modifier
-                                                            .align(Alignment.BottomStart)
-                                                            .offset(x = (-4).dp, y = 20.dp)
-                                                    )
-                                                    Text(
-                                                        text = "${index + 1}",
-                                                        style = androidx.compose.ui.text.TextStyle(
-                                                            fontSize = 120.sp,
-                                                            fontWeight = FontWeight.Black,
-                                                            color = Color.Black
-                                                        ),
-                                                        modifier = Modifier
-                                                            .align(Alignment.BottomStart)
-                                                            .offset(x = (-4).dp, y = 20.dp)
-                                                    )
-                                                    Text(
-                                                        text = "${index + 1}",
-                                                        style = androidx.compose.ui.text.TextStyle(
-                                                            fontSize = 120.sp,
-                                                            fontWeight = FontWeight.Black,
-                                                            color = Color.White.copy(alpha = 0.85f),
-                                                            drawStyle = androidx.compose.ui.graphics.drawscope.Stroke(
-                                                                width = 2.5f,
-                                                                join = androidx.compose.ui.graphics.StrokeJoin.Round
-                                                            )
-                                                        ),
-                                                        modifier = Modifier
-                                                            .align(Alignment.BottomStart)
-                                                            .offset(x = (-4).dp, y = 20.dp)
+                                                            .offset(x = (-6).dp, y = 8.dp)
                                                     )
 
                                                     Box(
@@ -1569,7 +2348,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                     ) {
                                                         PremiumAnimePosterCard(
                                                             anime = anime,
-                                                            inLibrary = libraryItemsList.any { it.id == anime.id },
+                                                            inLibrary = libraryItemIds.contains(anime.id),
                                                             onToggleLibrary = {
                                                                 if (isKitsuMode) {
                                                                     showKitsuMyListRestrictionDialog = true
@@ -1577,7 +2356,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                                     showAddToListDialogForAnime = anime
                                                                 }
                                                             },
-                                                            onClick = { openDetailsPage(anime.id, anime) }
+                                                            onClick = { openDetailsPage(anime.id, anime) },
+                                                            onLongClick = { quickOverviewAnime = anime }
                                                         )
                                                     }
                                                 }
@@ -1592,13 +2372,13 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                                         modifier = Modifier.padding(bottom = 12.dp)
                                     ) {
-                                        items(com.lagradost.cloudstream3.ui.animebox.api.AnimeStudioRepository.STUDIO_CARDS) { studioItem ->
+                                        items(visibleStudioCards, key = { it.name }) { studioItem ->
                                             StudioPosterCard(
                                                 studio = studioItem,
                                                 onClick = {
                                                     selectedTab = 1
                                                     searchCategoryMode = "STUDIO"
-                                                    filterByStudio(studioItem.name)
+                                                    filterByStudio(if (studioItem.queryName.isNotBlank()) studioItem.queryName else studioItem.name)
                                                 }
                                             )
                                         }
@@ -1612,10 +2392,10 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                                             modifier = Modifier.padding(bottom = 8.dp)
                                         ) {
-                                            items(recentlyAddedList) { anime ->
+                                            items(recentlyAddedList, key = { it.id }) { anime ->
                                                 PremiumAnimePosterCard(
                                                     anime = anime,
-                                                    inLibrary = libraryItemsList.any { it.id == anime.id },
+                                                    inLibrary = libraryItemIds.contains(anime.id),
                                                     onToggleLibrary = {
                                                         if (isKitsuMode) {
                                                             showKitsuMyListRestrictionDialog = true
@@ -1623,7 +2403,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                             showAddToListDialogForAnime = anime
                                                         }
                                                     },
-                                                    onClick = { openDetailsPage(anime.id, anime) }
+                                                    onClick = { openDetailsPage(anime.id, anime) },
+                                                            onLongClick = { quickOverviewAnime = anime }
                                                 )
                                             }
                                         }
@@ -1636,7 +2417,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                             anime = curSug,
                                             backdropUrl = curSug.bannerUrl,
                                             isAniZipBackdrop = true,
-                                            inLibrary = libraryItemsList.any { it.id == curSug.id },
+                                            inLibrary = libraryItemIds.contains(curSug.id),
                                             onToggleLibrary = {
                                                 if (isKitsuMode) {
                                                     showKitsuMyListRestrictionDialog = true
@@ -1658,10 +2439,10 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                                             modifier = Modifier.padding(bottom = 8.dp)
                                         ) {
-                                            items(thisSeasonList) { anime ->
+                                            items(thisSeasonList, key = { it.id }) { anime ->
                                                 PremiumAnimePosterCard(
                                                     anime = anime,
-                                                    inLibrary = libraryItemsList.any { it.id == anime.id },
+                                                    inLibrary = libraryItemIds.contains(anime.id),
                                                     onToggleLibrary = {
                                                         if (isKitsuMode) {
                                                             showKitsuMyListRestrictionDialog = true
@@ -1669,7 +2450,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                             showAddToListDialogForAnime = anime
                                                         }
                                                     },
-                                                    onClick = { openDetailsPage(anime.id, anime) }
+                                                    onClick = { openDetailsPage(anime.id, anime) },
+                                                            onLongClick = { quickOverviewAnime = anime }
                                                 )
                                             }
                                         }
@@ -1683,10 +2465,10 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                                             modifier = Modifier.padding(bottom = 8.dp)
                                         ) {
-                                            items(moviesListData) { anime ->
+                                            items(moviesListData, key = { it.id }) { anime ->
                                                 PremiumAnimePosterCard(
                                                     anime = anime,
-                                                    inLibrary = libraryItemsList.any { it.id == anime.id },
+                                                    inLibrary = libraryItemIds.contains(anime.id),
                                                     onToggleLibrary = {
                                                         if (isKitsuMode) {
                                                             showKitsuMyListRestrictionDialog = true
@@ -1694,7 +2476,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                             showAddToListDialogForAnime = anime
                                                         }
                                                     },
-                                                    onClick = { openDetailsPage(anime.id, anime) }
+                                                    onClick = { openDetailsPage(anime.id, anime) },
+                                                            onLongClick = { quickOverviewAnime = anime }
                                                 )
                                             }
                                         }
@@ -1708,10 +2491,10 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                                             modifier = Modifier.padding(bottom = 16.dp)
                                         ) {
-                                            items(comingSoonList) { anime ->
+                                            items(comingSoonList, key = { it.id }) { anime ->
                                                 PremiumAnimePosterCard(
                                                     anime = anime,
-                                                    inLibrary = libraryItemsList.any { it.id == anime.id },
+                                                    inLibrary = libraryItemIds.contains(anime.id),
                                                     onToggleLibrary = { /* Can't add coming soon to list */ },
                                                     onClick = { comingSoonAlertAnime = anime }
                                                 )
@@ -1720,12 +2503,56 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                     }
 
                                     FaqSection()
-                                }
-
+                                } // end if (!showOutageBanner && !isOffline)
                                 Spacer(modifier = Modifier.height(8.dp))
                             }
                         }
 
+                    if (hasVisitedMySpace) {
+                        // Retain My Space in memory for 0ms instant, butter-smooth navigation
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    alpha = if (selectedTab == 4) 1f else 0f
+                                    translationX = if (selectedTab == 4) 0f else 20000f
+                                }
+                        ) {
+                            MySpaceScreen(
+                                activeProfileId = currentProfileId,
+                                onSwitchProfile = {
+                                    showProfileSelector = true
+                                },
+                                onProfileUpdated = {
+                                    val act = ProfileManager.getActiveProfile(this@AnimeBoxMainActivity)
+                                    currentProfileId = act
+                                    val hMgr = WatchHistoryManager(this@AnimeBoxMainActivity, act)
+                                    val lMgr = LibraryManager(this@AnimeBoxMainActivity, act)
+                                    continueWatchingList = hMgr.getWatchHistory()
+                                    libraryItemsList = lMgr.getLibraryItems()
+                                }
+                            )
+                        }
+                    }
+
+                    if (hasVisitedDownloads) {
+                        // Retain Downloads tab in memory for 0ms instant, butter-smooth navigation
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    alpha = if (selectedTab == 2) 1f else 0f
+                                    translationX = if (selectedTab == 2) 0f else 20000f
+                                }
+                        ) {
+                            DownloadsTabContent(
+                                downloadManager = downloadManager,
+                                onExploreClick = { selectedTab = 0 }
+                            )
+                        }
+                    }
+
+                    when (selectedTab) {
                         1 -> {
                             // SEARCH TAB (Redesigned with Erased poster subtle translucent backdrop, pill search, recent searches, live suggestions, and 3-column full vertical poster cards)
                             val searchHistKey = remember { "user_search_history_${ProfileManager.getActiveProfile(context)}" }
@@ -1856,10 +2683,23 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                     )
                                                 }
                                             }
+
+                                            // Advance Search button at right end of search bar
+                                            IconButton(
+                                                onClick = { showAdvanceSearchDialog = true },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = AdvanceSearchIcon,
+                                                    contentDescription = "Advance Search",
+                                                    tint = if (showAdvanceSearchDialog) Color.White else Color(0xFF8E8E93),
+                                                    modifier = Modifier.size(19.dp)
+                                                )
+                                            }
                                         }
                                     }
 
-                                    // Tags Horizontal Row directly below search bar (Genres normally, Studios when navigated from Studio card)
+                                    // Tags Horizontal Row directly below search bar (Genres normally, Studios when navigated from Studio card, Tags when navigated from Detail tags)
                                     if (searchCategoryMode == "STUDIO") {
                                         ReorderableDragTagRow(
                                             tags = com.lagradost.cloudstream3.ui.animebox.api.AnimeStudioRepository.ALL_STUDIO_NAMES,
@@ -1871,6 +2711,39 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                     searchResults = emptyList()
                                                 } else {
                                                     filterByStudio(studioName)
+                                                }
+                                            },
+                                            onOrderChanged = {},
+                                            isCategoryStyle = false,
+                                            modifier = Modifier.padding(bottom = 12.dp)
+                                        )
+                                    } else if (searchCategoryMode == "TAG") {
+                                        val commonAniListTags = remember {
+                                            listOf(
+                                                "Shounen", "Magic", "Isekai", "Super Power", "School",
+                                                "Military", "Historical", "Vampire", "Harem", "Survival",
+                                                "Time Travel", "Martial Arts", "Cyberpunk", "Space",
+                                                "Post-Apocalyptic", "Mecha", "Gore", "Demons", "Parody",
+                                                "Mythology", "Reincarnation", "Supernatural", "Anti-Hero"
+                                            )
+                                        }
+                                        val displayTags = remember(activeSearchTag) {
+                                            if (activeSearchTag.isNotEmpty() && !commonAniListTags.contains(activeSearchTag)) {
+                                                listOf(activeSearchTag) + commonAniListTags
+                                            } else {
+                                                commonAniListTags
+                                            }
+                                        }
+                                        ReorderableDragTagRow(
+                                            tags = displayTags,
+                                            selectedTag = activeSearchTag,
+                                            onTagSelected = { tagName ->
+                                                if (activeSearchTag == tagName) {
+                                                    activeSearchTag = ""
+                                                    searchCategoryMode = "GENRE"
+                                                    searchResults = emptyList()
+                                                } else {
+                                                    filterByTag(tagName)
                                                 }
                                             },
                                             onOrderChanged = {},
@@ -1907,17 +2780,19 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                 .weight(1f),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            CircularProgressIndicator(color = primaryColor)
+                                            ThemeDotCircularProgressIndicator(color = primaryColor, size = 42.dp)
                                         }
                                     } else {
-                                        val isShowingRecs = searchQuery.isEmpty() && activeSearchGenre.isEmpty() && activeSearchStudio.isEmpty()
-                                        val blockedInitialTopResultIds = setOf(16498, 113415, 101922) // Attack on Titan, Jujutsu Kaisen, Demon Slayer Season 1
-                                        val displayList = if (isShowingRecs) {
-                                            val nonBlocked = recommendedAnimes.filter { it.id !in blockedInitialTopResultIds }
-                                            val blocked = recommendedAnimes.filter { it.id in blockedInitialTopResultIds }
-                                            nonBlocked + blocked
-                                        } else {
-                                            searchResults
+                                        val isShowingRecs = searchQuery.isEmpty() && activeSearchGenre.isEmpty() && activeSearchStudio.isEmpty() && activeSearchTag.isEmpty() && !isAdvanceFilterActive
+                                        val displayList = remember(isShowingRecs, recommendedAnimes, searchResults) {
+                                            if (isShowingRecs) {
+                                                val blockedInitialTopResultIds = setOf(16498, 113415, 101922) // Attack on Titan, Jujutsu Kaisen, Demon Slayer Season 1
+                                                val nonBlocked = recommendedAnimes.filter { it.id !in blockedInitialTopResultIds }
+                                                val blocked = recommendedAnimes.filter { it.id in blockedInitialTopResultIds }
+                                                nonBlocked + blocked
+                                            } else {
+                                                searchResults
+                                            }
                                         }
 
                                         LazyVerticalGrid(
@@ -1929,8 +2804,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                 .weight(1f)
                                                 .padding(bottom = 6.dp)
                                         ) {
-                                            // 1. RECENT SEARCHES (Shown when query is empty and no genre/studio selected)
-                                            if (searchQuery.isEmpty() && activeSearchGenre.isEmpty() && activeSearchStudio.isEmpty() && recentSearchesList.isNotEmpty()) {
+                                            // 1. RECENT SEARCHES (Shown when query is empty and no genre/studio/tag/filter selected)
+                                            if (isShowingRecs && recentSearchesList.isNotEmpty()) {
                                                 item(span = { GridItemSpan(3) }) {
                                                     Column {
                                                         Row(
@@ -1952,7 +2827,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                                 fontSize = 13.5.sp,
                                                                 fontWeight = FontWeight.Bold,
                                                                 modifier = Modifier
-                                                                    .clip(RoundedCornerShape(4.dp))
+                                                                    .clip(RoundedCornerShape(8.dp))
                                                                     .clickable { clearAllRecentQueries() }
                                                                     .padding(horizontal = 4.dp, vertical = 2.dp)
                                                             )
@@ -2096,7 +2971,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                                 modifier = Modifier.height(38.dp)
                                                             ) {
                                                                 Icon(
-                                                                    imageVector = Icons.Default.PlayArrow,
+                                                                    imageVector = SolarPlayVector,
                                                                     contentDescription = null,
                                                                     tint = Color.Black,
                                                                     modifier = Modifier.size(18.dp)
@@ -2112,11 +2987,11 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
                                                             Spacer(modifier = Modifier.width(10.dp))
 
-                                                            val inLib = libraryItemsList.any { it.id == topResult.id }
+                                                            val inLib = libraryItemIds.contains(topResult.id)
                                                             Box(
                                                                 modifier = Modifier
                                                                     .size(38.dp)
-                                                                    .clip(RoundedCornerShape(4.dp))
+                                                                    .clip(RoundedCornerShape(8.dp))
                                                                     .background(Color(0xFF262626))
                                                                     .clickable {
                                                                         if (showOutageBanner || isOffline) {
@@ -2194,10 +3069,10 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                         )
                                                     }
 
-                                                    items(moreLikeThis) { anime ->
+                                                    items(moreLikeThis, key = { it.id }) { anime ->
                                                         PremiumAnimePosterCard(
                                                             anime = anime,
-                                                            inLibrary = libraryItemsList.any { it.id == anime.id },
+                                                            inLibrary = libraryItemIds.contains(anime.id),
                                                             onToggleLibrary = {
                                                                 if (showOutageBanner || isOffline) {
                                                                     showServiceUnavailableDialog = true
@@ -2207,7 +3082,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                             },
                                                             onClick = {
                                                                 openDetailsPage(anime.id, anime)
-                                                            }
+                                                            },
+                                                            onLongClick = { quickOverviewAnime = anime }
                                                         )
                                                     }
                                                 }
@@ -2225,10 +3101,10 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                         )
                                                     }
 
-                                                    items(moreResults) { anime ->
+                                                    items(moreResults, key = { it.id }) { anime ->
                                                         PremiumAnimePosterCard(
                                                             anime = anime,
-                                                            inLibrary = libraryItemsList.any { it.id == anime.id },
+                                                            inLibrary = libraryItemIds.contains(anime.id),
                                                             onToggleLibrary = {
                                                                 if (showOutageBanner || isOffline) {
                                                                     showServiceUnavailableDialog = true
@@ -2238,20 +3114,21 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                             },
                                                             onClick = {
                                                                 openDetailsPage(anime.id, anime)
-                                                            }
+                                                            },
+                                                            onLongClick = { quickOverviewAnime = anime }
                                                         )
                                                     }
                                                 }
 
-                                                // Load More button (for genre or studio searches with more pages)
-                                                if (!isShowingRecs && (activeSearchGenre.isNotEmpty() || activeSearchStudio.isNotEmpty()) && genreHasMore) {
+                                                // Load More button (for genre, studio, or tag searches with more pages)
+                                                if (!isShowingRecs && (activeSearchGenre.isNotEmpty() || activeSearchStudio.isNotEmpty() || activeSearchTag.isNotEmpty()) && genreHasMore) {
                                                     item(span = { GridItemSpan(3) }) {
                                                         Box(
                                                             modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                                                             contentAlignment = Alignment.Center
                                                         ) {
                                                             if (isLoadingMore) {
-                                                                CircularProgressIndicator(color = primaryColor, modifier = Modifier.size(28.dp))
+                                                                ThemeDotCircularProgressIndicator(color = primaryColor, size = 28.dp)
                                                             } else {
                                                                 OutlinedButton(
                                                                     onClick = {
@@ -2269,6 +3146,19 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                                                     if (stripped.isNotEmpty() && stripped != queryStudio && stripped != activeSearchStudio) {
                                                                                         resp = AniListClient.getAnimeByStudio(stripped, nextPage)
                                                                                     }
+                                                                                }
+                                                                                if (resp != null) {
+                                                                                    searchResults = (searchResults + parseTrending(resp)).distinctBy { it.id }
+                                                                                    genrePage = nextPage
+                                                                                    genreHasMore = parseHasNextPage(resp)
+                                                                                } else {
+                                                                                    genreHasMore = false
+                                                                                }
+                                                                            } else if (activeSearchTag.isNotEmpty()) {
+                                                                                var resp = AniListClient.getAnimeByTag(activeSearchTag, nextPage)
+                                                                                if (resp == null) {
+                                                                                    val tagStudio = com.lagradost.cloudstream3.ui.animebox.api.AnimeStudioRepository.getQueryForStudio(activeSearchTag)
+                                                                                    resp = AniListClient.getAnimeByStudio(tagStudio, nextPage)
                                                                                 }
                                                                                 if (resp != null) {
                                                                                     searchResults = (searchResults + parseTrending(resp)).distinctBy { it.id }
@@ -2315,7 +3205,9 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                         Text(
                                                             text = when {
                                                                 activeSearchStudio.isNotEmpty() -> "No anime found for \"$activeSearchStudio\""
+                                                                activeSearchTag.isNotEmpty() -> "No anime found for \"$activeSearchTag\""
                                                                 activeSearchGenre.isNotEmpty() -> "No anime found for \"$activeSearchGenre\""
+                                                                isAdvanceFilterActive -> "No anime found matching selected filters"
                                                                 else -> "No results found for \"$searchQuery\""
                                                             },
                                                             color = Color.Gray,
@@ -2327,9 +3219,2393 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         }
                                     }
                                 }
+
+                                // Advance Search Modal Dialog (Monochrome Theme, Low-Opacity Black Backdrop)
+                                if (showAdvanceSearchDialog) {
+                                    val advPrimaryColor = MaterialTheme.colorScheme.primary
+                                    val advTagTextColor = Color.White
+                                    var advSelectedGenres by remember { mutableStateOf<List<String>>(emptyList()) }
+                                    var advSelectedFormat by remember { mutableStateOf<String?>(null) }
+                                    var advSelectedStatus by remember { mutableStateOf<String?>(null) }
+                                    var advSelectedSeason by remember { mutableStateOf<String?>(null) }
+                                    var advSelectedYear by remember { mutableStateOf<Int?>(null) }
+                                    var advSelectedSort by remember { mutableStateOf<String?>("POPULARITY_DESC") }
+                                    var advSelectedStudio by remember { mutableStateOf<String?>(null) }
+                                    val adultStudioNames = remember {
+                                        (com.lagradost.cloudstream3.ui.animebox.api.AnimeStudioRepository.ADULT_STUDIO_CARDS.map { it.name } + listOf("Bunnywalker")).toSet()
+                                    }
+                                    val allStudiosForAdv = remember(adultModeEnabled) {
+                                        if (adultModeEnabled) {
+                                            com.lagradost.cloudstream3.ui.animebox.api.AnimeStudioRepository.ALL_STUDIO_NAMES
+                                        } else {
+                                            com.lagradost.cloudstream3.ui.animebox.api.AnimeStudioRepository.ALL_STUDIO_NAMES.filterNot { adultStudioNames.contains(it) }
+                                        }
+                                    }
+                                    LaunchedEffect(adultModeEnabled) {
+                                        if (!adultModeEnabled && advSelectedStudio != null && adultStudioNames.contains(advSelectedStudio)) {
+                                            advSelectedStudio = null
+                                        }
+                                    }
+
+                                    var advDragOffsetY by remember { mutableFloatStateOf(0f) }
+                                    val advAnimatedOffsetY by androidx.compose.animation.core.animateFloatAsState(
+                                        targetValue = advDragOffsetY,
+                                        label = "advDragOffsetY"
+                                    )
+
+                                    Dialog(
+                                        onDismissRequest = { showAdvanceSearchDialog = false },
+                                        properties = DialogProperties(
+                                            usePlatformDefaultWidth = false,
+                                            decorFitsSystemWindows = false
+                                        )
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(Color.Black.copy(alpha = 0.65f))
+                                                .clickable { showAdvanceSearchDialog = false },
+                                            contentAlignment = Alignment.BottomCenter
+                                        ) {
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .fillMaxHeight(0.85f)
+                                                    .offset { IntOffset(0, advAnimatedOffsetY.roundToInt()) }
+                                                    .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                                                    .background(Color(0xFF13141B))
+                                                    .clickable(enabled = false) {}
+                                                    .padding(horizontal = 20.dp, vertical = 16.dp)
+                                            ) {
+                                                // Top drag handle indicator with responsive slide-down gesture
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .pointerInput(Unit) {
+                                                            detectVerticalDragGestures(
+                                                                onVerticalDrag = { _, dragAmount ->
+                                                                    advDragOffsetY = (advDragOffsetY + dragAmount).coerceAtLeast(0f)
+                                                                },
+                                                                onDragEnd = {
+                                                                    if (advDragOffsetY > 75f) {
+                                                                        showAdvanceSearchDialog = false
+                                                                    }
+                                                                    advDragOffsetY = 0f
+                                                                },
+                                                                onDragCancel = {
+                                                                    advDragOffsetY = 0f
+                                                                }
+                                                            )
+                                                        }
+                                                        .padding(bottom = 12.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .width(44.dp)
+                                                            .height(5.dp)
+                                                            .clip(RoundedCornerShape(3.dp))
+                                                            .background(Color(0xFF4A4D5E))
+                                                    )
+                                                }
+                                                // Header
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = AdvanceSearchIcon,
+                                                            contentDescription = null,
+                                                            tint = Color.White,
+                                                            modifier = Modifier.size(20.dp)
+                                                        )
+                                                        Text(
+                                                            text = "Advanced Search",
+                                                            color = Color.White,
+                                                            fontSize = 17.sp,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                    }
+
+                                                    Text(
+                                                        text = "✕",
+                                                        color = Color(0xFF8E8E9B),
+                                                        fontSize = 16.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier
+                                                            .clip(CircleShape)
+                                                            .clickable { showAdvanceSearchDialog = false }
+                                                            .padding(4.dp)
+                                                    )
+                                                }
+
+                                                Spacer(modifier = Modifier.height(14.dp))
+
+                                                // Scrollable content
+                                                Column(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .verticalScroll(rememberScrollState()),
+                                                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                                                ) {
+                                                    // 1. Format
+                                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        Text("Format", color = Color(0xFFBDC7D5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                                        val formats = listOf("TV", "MOVIE", "OVA", "ONA", "SPECIAL")
+                                                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                            items(formats) { fmt ->
+                                                                val isSel = advSelectedFormat == fmt
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .clip(RoundedCornerShape(8.dp))
+                                                                        .background(if (isSel) advPrimaryColor else Color(0xFF1B1D24))
+                                                                        .clickable { advSelectedFormat = if (isSel) null else fmt }
+                                                                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                                                                ) {
+                                                                    Text(
+                                                                        text = fmt,
+                                                                        color = if (isSel) advTagTextColor else Color.White,
+                                                                        fontSize = 13.5.sp,
+                                                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.SemiBold
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    // 2. Status
+                                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        Text("Status", color = Color(0xFFBDC7D5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                                        val statuses = listOf(
+                                                            "RELEASING" to "Airing",
+                                                            "FINISHED" to "Finished",
+                                                            "NOT_YET_RELEASED" to "Upcoming"
+                                                        )
+                                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                            statuses.forEach { (stVal, stLabel) ->
+                                                                val isSel = advSelectedStatus == stVal
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .clip(RoundedCornerShape(8.dp))
+                                                                        .background(if (isSel) advPrimaryColor else Color(0xFF1B1D24))
+                                                                        .clickable { advSelectedStatus = if (isSel) null else stVal }
+                                                                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                                                                ) {
+                                                                    Text(
+                                                                        text = stLabel,
+                                                                        color = if (isSel) advTagTextColor else Color.White,
+                                                                        fontSize = 13.5.sp,
+                                                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.SemiBold
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    // 3. Season
+                                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        Text("Season", color = Color(0xFFBDC7D5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                                        val seasons = listOf("WINTER", "SPRING", "SUMMER", "FALL")
+                                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                            seasons.forEach { ssn ->
+                                                                val isSel = advSelectedSeason == ssn
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .clip(RoundedCornerShape(8.dp))
+                                                                        .background(if (isSel) advPrimaryColor else Color(0xFF1B1D24))
+                                                                        .clickable { advSelectedSeason = if (isSel) null else ssn }
+                                                                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                                                                ) {
+                                                                    Text(
+                                                                        text = ssn.lowercase().replaceFirstChar { it.uppercase() },
+                                                                        color = if (isSel) advTagTextColor else Color.White,
+                                                                        fontSize = 13.5.sp,
+                                                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.SemiBold
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    // 4. Release Year
+                                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        Text("Release Year", color = Color(0xFFBDC7D5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                                        val years = listOf(2026, 2025, 2024, 2023, 2022, 2021, 2020, 2018, 2015, 2010, 2005, 2000, 1995)
+                                                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                            items(years) { yr ->
+                                                                val isSel = advSelectedYear == yr
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .clip(RoundedCornerShape(8.dp))
+                                                                        .background(if (isSel) advPrimaryColor else Color(0xFF1B1D24))
+                                                                        .clickable { advSelectedYear = if (isSel) null else yr }
+                                                                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                                                                ) {
+                                                                    Text(
+                                                                        text = "$yr",
+                                                                        color = if (isSel) advTagTextColor else Color.White,
+                                                                        fontSize = 13.5.sp,
+                                                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.SemiBold
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    // 5. Sort
+                                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        Text("Sort By", color = Color(0xFFBDC7D5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                                        val sortOptions = listOf(
+                                                            "POPULARITY_DESC" to "Popular",
+                                                            "SCORE_DESC" to "Top Rated",
+                                                            "TRENDING_DESC" to "Trending",
+                                                            "START_DATE_DESC" to "Newest"
+                                                        )
+                                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                            sortOptions.forEach { (sKey, sLabel) ->
+                                                                val isSel = advSelectedSort == sKey
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .clip(RoundedCornerShape(8.dp))
+                                                                        .background(if (isSel) advPrimaryColor else Color(0xFF1B1D24))
+                                                                        .clickable { advSelectedSort = sKey }
+                                                                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                                                                ) {
+                                                                    Text(
+                                                                        text = sLabel,
+                                                                        color = if (isSel) advTagTextColor else Color.White,
+                                                                        fontSize = 13.5.sp,
+                                                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.SemiBold
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    // 6. Genres
+                                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        Text("Genres", color = Color(0xFFBDC7D5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                                        val advanceGenres = listOf(
+                                                            "Action", "Adventure", "Comedy", "Drama", "Fantasy",
+                                                            "Horror", "Mecha", "Music", "Mystery", "Psychological",
+                                                            "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller"
+                                                        )
+                                                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                            items(advanceGenres) { g ->
+                                                                val isSel = advSelectedGenres.contains(g)
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .clip(RoundedCornerShape(8.dp))
+                                                                        .background(if (isSel) advPrimaryColor else Color(0xFF1B1D24))
+                                                                        .clickable {
+                                                                            advSelectedGenres = if (isSel) advSelectedGenres - g else advSelectedGenres + g
+                                                                        }
+                                                                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                                                                ) {
+                                                                    Text(
+                                                                        text = g,
+                                                                        color = if (isSel) advTagTextColor else Color.White,
+                                                                        fontSize = 13.5.sp,
+                                                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.SemiBold
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    // 7. Animation Studios
+                                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        Text("Animation Studios", color = Color(0xFFBDC7D5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                            items(allStudiosForAdv) { std ->
+                                                                val isSel = advSelectedStudio == std
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .clip(RoundedCornerShape(8.dp))
+                                                                        .background(if (isSel) advPrimaryColor else Color(0xFF1B1D24))
+                                                                        .clickable { advSelectedStudio = if (isSel) null else std }
+                                                                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                                                                ) {
+                                                                    Text(
+                                                                        text = std,
+                                                                        color = if (isSel) advTagTextColor else Color.White,
+                                                                        fontSize = 13.5.sp,
+                                                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.SemiBold
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                Spacer(modifier = Modifier.height(16.dp))
+
+                                                // Bottom Action Buttons - Segmented Review/Comment Tag Style Switch
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(13.dp))
+                                                        .background(Color(0xFF1B1D24))
+                                                        .padding(4.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    // Reset Segment
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .clip(RoundedCornerShape(10.dp))
+                                                            .background(Color.Transparent)
+                                                            .clickable {
+                                                                advSelectedGenres = emptyList()
+                                                                advSelectedFormat = null
+                                                                advSelectedStatus = null
+                                                                advSelectedSeason = null
+                                                                advSelectedYear = null
+                                                                advSelectedStudio = null
+                                                                advSelectedSort = "POPULARITY_DESC"
+                                                                isAdvanceFilterActive = false
+                                                            }
+                                                            .padding(vertical = 11.dp),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Text("Reset", color = Color(0xFFB0B2BA), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                                    }
+
+                                                    // Apply Filters Segment (Active Pill Tag Style)
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .weight(1.15f)
+                                                            .clip(RoundedCornerShape(10.dp))
+                                                            .background(Color(0xFF2B2E38))
+                                                            .clickable {
+                                                                showAdvanceSearchDialog = false
+                                                                isSearchLoading = true
+                                                                searchCategoryMode = "GENRE"
+                                                                activeSearchGenre = ""
+                                                                activeSearchStudio = ""
+                                                                activeSearchTag = ""
+                                                                isAdvanceFilterActive = true
+                                                                focusManager.clearFocus()
+                                                                coroutineScope.launch {
+                                                                    try {
+                                                                        val resp = if (!advSelectedStudio.isNullOrBlank()) {
+                                                                            val qStudio = com.lagradost.cloudstream3.ui.animebox.api.AnimeStudioRepository.getQueryForStudio(advSelectedStudio!!)
+                                                                            var sResp = AniListClient.getAnimeByStudio(qStudio, 1)
+                                                                            if (sResp == null && qStudio != advSelectedStudio) {
+                                                                                sResp = AniListClient.getAnimeByStudio(advSelectedStudio!!, 1)
+                                                                            }
+                                                                            sResp
+                                                                        } else {
+                                                                            AniListClient.advancedSearch(
+                                                                                queryText = searchQuery.ifBlank { null },
+                                                                                genres = advSelectedGenres,
+                                                                                seasonYear = advSelectedYear,
+                                                                                season = advSelectedSeason,
+                                                                                format = advSelectedFormat,
+                                                                                status = advSelectedStatus,
+                                                                                sort = advSelectedSort
+                                                                            )
+                                                                        }
+                                                                        var parsed = if (resp != null) parseTrending(resp) else emptyList()
+                                                                        if (!advSelectedStudio.isNullOrBlank() && parsed.isNotEmpty()) {
+                                                                            if (advSelectedYear != null) {
+                                                                                parsed = parsed.filter { it.releaseYear == advSelectedYear }
+                                                                            }
+                                                                            if (!advSelectedFormat.isNullOrBlank()) {
+                                                                                parsed = parsed.filter { it.format.equals(advSelectedFormat, ignoreCase = true) }
+                                                                            }
+                                                                            if (advSelectedGenres.isNotEmpty()) {
+                                                                                parsed = parsed.filter { anime ->
+                                                                                    advSelectedGenres.all { g -> anime.genres.any { it.equals(g, ignoreCase = true) } }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                        searchResults = parsed
+                                                                    } catch (_: Exception) {
+                                                                        searchResults = emptyList()
+                                                                    } finally {
+                                                                        isSearchLoading = false
+                                                                    }
+                                                                }
+                                                            }
+                                                            .padding(vertical = 11.dp),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Text("Apply Filters", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                         2 -> {
+                            // Rendered inside retained hasVisitedDownloads Box above for instant 0ms tab switching
+                        }
+                        3 -> {
+                            // Rendered inside retained hasVisitedMyList Box below for instant 0ms tab switching
+                        }
+                        4 -> {
+                            // Managed by retained graphicsLayer box below
+                        }
+                        else -> {
+                            if (selectedTab !in 0..4) {
+                                LaunchedEffect(selectedTab) {
+                                    selectedTab = 0
+                                }
+                            }
+                        }
+                    }
+
+                    if (hasVisitedMyList) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    alpha = if (selectedTab == 3) 1f else 0f
+                                    translationX = if (selectedTab == 3) 0f else 20000f
+                                }
+                        ) {
+                            // LIBRARY TAB ("My List")
+                            val allCategories = remember { listOf("All") + com.lagradost.cloudstream3.ui.animebox.library.LibraryManager.ANILIST_CATEGORIES }
+                            val normalizedSelected = remember(selectedMyListCategory) {
+                                com.lagradost.cloudstream3.ui.animebox.library.LibraryManager.normalizeCategory(selectedMyListCategory)
+                            }
+                            val filteredLibraryItems = remember(libraryItemsList, normalizedSelected, selectedMyListCategory) {
+                                if (selectedMyListCategory.equals("All", ignoreCase = true)) {
+                                    libraryItemsList
+                                } else {
+                                    libraryItemsList.filter { 
+                                        val cat = com.lagradost.cloudstream3.ui.animebox.library.LibraryManager.normalizeCategory(it.customListCategory)
+                                        cat.equals(normalizedSelected, ignoreCase = true)
+                                    }
+                                }
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color(0xFF101114))
+                            ) {
+                                // Full edge-to-edge wallpaper with dark gradient scrim (prevents white glare and missing sides)
+                                myListBackgroundUri?.let { uri ->
+                                    Image(
+                                        painter = rememberAsyncImagePainter(uri),
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(
+                                                Brush.verticalGradient(
+                                                    listOf(
+                                                        Color.Black.copy(alpha = 0.72f),
+                                                        Color.Black.copy(alpha = 0.60f),
+                                                        Color.Black.copy(alpha = 0.82f)
+                                                    )
+                                                )
+                                            )
+                                    )
+                                }
+
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .statusBarsPadding()
+                                        .padding(horizontal = 16.dp)
+                                ) {
+                                // Top Header - Placed comfortably below status bar
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 26.dp, bottom = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "My List",
+                                        fontSize = 22.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                    if (libraryItemsList.isNotEmpty()) {
+                                        Text(
+                                            text = "${filteredLibraryItems.size} Titles",
+                                            fontSize = 12.sp,
+                                            color = primaryColor,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+
+                                Row(
+                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(Color(0xFF24262A)).padding(4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    listOf("All", "My Collection", "Public Collection").forEach { section ->
+                                        val selected = myListSection == section
+                                        Text(
+                                            section,
+                                            color = if (selected) Color.White else Color(0xFF9B9DA4),
+                                            fontSize = 12.sp,
+                                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.weight(1f).clip(RoundedCornerShape(11.dp))
+                                                .background(if (selected) Color(0xFF42454A) else Color.Transparent)
+                                                .clickable {
+                                                    myListSection = section
+                                                    activeCustomCollectionId = null
+                                                }
+                                                .padding(vertical = 10.dp)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                if (myListSection == "All") {
+                                // Middle Anime Grid
+                                if (filteredLibraryItems.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .weight(1f),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = if (selectedMyListCategory == "All") "Your list is empty. Add shows to get started." else "No anime in \"$selectedMyListCategory\"",
+                                            color = Color.Gray,
+                                            fontSize = 14.sp
+                                        )
+                                    }
+                                } else {
+                                    LazyVerticalGrid(
+                                        columns = GridCells.Fixed(3),
+                                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .weight(1f)
+                                            .padding(bottom = 6.dp)
+                                    ) {
+                                        items(filteredLibraryItems, key = { it.id }) { anime ->
+                                            PremiumAnimePosterCard(
+                                                anime = anime,
+                                                inLibrary = true,
+                                                onToggleLibrary = {
+                                                    if (showOutageBanner || isOffline) {
+                                                        showServiceUnavailableDialog = true
+                                                    } else {
+                                                        showAddToListDialogForAnime = anime
+                                                    }
+                                                },
+                                                onClick = {
+                                                    if (showOutageBanner || isOffline) {
+                                                        showServiceUnavailableDialog = true
+                                                    } else {
+                                                        openDetailsPage(anime.id, anime)
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Bottom Side Category Filter Chips (Above Navbar with sleek modern look, Drag-and-Drop Reorderable)
+                                ReorderableDragTagRow(
+                                    tags = orderedCategories,
+                                    selectedTag = selectedMyListCategory,
+                                    onTagSelected = { cat ->
+                                        selectedMyListCategory = cat
+                                    },
+                                    onOrderChanged = { newOrder ->
+                                        orderedCategories = newOrder
+                                        saveCategoryOrder(this@AnimeBoxMainActivity, newOrder)
+                                    },
+                                    isCategoryStyle = true,
+                                    isCategorySelected = { cat ->
+                                        if (cat.equals("All", ignoreCase = true)) {
+                                            selectedMyListCategory.equals("All", ignoreCase = true)
+                                        } else {
+                                            !selectedMyListCategory.equals("All", ignoreCase = true) && 
+                                                com.lagradost.cloudstream3.ui.animebox.library.LibraryManager.normalizeCategory(cat) == normalizedSelected
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 8.dp, bottom = 12.dp)
+                                )
+                                } else {
+                                    val isPublicSection = myListSection == "Public Collection"
+                                    val currentCollections = if (isPublicSection) publicCollections else customCollections
+                                    val activeCollection = currentCollections.firstOrNull { it.id == activeCustomCollectionId }
+                                    if (activeCollection == null) {
+                                        Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            androidx.compose.foundation.text.BasicTextField(
+                                                value = newCustomCollectionName,
+                                                onValueChange = { newCustomCollectionName = it.take(40) },
+                                                singleLine = true,
+                                                textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
+                                                decorationBox = { inner -> Box(Modifier.fillMaxWidth()) {
+                                                    if (newCustomCollectionName.isBlank()) Text("Name a collection", color = Color(0xFF777A82), fontSize = 13.sp)
+                                                    inner()
+                                                } },
+                                                modifier = Modifier.weight(1f).clip(RoundedCornerShape(11.dp)).background(Color(0xFF24262A)).padding(horizontal = 13.dp, vertical = 12.dp)
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Text("＋ Create", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.clip(RoundedCornerShape(11.dp)).background(Color(0xFF414349)).clickable {
+                                                    val created = if (isPublicSection) {
+                                                        LibraryManager(this@AnimeBoxMainActivity, currentProfileId).createPublicCollection(newCustomCollectionName)
+                                                    } else {
+                                                        LibraryManager(this@AnimeBoxMainActivity, currentProfileId).createCollection(newCustomCollectionName)
+                                                    }
+                                                    if (created != null) { newCustomCollectionName = ""; activeCustomCollectionId = created.id }
+                                                    else Toast.makeText(context, "Enter a unique collection name", Toast.LENGTH_SHORT).show()
+                                                }.padding(horizontal = 13.dp, vertical = 12.dp))
+                                        }
+                                        Row(Modifier.fillMaxWidth().padding(bottom = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Text(if (isPublicSection) "Public movie franchise collections" else "Your collections", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                            if (!isPublicSection) {
+                                                Text(if (myListBackgroundUri == null) "Set background" else "Change background", color = Color(0xFFB7BBC1), fontSize = 10.sp,
+                                                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFF292B30)).clickable { myListBackgroundPicker.launch(arrayOf("image/*")) }.padding(horizontal = 10.dp, vertical = 7.dp))
+                                            }
+                                        }
+                                        if (currentCollections.isEmpty()) {
+                                            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                                                Text("Create a collection to group and share your anime picks.", color = Color(0xFF94969D), fontSize = 12.sp, textAlign = TextAlign.Center)
+                                            }
+                                        } else {
+                                            // Holographic Iridescent Cards Matching Screenshot #3
+                                            val collectionLibraryManager = remember(currentProfileId) {
+                                                LibraryManager(this@AnimeBoxMainActivity, currentProfileId)
+                                            }
+                                            var cachedCollectionBriefs by remember(currentCollections, libraryItemsList) {
+                                                mutableStateOf<Map<Int, AnimeBrief>>(emptyMap())
+                                            }
+                                            LaunchedEffect(currentCollections, libraryItemsList) {
+                                                val briefs = withContext(Dispatchers.IO) {
+                                                    collectionLibraryManager.getAllCachedCollectionBriefs().associateBy { it.id }
+                                                }
+                                                cachedCollectionBriefs = briefs
+                                            }
+                                            LaunchedEffect(currentCollections, libraryItemsList) {
+                                                val missingIds = currentCollections
+                                                    .flatMap { it.animeIds }
+                                                    .distinct()
+                                                    .filter { id ->
+                                                        libraryItemsList.none { it.id == id } && cachedCollectionBriefs[id] == null
+                                                    }
+                                                if (missingIds.isNotEmpty()) {
+                                                    try {
+                                                        val response = AniListClient.getAnimesByIds(missingIds)
+                                                        if (response != null) {
+                                                            val parsed = parseTrending(response)
+                                                            collectionLibraryManager.saveCollectionAnimeBriefsBatch(parsed)
+                                                            cachedCollectionBriefs = collectionLibraryManager
+                                                                .getAllCachedCollectionBriefs()
+                                                                .associateBy { it.id }
+                                                        }
+                                                    } catch (_: Exception) {}
+                                                }
+                                            }
+                                            val holoGradient = Brush.sweepGradient(
+                                                listOf(
+                                                    Color(0xFF80DEEA),
+                                                    Color(0xFFCE93D8),
+                                                    Color(0xFFF48FB1),
+                                                    Color(0xFFFFF59D),
+                                                    Color(0xFF90CAF9),
+                                                    Color(0xFF80DEEA)
+                                                )
+                                            )
+                                            LazyVerticalGrid(
+                                                columns = GridCells.Fixed(2),
+                                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                                modifier = Modifier.weight(1f).fillMaxWidth().padding(bottom = 8.dp)
+                                            ) {
+                                                items(currentCollections, key = { it.id }) { collection ->
+                                                    val previewAnime = collection.animeIds.mapNotNull { id ->
+                                                        libraryItemsList.find { it.id == id } ?: cachedCollectionBriefs[id]
+                                                    }.take(3)
+                                                    Column(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .clip(RoundedCornerShape(20.dp))
+                                                            .background(Color(0xFF131418))
+                                                            .border(1.8.dp, holoGradient, RoundedCornerShape(20.dp))
+                                                            .clickable { activeCustomCollectionId = collection.id }
+                                                            .padding(12.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = collection.name,
+                                                            color = Color.White,
+                                                            fontSize = 15.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                        Spacer(Modifier.height(14.dp))
+                                                        // Overlapping Fan-Out Anime Posters matching Screenshot #3
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .height(104.dp),
+                                                            contentAlignment = Alignment.BottomCenter
+                                                        ) {
+                                                            if (previewAnime.isNotEmpty()) {
+                                                                // Left Poster
+                                                                if (previewAnime.size > 1) {
+                                                                    Image(
+                                                                        painter = rememberAsyncImagePainter(previewAnime[1].coverUrl),
+                                                                        contentDescription = null,
+                                                                        contentScale = ContentScale.Crop,
+                                                                        modifier = Modifier
+                                                                            .offset(x = (-22).dp, y = (-2).dp)
+                                                                            .width(56.dp)
+                                                                            .height(82.dp)
+                                                                            .clip(RoundedCornerShape(8.dp))
+                                                                    )
+                                                                }
+                                                                // Right Poster
+                                                                if (previewAnime.size > 2) {
+                                                                    Image(
+                                                                        painter = rememberAsyncImagePainter(previewAnime[2].coverUrl),
+                                                                        contentDescription = null,
+                                                                        contentScale = ContentScale.Crop,
+                                                                        modifier = Modifier
+                                                                            .offset(x = 22.dp, y = (-2).dp)
+                                                                            .width(56.dp)
+                                                                            .height(82.dp)
+                                                                            .clip(RoundedCornerShape(8.dp))
+                                                                    )
+                                                                }
+                                                                // Center Poster (in front)
+                                                                Image(
+                                                                    painter = rememberAsyncImagePainter(previewAnime[0].coverUrl),
+                                                                    contentDescription = null,
+                                                                    contentScale = ContentScale.Crop,
+                                                                    modifier = Modifier
+                                                                        .width(64.dp)
+                                                                        .height(96.dp)
+                                                                        .shadow(10.dp, RoundedCornerShape(8.dp))
+                                                                        .clip(RoundedCornerShape(8.dp))
+                                                                )
+                                                            } else {
+                                                                // Placeholder cards fan-out
+                                                                Row(
+                                                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                                    verticalAlignment = Alignment.Bottom,
+                                                                    modifier = Modifier.fillMaxWidth().height(80.dp)
+                                                                ) {
+                                                                    repeat(3) { idx ->
+                                                                        Box(
+                                                                            Modifier
+                                                                                .weight(1f)
+                                                                                .fillMaxHeight(if (idx == 1) 1f else 0.8f)
+                                                                                .clip(RoundedCornerShape(6.dp))
+                                                                                .background(Color(0xFF262830))
+                                                                        )
+                                                                    }
+                                                                }
+                                                            }
+
+                                                            // Entry count pill badge at bottom right
+                                                            Text(
+                                                                text = "${collection.animeIds.size}/${maxOf(collection.animeIds.size, 10)}",
+                                                                color = Color.White,
+                                                                fontSize = 11.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                modifier = Modifier
+                                                                    .align(Alignment.BottomEnd)
+                                                                    .clip(RoundedCornerShape(12.dp))
+                                                                    .background(Color(0xCC303238))
+                                                                    .padding(horizontal = 9.dp, vertical = 4.dp)
+                                                            )
+                                                        }
+                                                        Spacer(Modifier.height(8.dp))
+                                                        Row(
+                                                            Modifier.fillMaxWidth(),
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.SpaceBetween
+                                                        ) {
+                                                            Text("${collection.animeIds.size} titles", color = Color(0xFF9E9FA6), fontSize = 10.sp)
+                                                            Text(
+                                                                text = "Delete",
+                                                                color = Color(0xFFFF9B9B),
+                                                                fontSize = 10.sp,
+                                                                modifier = Modifier.clickable {
+                                                                    if (isPublicSection) {
+                                                                        LibraryManager(this@AnimeBoxMainActivity, currentProfileId).deletePublicCollection(collection.id)
+                                                                    } else {
+                                                                        LibraryManager(this@AnimeBoxMainActivity, currentProfileId).deleteCollection(collection.id)
+                                                                    }
+                                                                }.padding(2.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        // Opened Collection Screen Matching Screenshot #4
+                                        var orderedAnimeIds by remember(activeCollection.id, activeCollection.animeIds) { mutableStateOf(activeCollection.animeIds) }
+                                        val libManager = remember(currentProfileId) { LibraryManager(this@AnimeBoxMainActivity, currentProfileId) }
+                                        var cachedCollectionBriefs by remember(orderedAnimeIds, libraryItemsList) {
+                                            mutableStateOf<Map<Int, AnimeBrief>>(emptyMap())
+                                        }
+                                        val collectionAnime = orderedAnimeIds.mapNotNull { id -> libraryItemsList.find { it.id == id } ?: cachedCollectionBriefs[id] }
+
+                                        LaunchedEffect(orderedAnimeIds, libraryItemsList) {
+                                            val initialBriefs = withContext(Dispatchers.IO) {
+                                                libManager.getAllCachedCollectionBriefs().associateBy { it.id }
+                                            }
+                                            cachedCollectionBriefs = initialBriefs
+                                            val missingIds = orderedAnimeIds.filter { id -> libraryItemsList.none { it.id == id } && initialBriefs[id] == null }
+                                            if (missingIds.isNotEmpty()) {
+                                                try {
+                                                    val resp = AniListClient.getAnimesByIds(missingIds)
+                                                    if (resp != null) {
+                                                        val parsed = parseTrending(resp)
+                                                        withContext(Dispatchers.IO) {
+                                                            libManager.saveCollectionAnimeBriefsBatch(parsed)
+                                                            libManager.getAllCachedCollectionBriefs().associateBy { it.id }
+                                                        }.let { cachedCollectionBriefs = it }
+                                                    }
+                                                } catch (_: Exception) {}
+                                            }
+                                        }
+
+                                        var draggingAnimeId by remember { mutableStateOf<Int?>(null) }
+                                        var dragAccumulatedX by remember { mutableStateOf(0f) }
+                                        var dragAccumulatedY by remember { mutableStateOf(0f) }
+                                        val activeProf = ProfileManager.getProfiles(context).find { it.id == currentProfileId }
+                                        val activeUser = activeProf?.name ?: "Guest"
+                                        val navOutlineColor = AnimeBoxThemeHelper.getNavbarOutlineColor(context)
+
+                                        // Top navigation bar: '✕' close on left, 'Save' and '•••' on right
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Close",
+                                                tint = Color.White,
+                                                modifier = Modifier
+                                                    .size(24.dp)
+                                                    .clickable {
+                                                        activeCustomCollectionId = null
+                                                        isAddingToCustomCollection = false
+                                                    }
+                                            )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                // Save Button (Replaced Share as requested)
+                                                Text(
+                                                    text = "Save",
+                                                    color = Color.White,
+                                                    fontSize = 11.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(10.dp))
+                                                        .background(Color(0xFF383A42))
+                                                        .clickable {
+                                                            Toast.makeText(context, "Collection saved", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                                                )
+                                                Icon(
+                                                    imageVector = Icons.Default.MoreVert,
+                                                    contentDescription = "More",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(22.dp).clickable {
+                                                        val titles = collectionAnime.joinToString("\n") { it.title }
+                                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                            type = "text/plain"
+                                                            putExtra(Intent.EXTRA_TEXT, "${activeCollection.name}\n\n$titles")
+                                                        }
+                                                        startActivity(Intent.createChooser(shareIntent, "Share collection"))
+                                                    }
+                                                )
+                                            }
+                                        }
+
+                                        // Top Banner Posters Collage with Cosmic Aurora Glow
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(110.dp)
+                                                .clip(RoundedCornerShape(16.dp))
+                                                .background(Color(0xFF1A1C22))
+                                        ) {
+                                            // Ambient Rainbow Glow top edge
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(40.dp)
+                                                    .background(
+                                                        Brush.horizontalGradient(
+                                                            listOf(
+                                                                Color(0x66FF5252),
+                                                                Color(0x667C4DFF),
+                                                                Color(0x6600E5FF),
+                                                                Color(0x66FFD740)
+                                                            )
+                                                        )
+                                                    )
+                                            )
+                                            // Collage of covers
+                                            Row(
+                                                modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 6.dp),
+                                                horizontalArrangement = Arrangement.Center,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                collectionAnime.take(5).forEach { anime ->
+                                                    Image(
+                                                        painter = rememberAsyncImagePainter(anime.coverUrl),
+                                                        contentDescription = anime.title,
+                                                        contentScale = ContentScale.Crop,
+                                                        modifier = Modifier
+                                                            .padding(horizontal = 3.dp)
+                                                            .width(54.dp)
+                                                            .height(78.dp)
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                    )
+                                                }
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .background(
+                                                        Brush.verticalGradient(
+                                                            listOf(Color.Transparent, Color(0xCC1A1C22))
+                                                        )
+                                                    )
+                                            )
+                                        }
+
+                                        Spacer(Modifier.height(10.dp))
+
+                                        // Title & Subtitle Matching Screenshot #4
+                                        Text(
+                                            text = activeCollection.name,
+                                            color = Color.White,
+                                            fontSize = 22.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = if (isPublicSection) "Movie Franchise Collection" else "My Anime Collection",
+                                            color = Color(0xFF9E9FA6),
+                                            fontSize = 12.sp,
+                                            modifier = Modifier.padding(top = 2.dp)
+                                        )
+                                        Text(
+                                            text = "Updated recently · ${collectionAnime.size} titles",
+                                            color = Color(0xFF75777F),
+                                            fontSize = 11.sp,
+                                            modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
+                                        )
+
+                                        // Pill Badge, '+' Add Button, and User Info Row
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            // Count pill
+                                            Text(
+                                                text = "${collectionAnime.size}/10",
+                                                color = Color.White,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(14.dp))
+                                                    .background(Color(0xFF33353D))
+                                                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            // '+' button to toggle adding titles
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0xFF33353D))
+                                                    .clickable { isAddingToCustomCollection = !isAddingToCustomCollection },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Add,
+                                                    contentDescription = "Add Titles",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+
+                                            Spacer(Modifier.weight(1f))
+
+                                            // User Profile Avatar with Golden Ring & Level Badge (Screenshot #4)
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(28.dp)
+                                                        .clip(CircleShape)
+                                                        .border(1.5.dp, navOutlineColor, CircleShape),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    com.lagradost.cloudstream3.ui.animebox.profiles.DecoratedProfilePicture(
+                                                        avatarUrl = activeProf?.avatarUrl.orEmpty(),
+                                                        decorationUrl = "",
+                                                        size = 24.dp,
+                                                        fallbackInitial = activeUser,
+                                                        forceCircle = true
+                                                    )
+                                                }
+                                                Column {
+                                                    Text(
+                                                        text = activeUser,
+                                                        color = Color.White,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                    Text(
+                                                        text = if (isPublicSection) "Movie Franchise · ${collectionAnime.size} Titles" else if (activeUser.equals("Guest", ignoreCase = true)) "Guest Curator · ${collectionAnime.size} Titles" else "Collector · ${collectionAnime.size} Titles",
+                                                        color = Color(0xFF9E9FA6),
+                                                        fontSize = 9.sp
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        // Collection Items Content
+                                        if (isAddingToCustomCollection) {
+                                            var collectionSearchQuery by remember(isAddingToCustomCollection) { mutableStateOf("") }
+                                            var onlineSearchResults by remember(isAddingToCustomCollection) { mutableStateOf<List<AnimeBrief>>(emptyList()) }
+                                            var isSearchingOnline by remember(isAddingToCustomCollection) { mutableStateOf(false) }
+
+                                            LaunchedEffect(collectionSearchQuery) {
+                                                val query = collectionSearchQuery.trim()
+                                                if (query.length >= 2) {
+                                                    isSearchingOnline = true
+                                                    kotlinx.coroutines.delay(350L)
+                                                    try {
+                                                        val resp = AniListClient.searchAnime(query)
+                                                        onlineSearchResults = if (resp != null) {
+                                                            parseTrending(resp)
+                                                        } else {
+                                                            com.lagradost.cloudstream3.ui.animebox.api.KitsuClient.searchAnime(query)
+                                                        }
+                                                    } catch (_: Exception) {
+                                                        onlineSearchResults = emptyList()
+                                                    } finally {
+                                                        isSearchingOnline = false
+                                                    }
+                                                } else {
+                                                    onlineSearchResults = emptyList()
+                                                    isSearchingOnline = false
+                                                }
+                                            }
+
+                                            val displayedItems = remember(libraryItemsList, collectionSearchQuery, onlineSearchResults) {
+                                                if (collectionSearchQuery.isBlank()) {
+                                                    libraryItemsList
+                                                } else {
+                                                    val localMatches = libraryItemsList.filter {
+                                                        it.title.contains(collectionSearchQuery.trim(), ignoreCase = true)
+                                                    }
+                                                    (localMatches + onlineSearchResults).distinctBy { it.id }
+                                                }
+                                            }
+
+                                            Column(
+                                                modifier = Modifier.weight(1f).fillMaxWidth()
+                                            ) {
+                                                // Search Bar for filtering library anime or searching any anime across the catalog
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(bottom = 8.dp)
+                                                        .clip(RoundedCornerShape(10.dp))
+                                                        .background(Color(0xFF1E2028))
+                                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        painter = painterResource(id = R.drawable.search_icon),
+                                                        contentDescription = "Search",
+                                                        tint = Color(0xFF8E909B),
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    BasicTextField(
+                                                        value = collectionSearchQuery,
+                                                        onValueChange = { collectionSearchQuery = it },
+                                                        modifier = Modifier.weight(1f),
+                                                        textStyle = androidx.compose.ui.text.TextStyle(
+                                                            color = Color.White,
+                                                            fontSize = 13.sp
+                                                        ),
+                                                        singleLine = true,
+                                                        decorationBox = { innerTextField ->
+                                                            if (collectionSearchQuery.isEmpty()) {
+                                                                Text(
+                                                                    text = "Search any anime to add…",
+                                                                    color = Color(0xFF6B6E7B),
+                                                                    fontSize = 13.sp
+                                                                )
+                                                            }
+                                                            innerTextField()
+                                                        }
+                                                    )
+                                                    if (isSearchingOnline) {
+                                                        ThemeDotCircularProgressIndicator(
+                                                            modifier = Modifier.size(16.dp),
+                                                            color = navOutlineColor,
+                                                            size = 16.dp
+                                                        )
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                    }
+                                                    if (collectionSearchQuery.isNotEmpty()) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Close,
+                                                            contentDescription = "Clear",
+                                                            tint = Color(0xFF8E909B),
+                                                            modifier = Modifier
+                                                                .size(16.dp)
+                                                                .clickable { collectionSearchQuery = "" }
+                                                        )
+                                                    }
+                                                }
+
+                                                if (displayedItems.isEmpty() && !isSearchingOnline) {
+                                                    Box(
+                                                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Text(
+                                                            text = if (collectionSearchQuery.isNotBlank()) "No anime matching \"$collectionSearchQuery\"" else "No anime in library yet · Search above to add any title",
+                                                            color = Color(0xFF8E909B),
+                                                            fontSize = 12.5.sp
+                                                        )
+                                                    }
+                                                } else {
+                                                    LazyColumn(
+                                                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                                    ) {
+                                                        items(displayedItems, key = { it.id }) { anime ->
+                                                            val included = anime.id in activeCollection.animeIds
+                                                            val isInLibrary = libraryItemIds.contains(anime.id)
+                                                            Row(
+                                                                Modifier
+                                                                    .fillMaxWidth()
+                                                                    .clip(RoundedCornerShape(11.dp))
+                                                                    .background(Color(0xFF22242B))
+                                                                    .clickable {
+                                                                        if (included) {
+                                                                            Toast.makeText(this@AnimeBoxMainActivity, "Anime is already added inside collection and you can't add duplicate anime", Toast.LENGTH_SHORT).show()
+                                                                        } else {
+                                                                            libManager.saveCollectionAnimeBrief(anime)
+                                                                            val updatedIds = (activeCollection.animeIds + anime.id).distinct()
+                                                                            if (isPublicSection) {
+                                                                                libManager.setPublicCollectionAnimeIds(activeCollection.id, updatedIds)
+                                                                            } else {
+                                                                                libManager.setCollectionAnimeIds(activeCollection.id, updatedIds)
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                                                verticalAlignment = Alignment.CenterVertically
+                                                            ) {
+                                                                Checkbox(
+                                                                    checked = included,
+                                                                    onCheckedChange = { checked ->
+                                                                        if (checked) {
+                                                                            if (included) {
+                                                                                Toast.makeText(this@AnimeBoxMainActivity, "Anime is already added inside collection and you can't add duplicate anime", Toast.LENGTH_SHORT).show()
+                                                                            } else {
+                                                                                libManager.saveCollectionAnimeBrief(anime)
+                                                                                val updatedIds = (activeCollection.animeIds + anime.id).distinct()
+                                                                                if (isPublicSection) {
+                                                                                    libManager.setPublicCollectionAnimeIds(activeCollection.id, updatedIds)
+                                                                                } else {
+                                                                                    libManager.setCollectionAnimeIds(activeCollection.id, updatedIds)
+                                                                                }
+                                                                            }
+                                                                        } else {
+                                                                            val updatedIds = activeCollection.animeIds - anime.id
+                                                                            if (isPublicSection) {
+                                                                                libManager.setPublicCollectionAnimeIds(activeCollection.id, updatedIds)
+                                                                            } else {
+                                                                                libManager.setCollectionAnimeIds(activeCollection.id, updatedIds)
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                )
+                                                                Image(
+                                                                    painter = rememberAsyncImagePainter(anime.coverUrl),
+                                                                    contentDescription = null,
+                                                                    contentScale = ContentScale.Crop,
+                                                                    modifier = Modifier.size(38.dp, 52.dp).clip(RoundedCornerShape(6.dp))
+                                                                )
+                                                                Spacer(Modifier.width(10.dp))
+                                                                Column(Modifier.weight(1f)) {
+                                                                    Text(anime.title, color = Color.White, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                                        if (isInLibrary) {
+                                                                            Box(
+                                                                                modifier = Modifier
+                                                                                    .clip(RoundedCornerShape(3.dp))
+                                                                                    .background(Color(0xFF2A3A2C))
+                                                                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                                                                            ) {
+                                                                                Text("Library", color = Color(0xFF81C784), fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
+                                                                            }
+                                                                        }
+                                                                        if (anime.episodes > 0) {
+                                                                            Text("${anime.episodes} eps", color = Color(0xFF8E909B), fontSize = 9.sp)
+                                                                        }
+                                                                        if (anime.status.isNotBlank()) {
+                                                                            Text("·", color = Color(0xFF8E909B), fontSize = 9.sp)
+                                                                            Text(anime.status.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }, color = Color(0xFF8E909B), fontSize = 9.sp)
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } else if (collectionAnime.isEmpty()) {
+                                            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                                Text("This collection is ready for your picks.", color = Color(0xFFB6B8BF), fontSize = 13.sp)
+                                            }
+                                        } else {
+                                            // 4-Column Grid with Rank Badge, Score Badge & Format Tag (MOVIE / TV) + Hold & Drag to Reorder
+                                            LazyVerticalGrid(
+                                                columns = GridCells.Fixed(4),
+                                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                contentPadding = PaddingValues(top = 10.dp, bottom = 24.dp, start = 4.dp, end = 4.dp),
+                                                modifier = Modifier.weight(1f).fillMaxWidth().padding(bottom = 8.dp)
+                                            ) {
+                                                items(collectionAnime.size, key = { collectionAnime[it].id }) { index ->
+                                                    val anime = collectionAnime[index]
+                                                    val isMovie = anime.episodes == 1 || anime.title.contains("Movie", ignoreCase = true) || anime.genres.any { it.equals("Movie", ignoreCase = true) }
+                                                    val formatBadge = if (isMovie) "MOVIE" else "TV"
+                                                    val formatBadgeBg = if (isMovie) Color(0xFFC2185B) else Color(0xFF2E7D32)
+                                                    val isItemDragging = draggingAnimeId == anime.id
+
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .aspectRatio(0.68f)
+                                                            .zIndex(if (isItemDragging) 30f else 1f)
+                                                            .graphicsLayer {
+                                                                if (isItemDragging) {
+                                                                    scaleX = 1.02f
+                                                                    scaleY = 1.02f
+                                                                    shadowElevation = 14f
+                                                                    translationX = dragAccumulatedX.coerceIn(-30f, 30f)
+                                                                    translationY = dragAccumulatedY.coerceIn(-10f, 30f)
+                                                                }
+                                                            }
+                                                            .clip(RoundedCornerShape(8.dp))
+                                                            .then(
+                                                                if (isItemDragging) Modifier.border(2.dp, navOutlineColor, RoundedCornerShape(8.dp))
+                                                                else Modifier
+                                                            )
+                                                            .pointerInput(orderedAnimeIds, anime.id) {
+                                                                detectDragGesturesAfterLongPress(
+                                                                    onDragStart = {
+                                                                        draggingAnimeId = anime.id
+                                                                        dragAccumulatedX = 0f
+                                                                        dragAccumulatedY = 0f
+                                                                    },
+                                                                    onDragEnd = {
+                                                                        draggingAnimeId = null
+                                                                        dragAccumulatedX = 0f
+                                                                        dragAccumulatedY = 0f
+                                                                        if (isPublicSection) {
+                                                                            LibraryManager(this@AnimeBoxMainActivity, currentProfileId).setPublicCollectionAnimeIds(activeCollection.id, orderedAnimeIds)
+                                                                        } else {
+                                                                            LibraryManager(this@AnimeBoxMainActivity, currentProfileId).setCollectionAnimeIds(activeCollection.id, orderedAnimeIds)
+                                                                        }
+                                                                    },
+                                                                    onDragCancel = {
+                                                                        draggingAnimeId = null
+                                                                        dragAccumulatedX = 0f
+                                                                        dragAccumulatedY = 0f
+                                                                    },
+                                                                    onDrag = { change, dragAmount ->
+                                                                        change.consume()
+                                                                        dragAccumulatedX += dragAmount.x
+                                                                        dragAccumulatedY += dragAmount.y
+                                                                        val currentIdx = orderedAnimeIds.indexOf(anime.id)
+                                                                        if (currentIdx != -1) {
+                                                                            val stepX = 130f
+                                                                            val stepY = 150f
+                                                                            var targetIdx = currentIdx
+                                                                            if (dragAccumulatedY < -stepY && targetIdx > 0) {
+                                                                                targetIdx = (targetIdx - 4).coerceAtLeast(0)
+                                                                                dragAccumulatedY = 0f
+                                                                            } else if (dragAccumulatedY > stepY && targetIdx < orderedAnimeIds.lastIndex) {
+                                                                                targetIdx = (targetIdx + 4).coerceAtMost(orderedAnimeIds.lastIndex)
+                                                                                dragAccumulatedY = 0f
+                                                                            }
+                                                                            if (dragAccumulatedX < -stepX && targetIdx > 0) {
+                                                                                targetIdx = (targetIdx - 1).coerceAtLeast(0)
+                                                                                dragAccumulatedX = 0f
+                                                                            } else if (dragAccumulatedX > stepX && targetIdx < orderedAnimeIds.lastIndex) {
+                                                                                targetIdx = (targetIdx + 1).coerceAtMost(orderedAnimeIds.lastIndex)
+                                                                                dragAccumulatedX = 0f
+                                                                            }
+                                                                            if (targetIdx != currentIdx) {
+                                                                                val mutable = orderedAnimeIds.toMutableList()
+                                                                                val item = mutable.removeAt(currentIdx)
+                                                                                mutable.add(targetIdx, item)
+                                                                                orderedAnimeIds = mutable
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                )
+                                                            }
+                                                            .clickable { openDetailsPage(anime.id, anime) }
+                                                    ) {
+                                                        Image(
+                                                            painter = rememberAsyncImagePainter(anime.coverUrl),
+                                                            contentDescription = anime.title,
+                                                            contentScale = ContentScale.Crop,
+                                                            modifier = Modifier.fillMaxSize()
+                                                        )
+                                                        // Rank pill badge at top-left (1, 2, 3...)
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .align(Alignment.TopStart)
+                                                                .padding(4.dp)
+                                                                .clip(RoundedCornerShape(5.dp))
+                                                                .background(if (isItemDragging) navOutlineColor else Color(0xD9202228))
+                                                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = "${index + 1}",
+                                                                color = if (isItemDragging) Color.Black else Color.White,
+                                                                fontSize = 11.sp,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                        }
+                                                        // Bottom-right Format badge (TV or MOVIE, never SUB)
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .align(Alignment.BottomEnd)
+                                                                .padding(4.dp)
+                                                                .clip(RoundedCornerShape(8.dp))
+                                                                .background(formatBadgeBg)
+                                                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = formatBadge,
+                                                                color = Color.White,
+                                                                fontSize = 8.sp,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // Bottom Option: Add more titles button (with comfortable bottom padding to avoid navbar collision)
+                                        Text(
+                                            text = if (isAddingToCustomCollection) "Done" else "＋  Add more titles",
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 8.dp, bottom = 18.dp)
+                                                .clip(RoundedCornerShape(13.dp))
+                                                .background(Color(0xFF383A42))
+                                                .clickable { isAddingToCustomCollection = !isAddingToCustomCollection }
+                                                .padding(vertical = 12.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        }
+                    }
+                }
+
+                // Schedule Episode Release Alert Chibi Card (shows once on opening app in chibi style)
+                AnimatedVisibility(
+                    visible = showScheduleAlertChibi && selectedTab == 0 && activeScheduleAlert != null && !isOffline && !showOutageBanner && anilistErrorMessage == null && isNetworkAvailable(this@AnimeBoxMainActivity),
+                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(animationSpec = androidx.compose.animation.core.tween(250)),
+                    exit = fadeOut(animationSpec = androidx.compose.animation.core.tween(150)),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    val alert = activeScheduleAlert
+                    if (alert != null) {
+                        val alertScope = rememberCoroutineScope()
+                        val alertOffsetX = remember { androidx.compose.animation.core.Animatable(0f) }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .offset { IntOffset(alertOffsetX.value.roundToInt(), 0) }
+                                .alpha((1f - (abs(alertOffsetX.value) / 320f)).coerceIn(0f, 1f))
+                                .pointerInput(Unit) {
+                                    detectHorizontalDragGestures(
+                                        onDragEnd = {
+                                            alertScope.launch {
+                                                if (abs(alertOffsetX.value) > 100f) {
+                                                    val target = if (alertOffsetX.value > 0) 1200f else -1200f
+                                                    alertOffsetX.animateTo(target, androidx.compose.animation.core.tween(200))
+                                                    showScheduleAlertChibi = false
+                                                } else {
+                                                    alertOffsetX.animateTo(0f, androidx.compose.animation.core.tween(150))
+                                                }
+                                            }
+                                        },
+                                        onHorizontalDrag = { change, dragAmount ->
+                                            change.consume()
+                                            alertScope.launch {
+                                                alertOffsetX.snapTo(alertOffsetX.value + dragAmount)
+                                            }
+                                        }
+                                    )
+                                }
+                                .shadow(elevation = 18.dp, shape = RoundedCornerShape(14.dp), spotColor = Color.Black)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color(0xFF141418))
+                                .clickable {
+                                    openDetailsPage(alert.anilistId)
+                                    showScheduleAlertChibi = false
+                                }
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Image(
+                                    painter = painterResource(id = R.drawable.firefly_chibi_suggestion),
+                                    contentDescription = "Schedule Release Alert",
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier
+                                        .size(62.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                )
+
+                                Spacer(modifier = Modifier.width(12.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.Top
+                                    ) {
+                                        Text(
+                                            text = "${alert.title} Ep ${alert.episode} is Out!",
+                                            color = Color.White,
+                                            fontSize = 12.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+
+                                        IconButton(
+                                            onClick = { showScheduleAlertChibi = false },
+                                            modifier = Modifier.size(20.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Close",
+                                                tint = Color(0xFF7A7D8F),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(2.dp))
+
+                                    Text(
+                                        text = "Episode ${alert.episode} has aired! It could take some time to be added to servers, so it might be available in the next few hours.",
+                                        color = Color(0xFF9E9EA8),
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Normal,
+                                        lineHeight = 14.sp
+                                    )
+
+                                    Spacer(modifier = Modifier.height(6.dp))
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color(0xFF24252E))
+                                            .clickable {
+                                                openDetailsPage(alert.anilistId)
+                                                showScheduleAlertChibi = false
+                                            }
+                                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = SolarPlayVector,
+                                            contentDescription = "View Details",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Text(
+                                            text = "View Anime Page",
+                                            color = Color.White,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 15-Second Idle Floating Recommendation Card (above bottom nav, suppressed when schedule chibi is active, or offline / outage)
+                AnimatedVisibility(
+                    visible = showIdleRecommendation && !showScheduleAlertChibi && selectedTab == 0 && recommendedAnimeForIdle != null && !isOffline && !showOutageBanner && anilistErrorMessage == null && isNetworkAvailable(this@AnimeBoxMainActivity),
+                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                    exit = fadeOut(animationSpec = androidx.compose.animation.core.tween(150)),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    val rec = recommendedAnimeForIdle
+                    if (rec != null) {
+                        val idleScope = rememberCoroutineScope()
+                        val idleOffsetX = remember { androidx.compose.animation.core.Animatable(0f) }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .offset { IntOffset(idleOffsetX.value.roundToInt(), 0) }
+                                .alpha((1f - (abs(idleOffsetX.value) / 320f)).coerceIn(0f, 1f))
+                                .pointerInput(Unit) {
+                                    detectHorizontalDragGestures(
+                                        onDragEnd = {
+                                            idleScope.launch {
+                                                if (abs(idleOffsetX.value) > 100f) {
+                                                    val target = if (idleOffsetX.value > 0) 1200f else -1200f
+                                                    idleOffsetX.animateTo(target, androidx.compose.animation.core.tween(200))
+                                                    idleDismissed = true
+                                                    showIdleRecommendation = false
+                                                } else {
+                                                    idleOffsetX.animateTo(0f, androidx.compose.animation.core.tween(150))
+                                                }
+                                            }
+                                        },
+                                        onHorizontalDrag = { change, dragAmount ->
+                                            change.consume()
+                                            idleScope.launch {
+                                                idleOffsetX.snapTo(idleOffsetX.value + dragAmount)
+                                            }
+                                        }
+                                    )
+                                }
+                                .shadow(elevation = 18.dp, shape = RoundedCornerShape(14.dp), spotColor = Color.Black)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color(0xFF141418))
+                                .clickable {
+                                    openDetailsPage(rec.id, rec)
+                                    showIdleRecommendation = false
+                                }
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Chibi Character Avatar (no thin borders, clean presentation)
+                                Image(
+                                    painter = painterResource(id = R.drawable.firefly_chibi_suggestion),
+                                    contentDescription = "FireFly Suggestion",
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier
+                                        .size(62.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                )
+
+                                Spacer(modifier = Modifier.width(12.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.Top
+                                    ) {
+                                        Text(
+                                            text = "Having trouble finding what to watch?",
+                                            color = Color.White,
+                                            fontSize = 12.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+
+                                        IconButton(
+                                            onClick = {
+                                                idleDismissed = true
+                                                showIdleRecommendation = false
+                                            },
+                                            modifier = Modifier.size(20.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Close",
+                                                tint = Color(0xFF7A7D8F),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(2.dp))
+
+                                    Text(
+                                        text = "Let me recommend a show for you!",
+                                        color = Color(0xFF9E9EA8),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+
+                                    Spacer(modifier = Modifier.height(6.dp))
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color(0xFF24252E))
+                                            .clickable {
+                                                openDetailsPage(rec.id, rec)
+                                                showIdleRecommendation = false
+                                            }
+                                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = SolarPlayVector,
+                                            contentDescription = "Play",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Text(
+                                            text = rec.title,
+                                            color = Color.White,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Continue Watching loading overlay
+                if (continueLaunchLoading) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.7f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            ThemeDotCircularProgressIndicator(color = primaryColor, size = 42.dp)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text("Loading...", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                // Floating Top Header Bar (Search icon left | Notification + Profile right) — Home tab only
+                if (selectedTab == 0) {
+                    val activeProfileObj = remember(profileRevision, currentProfileId) {
+                        ProfileManager.getProfiles(this@AnimeBoxMainActivity)
+                            .find { it.id == currentProfileId }
+                    }
+                    val activeName = activeProfileObj?.name ?: "Guest"
+                    val avatarUrl = activeProfileObj?.avatarUrl ?: ""
+                    val profilePainter = remember(avatarUrl) {
+                        if (avatarUrl.startsWith("android.resource://")) {
+                            val resName = avatarUrl.substringAfterLast("/")
+                            val resId = context.resources.getIdentifier(resName, "drawable", context.packageName)
+                            if (resId != 0) resId else avatarUrl
+                        } else {
+                            avatarUrl
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.TopCenter)
+                    ) {
+                        // Minimal subtle top gradient for header visibility
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .background(
+                                    Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color.Black.copy(alpha = 0.30f),
+                                            Color.Transparent
+                                        )
+                                    )
+                                )
+                        )
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                                .padding(horizontal = 16.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            // Left side: FireFly App Logo
+                            Image(
+                                painter = painterResource(id = R.drawable.firefly_logo),
+                                contentDescription = "FireFly",
+                                modifier = Modifier
+                                    .height(48.dp)
+                                    .wrapContentWidth()
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) {
+                                        showProfileSelector = true
+                                    },
+                                contentScale = ContentScale.Fit
+                            )
+
+                            // Right side: Search + Notification bell + Profile avatar
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                // Search Icon Button
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clickable(
+                                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                            indication = null
+                                        ) { selectedTab = 1 },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = CustomSearchIcon,
+                                        contentDescription = "Search",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+
+                                // Notification Icon Button
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clickable(
+                                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                            indication = null
+                                        ) { 
+                                            showNotificationsDialog = true 
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Box(
+                                        modifier = Modifier.size(24.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = CustomNotificationIcon,
+                                            contentDescription = "Notifications",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        if (unreadNotifCount > 0) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .offset(x = 3.dp, y = (-2).dp)
+                                                    .size(15.dp)
+                                                    .background(Color(0xFFE50914), CircleShape)
+                                                    .border(1.dp, Color.Black, CircleShape),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = if (unreadNotifCount > 9) "9+" else "$unreadNotifCount",
+                                                    color = Color.White,
+                                                    fontSize = 8.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    textAlign = TextAlign.Center,
+                                                    style = androidx.compose.ui.text.TextStyle(
+                                                        platformStyle = androidx.compose.ui.text.PlatformTextStyle(
+                                                            includeFontPadding = false
+                                                        )
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clickable { showProfileSelector = true },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                com.lagradost.cloudstream3.ui.animebox.profiles.DecoratedProfilePicture(
+                                    avatarUrl = avatarUrl,
+                                    decorationUrl = activeProfileObj?.decorationUrl ?: "",
+                                    size = 32.dp,
+                                    fallbackInitial = activeName,
+                                    onClick = { showProfileSelector = true }
+                                )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if ( showProfileSelector) {
+            ProfileSelectorDialog(
+                initialProfileForEditing = initialProfileForEditing,
+                onDismiss = { 
+                    showProfileSelector = false
+                    initialProfileForEditing = null
+                },
+                onOpenMySpace = { profileId ->
+                    ProfileManager.setActiveProfile(this@AnimeBoxMainActivity, profileId)
+                    currentProfileId = profileId
+                    val hMgr = WatchHistoryManager(this@AnimeBoxMainActivity, profileId)
+                    val lMgr = LibraryManager(this@AnimeBoxMainActivity, profileId)
+                    continueWatchingList = hMgr.getWatchHistory()
+                    libraryItemsList = lMgr.getLibraryItems()
+                    showProfileSelector = false
+                    initialProfileForEditing = null
+                    selectedTab = 4
+                },
+                onProfileSelected = { profileId ->
+                    ProfileManager.setActiveProfile(this@AnimeBoxMainActivity, profileId)
+                    currentProfileId = profileId
+                    val hMgr = WatchHistoryManager(this@AnimeBoxMainActivity, profileId)
+                    val lMgr = LibraryManager(this@AnimeBoxMainActivity, profileId)
+                    continueWatchingList = hMgr.getWatchHistory()
+                    libraryItemsList = lMgr.getLibraryItems()
+                    showProfileSelector = false
+                    initialProfileForEditing = null
+                }
+            )
+        }
+
+        if (showNotificationsDialog) {
+            NotificationsDialog(
+                notifications = supabaseNotifications,
+                onDismiss = { showNotificationsDialog = false },
+                onMarkAllAsRead = {
+                    coroutineScope.launch {
+                        SupabaseNotificationManager.markAllAsRead(this@AnimeBoxMainActivity)
+                        supabaseNotifications = supabaseNotifications.map { it.copy(isRead = true) }
+                        unreadNotifCount = 0
+                    }
+                },
+                onNotificationClick = { notif ->
+                    coroutineScope.launch {
+                        SupabaseNotificationManager.markAsRead(this@AnimeBoxMainActivity, notif.id)
+                        supabaseNotifications = supabaseNotifications.map {
+                            if (it.id == notif.id) it.copy(isRead = true) else it
+                        }
+                        unreadNotifCount = supabaseNotifications.count { !it.isRead }
+                    }
+                    if (!notif.link.isNullOrEmpty()) {
+                        val link = notif.link
+                        val intId = link.toIntOrNull()
+                        if (intId != null) {
+                            openDetailsPage(intId)
+                            showNotificationsDialog = false
+                        } else if (link.startsWith("http://") || link.startsWith("https://")) {
+                            try {
+                                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(link))
+                                startActivity(browserIntent)
+                            } catch (_: Exception) {}
+                        }
+                    }
+                },
+                onClearAll = {
+                    SupabaseNotificationManager.clearAllNotifications(this@AnimeBoxMainActivity)
+                    supabaseNotifications = emptyList()
+                    unreadNotifCount = 0
+                }
+            )
+        }
+
+        if (showDnsDialog) {
+            AnimeBoxDnsDialog(
+                onDismiss = { showDnsDialog = false },
+                onDnsChanged = { loadHomeData() }
+            )
+        }
+
+        // Coming Soon Release Alert Dialog
+        if (comingSoonAlertAnime != null) {
+            AlertDialog(
+                onDismissRequest = { comingSoonAlertAnime = null },
+                confirmButton = {
+                    TextButton(onClick = { comingSoonAlertAnime = null }) {
+                        Text("OK", color = primaryColor, fontWeight = FontWeight.Bold)
+                    }
+                },
+                title = {
+                    Text(
+                        text = "Coming Soon",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                },
+                text = {
+                    Text(
+                        text = "The following anime has not been released yet.",
+                        color = Color.LightGray,
+                        fontSize = 14.sp
+                    )
+                },
+                containerColor = Color(0xFF1E1E1E),
+                titleContentColor = Color.White,
+                textContentColor = Color.LightGray
+            )
+        }
+
+        // Kitsu Mode My List Restriction Alert Dialog
+        if (showKitsuMyListRestrictionDialog) {
+            AlertDialog(
+                onDismissRequest = { showKitsuMyListRestrictionDialog = false },
+                confirmButton = {
+                    TextButton(onClick = { showKitsuMyListRestrictionDialog = false }) {
+                        Text("OK", color = primaryColor, fontWeight = FontWeight.Bold)
+                    }
+                },
+                title = {
+                    Text(
+                        text = "My List Unavailable in Fallback Mode",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp
+                    )
+                },
+                text = {
+                    Text(
+                        text = "Adding anime to My List is only supported when connected to AniList. Please try again once AniList servers are back online.",
+                        color = Color.LightGray,
+                        fontSize = 13.5.sp,
+                        lineHeight = 19.sp
+                    )
+                },
+                containerColor = Color(0xFF1E1E1E),
+                titleContentColor = Color.White,
+                textContentColor = Color.LightGray
+            )
+        }
+
+        // Kitsu Fallback Offer Prompt Dialog (Triggered on Retry Failure)
+        if (showKitsuFallbackPromptDialog) {
+            Dialog(
+                onDismissRequest = { showKitsuFallbackPromptDialog = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.75f))
+                        .clickable { showKitsuFallbackPromptDialog = false },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .widthIn(min = 300.dp, max = 390.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF141418))
+                            .clickable(enabled = false) {}
+                            .padding(22.dp)
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF222228)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = CustomCloudOffIcon,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            Text(
+                                text = "Switch to Kitsu Fallback?",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 17.sp,
+                                textAlign = TextAlign.Center
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                text = "AniList servers are still unreachable. Would you like to temporarily switch to Kitsu metadata to browse and stream anime?",
+                                color = Color(0xFFB0B0B8),
+                                fontSize = 13.sp,
+                                lineHeight = 19.sp,
+                                textAlign = TextAlign.Center
+                            )
+
+                            Spacer(modifier = Modifier.height(20.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Button(
+                                    onClick = { showKitsuFallbackPromptDialog = false },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF24242A)),
+                                    shape = RoundedCornerShape(4.dp),
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = PaddingValues(vertical = 10.dp)
+                                ) {
+                                    Text("Stay Offline", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        showKitsuFallbackPromptDialog = false
+                                        isKitsuMode = true
+                                        loadKitsuHomeData()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                    shape = RoundedCornerShape(4.dp),
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = PaddingValues(vertical = 10.dp)
+                                ) {
+                                    Text("Switch to Kitsu", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Service Unavailable / Offline Alert Dialog
+        if (showServiceUnavailableDialog) {
+            Dialog(
+                onDismissRequest = { showServiceUnavailableDialog = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.75f))
+                        .clickable { showServiceUnavailableDialog = false },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .widthIn(min = 300.dp, max = 380.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF141418))
+                            .clickable(enabled = false) {}
+                            .padding(22.dp)
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF222228)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (isOffline) CustomWifiOffIcon else CustomCloudOffIcon,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            Text(
+                                text = if (isOffline) "You're Offline" else "Service Unavailable",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 17.sp,
+                                textAlign = TextAlign.Center
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                text = if (isOffline) {
+                                    "You are currently offline. Online streaming and anime details cannot be loaded without an internet connection.\n\nYou can watch your downloaded anime episodes in the Downloads section."
+                                } else {
+                                    "AniList servers are currently unreachable. Online streaming and anime details cannot be accessed right now.\n\nYou can watch your downloaded anime episodes in the Downloads section."
+                                },
+                                color = Color(0xFFB0B0B8),
+                                fontSize = 12.5.sp,
+                                lineHeight = 18.sp,
+                                textAlign = TextAlign.Center
+                            )
+
+                            Spacer(modifier = Modifier.height(20.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Button(
+                                    onClick = { showServiceUnavailableDialog = false },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF24242A)),
+                                    shape = RoundedCornerShape(4.dp),
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = PaddingValues(vertical = 10.dp)
+                                ) {
+                                    Text("Dismiss", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        showServiceUnavailableDialog = false
+                                        selectedTab = 2 // Switch to Downloads tab!
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                    shape = RoundedCornerShape(4.dp),
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = PaddingValues(vertical = 10.dp)
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.netflix_download),
+                                        contentDescription = null,
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Downloads", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Add to My List / Watch Status Category Selector Dialog (Matching Screenshot 2)
+        if (showAddToListDialogForAnime != null) {
+            if (isKitsuMode || com.lagradost.cloudstream3.ui.animebox.api.KitsuClient.isKitsuModeActive || AniListClient.lastErrorMessage != null) {
+                showKitsuMyListRestrictionDialog = true
+                showAddToListDialogForAnime = null
+            } else {
+                val libraryManager = com.lagradost.cloudstream3.ui.animebox.library.LibraryManager(context)
+                val targetAnime = showAddToListDialogForAnime!!
+                val isShin = com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.isShinChan(targetAnime.id)
+                val fixedAnime = if (isShin && targetAnime.coverUrl != com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.SHINCHAN_POSTER_URL) {
+                    targetAnime.copy(coverUrl = com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.SHINCHAN_POSTER_URL)
+                } else targetAnime
+                val isInLib = libraryManager.isInLibrary(fixedAnime.id)
+                val currentCat = if (isInLib) libraryManager.getAnimeCategory(fixedAnime.id) else "Plan to Watch"
+
+                com.lagradost.cloudstream3.ui.animebox.library.SelectWatchStatusDialog(
+                    isInLibrary = isInLib,
+                    currentCategory = currentCat,
+                    onSelectStatus = { selectedStatus ->
+                        libraryManager.addOrUpdateLibraryItem(fixedAnime, selectedStatus)
+                        libraryItemsList = libraryManager.getLibraryItems()
+                        showAddToListDialogForAnime = null
+                        Toast.makeText(context, "Added to \"$selectedStatus\"", Toast.LENGTH_SHORT).show()
+                    },
+                    onRemoveFromLibrary = {
+                        libraryManager.removeLibraryItem(targetAnime.id)
+                        libraryItemsList = libraryManager.getLibraryItems()
+                        showAddToListDialogForAnime = null
+                        Toast.makeText(context, "Removed from Library", Toast.LENGTH_SHORT).show()
+                    },
+                    onDismiss = {
+                        showAddToListDialogForAnime = null
+                    }
+                )
+            }
+        }
+
+        // Quick Overview Bottom Sheet on Poster Long Press (Matching User Reference Image)
+        if (quickOverviewAnime != null) {
+            val targetAnime = quickOverviewAnime!!
+            ModalBottomSheet(
+                onDismissRequest = { quickOverviewAnime = null },
+                containerColor = Color(0xFF13141B),
+                dragHandle = {
+                    Box(
+                        modifier = Modifier
+                            .padding(vertical = 10.dp)
+                            .width(36.dp)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(Color(0xFF484A54))
+                    )
+                }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                ) {
+                    // Header: Thumbnail + Title + Add to My List
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Image(
+                            painter = rememberAsyncImagePainter(targetAnime.coverUrl),
+                            contentDescription = targetAnime.title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(width = 46.dp, height = 64.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFF22242D))
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = targetAnime.title,
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Add to My List",
+                                color = Color(0xFF9E9EB2),
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Normal
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // All watch status items in ONE row (Matching user request!)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val statuses = listOf(
+                            Triple("Watching", com.lagradost.cloudstream3.ui.animebox.library.StatusWatchingIcon, Color(0xFF22C55E)),
+                            Triple("Plan to Watch", com.lagradost.cloudstream3.ui.animebox.library.StatusPlanToWatchIcon, Color(0xFF3B82F6)),
+                            Triple("Completed", com.lagradost.cloudstream3.ui.animebox.library.StatusCompletedIcon, Color(0xFF10B981)),
+                            Triple("On-Hold", com.lagradost.cloudstream3.ui.animebox.library.StatusOnHoldIcon, Color(0xFFF59E0B)),
+                            Triple("Dropped", com.lagradost.cloudstream3.ui.animebox.library.StatusDroppedIcon, Color(0xFFEF4444))
+                        )
+
+                        statuses.forEach { (statusName, statusIcon, statusColor) ->
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(Color(0xFF20222B))
+                                    .clickable {
+                                        val libMgr = LibraryManager(this@AnimeBoxMainActivity)
+                                        libMgr.addOrUpdateLibraryItem(targetAnime, statusName)
+                                        libraryItemsList = libMgr.getLibraryItems()
+                                        Toast.makeText(this@AnimeBoxMainActivity, "Marked as $statusName", Toast.LENGTH_SHORT).show()
+                                        quickOverviewAnime = null
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = statusIcon,
+                                    contentDescription = statusName,
+                                    tint = statusColor,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                                Text(
+                                    text = statusName,
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.navigationBarsPadding().padding(bottom = 16.dp))
+                }
+            }
+        }
+    }
+}
+}
+
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    private fun DownloadsTabContent(
+        downloadManager: AnimeDownloadManager,
+        onExploreClick: () -> Unit
+    ) {
+        val coroutineScope = rememberCoroutineScope()
+        val context = this@AnimeBoxMainActivity
+        var storageStats by remember { mutableStateOf(downloadManager.getCachedStorageStats()) }
                             // DOWNLOADS TAB (Netflix-Style Series Cards & Offline Playback Manager)
                             val allEpisodes by AnimeDownloadManager.episodesState.collectAsState()
                             var downloadSearchQuery by remember { mutableStateOf("") }
@@ -2346,53 +5622,63 @@ class AnimeBoxMainActivity : ComponentActivity() {
                             }
 
                             fun getDiskSizeForEpisode(ep: DownloadedEpisode): Long {
-                                if (ep.fileSizeBytes > 1000L) return ep.fileSizeBytes
-                                return try {
-                                    if (ep.localFilePath.isNotEmpty()) {
-                                        val f = if (ep.localFilePath.startsWith("file://")) File(java.net.URI(ep.localFilePath).path) else File(ep.localFilePath)
-                                        if (f.exists()) {
-                                            if (f.isDirectory) {
-                                                f.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-                                            } else if (f.name.endsWith(".m3u8", ignoreCase = true)) {
-                                                f.parentFile?.walkTopDown()?.filter { it.isFile }?.sumOf { it.length() } ?: f.length()
-                                            } else {
-                                                val bundle = File(f.parentFile, "${f.nameWithoutExtension}_bundle")
-                                                if (bundle.exists() && bundle.isDirectory) {
-                                                    bundle.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-                                                } else f.length()
-                                            }
-                                        } else ep.fileSizeBytes
-                                    } else ep.fileSizeBytes
-                                } catch (_: Exception) { ep.fileSizeBytes }
+                                return maxOf(ep.fileSizeBytes, ep.totalBytes)
                             }
 
                             val downloadedGroups = remember(completedVideos) {
-                                completedVideos.groupBy { it.anilistId }.map { (id, epList) ->
-                                    val first = epList.first()
+                                fun normalizeTitleForGrouping(title: String): String {
+                                    return title.lowercase()
+                                        .replace(Regex("""[^a-z0-9]"""), " ")
+                                        .replace(Regex("""\s+"""), " ")
+                                        .trim()
+                                }
+
+                                // 1. Map any recovered or missing anilistId (<=0) to a positive anilistId if same anime exists
+                                val idByTitle = mutableMapOf<String, Int>()
+                                completedVideos.forEach { ep ->
+                                    val normTitle = normalizeTitleForGrouping(ep.animeTitle)
+                                    if (ep.anilistId > 0 && normTitle.isNotEmpty() && !idByTitle.containsKey(normTitle)) {
+                                        idByTitle[normTitle] = ep.anilistId
+                                    }
+                                }
+
+                                // 2. Group by canonical key: if known positive anilistId -> "id_$id", otherwise by normalized title
+                                completedVideos.groupBy { ep ->
+                                    val normTitle = normalizeTitleForGrouping(ep.animeTitle)
+                                    val canonicalId = if (ep.anilistId > 0) ep.anilistId else (idByTitle[normTitle] ?: 0)
+                                    if (canonicalId > 0) "id_$canonicalId" else "title_$normTitle"
+                                }.map { (_, rawList) ->
+                                    // Deduplicate episodes in group by (episodeNumber, streamType)
+                                    val epList = rawList.distinctBy { Pair(it.episodeNumber, it.streamType.lowercase()) }
+                                    val bestTitle = rawList.map { it.animeTitle }.maxByOrNull { it.length } ?: rawList.first().animeTitle
+                                    val firstWithId = rawList.firstOrNull { it.anilistId > 0 } ?: rawList.first()
+                                    val normTitle = normalizeTitleForGrouping(bestTitle)
+                                    val effectiveId = if (firstWithId.anilistId > 0) firstWithId.anilistId else (idByTitle[normTitle] ?: 0)
                                     val imagesDir = File(downloadManager.baseDir, "images")
                                     val coversDir = File(downloadManager.baseDir, "covers")
-                                    val localBg = File(imagesDir, "backdrop_${id}.jpg")
-                                    val localLogo = File(imagesDir, "logo_${id}.png")
-                                    val localShowCover = File(coversDir, "show_cover_${id}.jpg")
+                                    val localBg = if (effectiveId > 0) File(imagesDir, "backdrop_${effectiveId}.jpg") else null
+                                    val localLogo = if (effectiveId > 0) File(imagesDir, "logo_${effectiveId}.png") else null
+                                    val localShowCover = if (effectiveId > 0) File(coversDir, "show_cover_${effectiveId}.jpg") else null
 
                                     val bgPath = when {
-                                        localBg.exists() && localBg.length() > 0 -> localBg.absolutePath
-                                        first.localBackdropPath.isNotEmpty() -> first.localBackdropPath
+                                        rawList.any { it.localBackdropPath.isNotEmpty() } -> rawList.first { it.localBackdropPath.isNotEmpty() }.localBackdropPath
+                                        localBg != null && localBg.exists() -> localBg.absolutePath
                                         else -> ""
                                     }
                                     val logoPath = when {
-                                        localLogo.exists() && localLogo.length() > 0 -> localLogo.absolutePath
-                                        first.localLogoPath.isNotEmpty() -> first.localLogoPath
+                                        rawList.any { it.localLogoPath.isNotEmpty() } -> rawList.first { it.localLogoPath.isNotEmpty() }.localLogoPath
+                                        localLogo != null && localLogo.exists() -> localLogo.absolutePath
                                         else -> ""
                                     }
                                     val coverPath = when {
-                                        localShowCover.exists() && localShowCover.length() > 0 -> localShowCover.absolutePath
-                                        first.showCoverUrl.isNotEmpty() -> first.showCoverUrl
-                                        else -> first.coverUrl
+                                        rawList.any { it.showCoverUrl.isNotEmpty() } -> rawList.first { it.showCoverUrl.isNotEmpty() }.showCoverUrl
+                                        localShowCover != null && localShowCover.exists() -> localShowCover.absolutePath
+                                        rawList.any { it.coverUrl.isNotEmpty() } -> rawList.first { it.coverUrl.isNotEmpty() }.coverUrl
+                                        else -> ""
                                     }
                                     DownloadedAnimeGroup(
-                                        anilistId = id,
-                                        animeTitle = first.animeTitle,
+                                        anilistId = effectiveId,
+                                        animeTitle = bestTitle,
                                         coverUrl = coverPath,
                                         backdropUrl = bgPath,
                                         logoUrl = logoPath,
@@ -2408,8 +5694,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                             var showDeleteAllDownloadsDialog by remember { mutableStateOf(false) }
                             var groupToDelete by remember { mutableStateOf<DownloadedAnimeGroup?>(null) }
                             var episodeToDelete by remember { mutableStateOf<DownloadedEpisode?>(null) }
-                            var installedAiModels by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.getInstalledModels(this@AnimeBoxMainActivity)) }
-                            var savedSubtitles by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.getAllSavedSubtitles(this@AnimeBoxMainActivity)) }
+                            var installedAiModels by remember { mutableStateOf<List<com.lagradost.cloudstream3.ui.animebox.api.AiModelInfo>>(emptyList()) }
+                            var savedSubtitles by remember { mutableStateOf<List<com.lagradost.cloudstream3.ui.animebox.api.SavedSubtitleInfo>>(emptyList()) }
                             var modelToDelete by remember { mutableStateOf<com.lagradost.cloudstream3.ui.animebox.api.AiModelInfo?>(null) }
                             var subtitleToDelete by remember { mutableStateOf<com.lagradost.cloudstream3.ui.animebox.api.SavedSubtitleInfo?>(null) }
                             var modelWarningPrompt by remember { mutableStateOf<com.lagradost.cloudstream3.ui.animebox.api.AiModelInfo?>(null) }
@@ -2418,13 +5704,111 @@ class AnimeBoxMainActivity : ComponentActivity() {
                             }
                             val activeAiModelProgress by com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.downloadProgressFlow.collectAsState()
 
-                            LaunchedEffect(selectedTab, selectedDownloadFilter, activeAiModelProgress) {
-                                if (selectedTab == 3) {
-                                    installedAiModels = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.getInstalledModels(this@AnimeBoxMainActivity)
-                                    savedSubtitles = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.getAllSavedSubtitles(this@AnimeBoxMainActivity)
-                                    storageStats = downloadManager.getStorageStats()
+                            var fullscreenScreenshotGallery by remember { mutableStateOf<Pair<List<ScreenshotItem>, Int>?>(null) }
+                            var screenshotRefreshRevision by remember { mutableStateOf(0L) }
+                            var screenshotGroups by remember { mutableStateOf<List<AnimeScreenshotGroup>>(emptyList()) }
+
+                            LaunchedEffect(Unit) {
+                                AnimeScreenshotEvents.refreshFlow.collect {
+                                    screenshotRefreshRevision++
                                 }
                             }
+
+                            LaunchedEffect(screenshotRefreshRevision, dQuery, completedVideos.size, savedSubtitles.size) {
+                                val loadedGroups = withContext(Dispatchers.IO) {
+                                    try {
+                                        val base = File(this@AnimeBoxMainActivity.getExternalFilesDir(null), "screenshots")
+                                        val imagesDir = File(downloadManager.baseDir, "images")
+                                        if (base.exists() && base.isDirectory) {
+                                            base.listFiles()?.filter { it.isDirectory }?.mapNotNull { dir ->
+                                                val files = dir.listFiles()?.filter { it.isFile && (it.extension.equals("jpg", true) || it.extension.equals("png", true) || it.extension.equals("jpeg", true)) } ?: emptyList()
+                                                if (files.isNotEmpty()) {
+                                                    var title = formatAnimeFolderTitle(dir.name)
+                                                    var anilistId = 0
+                                                    var bgUrl = ""
+                                                    var logoUrl = ""
+
+                                                    // Read meta.json if saved by player
+                                                    val metaFile = File(dir, "meta.json")
+                                                    if (metaFile.exists() && metaFile.length() > 0) {
+                                                        try {
+                                                            val json = org.json.JSONObject(metaFile.readText())
+                                                            val t = json.optString("animeTitle", "")
+                                                            if (t.isNotBlank()) title = t.trim()
+                                                            anilistId = json.optInt("anilistId", 0)
+                                                            bgUrl = json.optString("backdropUrl", "")
+                                                            logoUrl = json.optString("logoUrl", "")
+                                                        } catch (_: Exception) {}
+                                                    }
+
+                                                    // Fallback lookup from completed downloads or saved subtitles
+                                                    if (anilistId <= 0) {
+                                                        val matchedDl = completedVideos.find {
+                                                            it.animeTitle.equals(title, ignoreCase = true) ||
+                                                            it.animeTitle.replace(Regex("[^a-zA-Z0-9.-]"), "_").equals(dir.name, ignoreCase = true)
+                                                        }
+                                                        if (matchedDl != null) {
+                                                            anilistId = matchedDl.anilistId
+                                                            if (bgUrl.isEmpty()) bgUrl = matchedDl.localBackdropPath
+                                                            if (logoUrl.isEmpty()) logoUrl = matchedDl.localLogoPath
+                                                        } else {
+                                                            val matchedSub = savedSubtitles.find {
+                                                                it.animeTitle.equals(title, ignoreCase = true) ||
+                                                                it.animeTitle.replace(Regex("[^a-zA-Z0-9.-]"), "_").equals(dir.name, ignoreCase = true)
+                                                            }
+                                                            if (matchedSub != null && matchedSub.anilistId > 0) {
+                                                                anilistId = matchedSub.anilistId
+                                                                if (bgUrl.isEmpty()) bgUrl = matchedSub.backdropUrl
+                                                                if (logoUrl.isEmpty()) logoUrl = matchedSub.logoUrl
+                                                            }
+                                                        }
+                                                    }
+
+                                                    // Check locally stored images from imagesDir (same as series)
+                                                    if (anilistId > 0) {
+                                                        val localBg = File(imagesDir, "backdrop_${anilistId}.jpg")
+                                                        val localLogo = File(imagesDir, "logo_${anilistId}.png")
+                                                        if (localBg.exists() && localBg.length() > 0) bgUrl = localBg.absolutePath
+                                                        if (localLogo.exists() && localLogo.length() > 0) logoUrl = localLogo.absolutePath
+                                                    }
+
+                                                    val matchesQuery = dQuery.isEmpty() || title.lowercase().contains(dQuery) || dir.name.lowercase().contains(dQuery)
+                                                    if (matchesQuery) {
+                                                        val items = files.sortedByDescending { it.lastModified() }.map { f ->
+                                                            val epNum = Regex("""(?i)(?:ep_?|episode_?)(\d+)""").find(f.name)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+                                                            ScreenshotItem(f, title, epNum, f.lastModified())
+                                                        }
+                                                        AnimeScreenshotGroup(
+                                                            animeTitle = title,
+                                                            folder = dir,
+                                                            screenshots = items,
+                                                            anilistId = anilistId,
+                                                            backdropUrl = bgUrl,
+                                                            logoUrl = logoUrl
+                                                        )
+                                                    } else null
+                                                } else null
+                                            }?.sortedByDescending { it.screenshots.firstOrNull()?.timestamp ?: 0L } ?: emptyList()
+                                        } else emptyList()
+                                    } catch (_: Exception) {
+                                        emptyList()
+                                    }
+                                }
+                                screenshotGroups = loadedGroups
+                            }
+
+        LaunchedEffect(selectedDownloadFilter, activeAiModelProgress) {
+            val (models, subs, stats) = withContext(Dispatchers.IO) {
+                Triple(
+                    com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.getInstalledModels(this@AnimeBoxMainActivity),
+                    com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.getAllSavedSubtitles(this@AnimeBoxMainActivity),
+                    downloadManager.getStorageStats()
+                )
+            }
+            installedAiModels = models
+            savedSubtitles = subs
+            storageStats = stats
+        }
 
                             fun formatDownloadedBytes(bytes: Long): String {
                                 if (bytes <= 0L) return "0 MB"
@@ -2440,13 +5824,18 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
                             val playEpisode: (DownloadedEpisode) -> Unit = { ep ->
                                 if (ep.localFilePath.isNotEmpty()) {
-                                    val playIntent = Intent(this@AnimeBoxMainActivity, AnimeBoxPlayerActivity::class.java).apply {
+                                    val openedExternally = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isExternalPlayerEnabled(this@AnimeBoxMainActivity) &&
+                                        openEpisodeInExternalPlayer(ep.localFilePath, "${ep.animeTitle} Episode ${ep.episodeNumber}", subtitle = ep.localSubtitlePath)
+                                    if (!openedExternally) {
+                                    val playIntent = Intent(this@AnimeBoxMainActivity, com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getPlayerActivityClass(this@AnimeBoxMainActivity)).apply {
                                         putExtra("localFilePath", ep.localFilePath)
                                         putExtra("isOffline", true)
                                         putExtra("animeTitle", ep.animeTitle)
+                                        val effectiveShowCover = ep.showCoverUrl.ifBlank { continueWatchingPosterCache[ep.anilistId] ?: "" }
                                         putExtra("anilistId", ep.anilistId)
                                         putExtra("episode", ep.episodeNumber)
-                                        putExtra("showCoverUrl", ep.coverUrl)
+                                        putExtra("totalEpisodes", 0)
+                                        putExtra("showCoverUrl", effectiveShowCover)
                                         putExtra("coverUrl", ep.coverUrl)
                                         putExtra("subtitleUrl", ep.localSubtitlePath)
                                         putExtra("subtitlesJson", ep.subtitlesJson)
@@ -2455,8 +5844,20 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         putExtra("outroStart", ep.outroStart)
                                         putExtra("outroEnd", ep.outroEnd)
                                         putExtra("streamType", ep.streamType)
+                                        putExtra("activeAudio", when (ep.streamType.lowercase()) {
+                                            "hindi" -> "Hindi"
+                                            "dub", "english" -> "English"
+                                            "french", "vf" -> "French (VF)"
+                                            "italian", "ita" -> "Italian (ITA)"
+                                            "spanish_latino", "latino", "spanish", "es" -> "Spanish (Latino)"
+                                            "spanish_castellano", "castellano" -> "Spanish (Castellano)"
+                                            "german", "deutsch", "de" -> "German (Deutsch)"
+                                            else -> "Japanese (Original)"
+                                        })
+                                        putExtra("fromContinueWatching", true)
                                     }
                                     startActivity(playIntent)
+                                    }
                                 }
                             }
 
@@ -2475,18 +5876,38 @@ class AnimeBoxMainActivity : ComponentActivity() {
                             }
 
                             // Keep storage stats updated
-                            LaunchedEffect(allEpisodes.size, selectedTab) {
-                                storageStats = downloadManager.getStorageStats()
+                            LaunchedEffect(allEpisodes.size) {
+                                storageStats = withContext(Dispatchers.IO) { downloadManager.getStorageStats() }
+                            }
+
+                            val startDirectModelDownload = { targetModel: com.lagradost.cloudstream3.ui.animebox.api.AiModelInfo, isSpeech: Boolean ->
+                                coroutineScope.launch {
+                                    val success = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.downloadModel(
+                                        context = this@AnimeBoxMainActivity,
+                                        langCode = targetModel.langCode
+                                    )
+                                    if (success) {
+                                        installedAiModels = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.getInstalledModels(this@AnimeBoxMainActivity)
+                                        if (isSpeech) {
+                                            selectedSpeechCode = targetModel.langCode
+                                            com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.setSelectedSpeechModel(this@AnimeBoxMainActivity, targetModel.langCode)
+                                        }
+                                    }
+                                }
                             }
 
                             Column(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .background(Color.Black)
-                                    .padding(horizontal = 16.dp)
+                                    .background(Color(0xFF101114))
                             ) {
                                 if (currentDrilldown != null) {
-                                    // ─── SERIES DRILLDOWN VIEW (Netflix Style) ───────────────────────────
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(horizontal = 16.dp)
+                                    ) {
+                                        // ─── SERIES DRILLDOWN VIEW (Netflix Style) ───────────────────────────
                                     val group = currentDrilldown
                                     var drillBackdropUrl by remember(group.anilistId) { mutableStateOf(group.backdropUrl) }
                                     var drillLogoUrl by remember(group.anilistId) { mutableStateOf(group.logoUrl) }
@@ -2537,8 +5958,18 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis
                                                 )
+                                                val distinctHeaderLangs = group.episodes.map { ep ->
+                                                    when (ep.streamType.lowercase()) {
+                                                        "hindi" -> "Hindi"
+                                                        "dub" -> "Dub"
+                                                        "hardsub" -> "HSub"
+                                                        else -> "Sub"
+                                                    }
+                                                }.distinct()
+                                                val hasHeaderMultiLang = group.episodes.groupBy { it.episodeNumber }.any { it.value.map { e -> e.streamType.lowercase() }.distinct().size > 1 }
+                                                val headerLangLabel = if (hasHeaderMultiLang || distinctHeaderLangs.size > 1) "Multi" else (distinctHeaderLangs.firstOrNull() ?: "Sub")
                                                 Text(
-                                                    text = "${group.episodes.size} Episodes • ${formatDownloadedBytes(group.totalSizeBytes)}",
+                                                    text = "${group.episodes.size} Episodes • $headerLangLabel • ${formatDownloadedBytes(group.totalSizeBytes)}",
                                                     color = Color(0xFF8E8E93),
                                                     fontSize = 12.sp
                                                 )
@@ -2648,7 +6079,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                 modifier = Modifier.height(34.dp)
                                             ) {
                                                 Icon(
-                                                    imageVector = Icons.Default.PlayArrow,
+                                                    imageVector = SolarPlayVector,
                                                     contentDescription = null,
                                                     tint = Color.Black,
                                                     modifier = Modifier.size(16.dp)
@@ -2673,7 +6104,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         verticalArrangement = Arrangement.spacedBy(8.dp),
                                         contentPadding = PaddingValues(bottom = 24.dp)
                                     ) {
-                                        items(group.episodes) { ep ->
+                                        items(group.episodes, key = { it.id }) { ep ->
                                             Row(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
@@ -2710,7 +6141,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                         contentAlignment = Alignment.Center
                                                     ) {
                                                         Icon(
-                                                            imageVector = Icons.Default.PlayArrow,
+                                                            imageVector = SolarPlayVector,
                                                             contentDescription = "Play",
                                                             tint = Color.White,
                                                             modifier = Modifier.size(19.dp)
@@ -2737,8 +6168,15 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                         lineHeight = 18.sp
                                                     )
                                                     Spacer(modifier = Modifier.height(3.dp))
+                                                    val epsWithSameNum = group.episodes.filter { it.episodeNumber == ep.episodeNumber }
+                                                    val epLangs = epsWithSameNum.map { it.streamType.lowercase() }.distinct()
+                                                    val epQuality = if (epLangs.size > 1) {
+                                                        "1080p Multi"
+                                                    } else {
+                                                        ep.quality.ifEmpty { "HD" }
+                                                    }
                                                     Text(
-                                                        text = "${ep.quality.ifEmpty { "HD" }} | ${formatDownloadedBytes(getDiskSizeForEpisode(ep))}",
+                                                        text = "$epQuality | ${formatDownloadedBytes(getDiskSizeForEpisode(ep))}",
                                                         color = Color(0xFF8E8E93),
                                                         fontSize = 12.sp,
                                                         fontWeight = FontWeight.Normal
@@ -2769,8 +6207,14 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                             }
                                         }
                                     }
+                                    }
                                 } else if (currentSubDrilldown != null) {
-                                    // ─── SUBTITLES ANIME DRILLDOWN VIEW ───────────────────────────
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(horizontal = 16.dp)
+                                    ) {
+                                        // ─── SUBTITLES ANIME DRILLDOWN VIEW ───────────────────────────
                                     val subGroup = currentSubDrilldown
                                     var drillBackdropUrl by remember(subGroup.anilistId) { mutableStateOf(subGroup.backdropUrl) }
                                     var drillLogoUrl by remember(subGroup.anilistId) { mutableStateOf(subGroup.logoUrl) }
@@ -2836,7 +6280,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         verticalArrangement = Arrangement.spacedBy(8.dp),
                                         contentPadding = PaddingValues(bottom = 24.dp)
                                     ) {
-                                        items(subGroup.subtitles) { subItem ->
+                                        items(subGroup.subtitles, key = { it.filePath }) { subItem ->
                                             val subKb = (subItem.fileSizeBytes / 1024).coerceAtLeast(1)
                                             Row(
                                                 modifier = Modifier
@@ -2889,6 +6333,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                             }
                                         }
                                     }
+                                    }
                                 } else {
                                     // ─── MAIN DOWNLOADS SCREEN (Monochrome Netflix Style) ─────────
                                     // 1. Header Title: "Downloads" + Shows count badge
@@ -2896,6 +6341,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .statusBarsPadding()
+                                            .padding(horizontal = 16.dp)
                                             .padding(top = 10.dp, bottom = 10.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.SpaceBetween
@@ -2909,7 +6355,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         if (downloadedGroups.isNotEmpty()) {
                                             Box(
                                                 modifier = Modifier
-                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .clip(RoundedCornerShape(8.dp))
                                                     .background(Color(0xFF1E1E1E))
                                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                                             ) {
@@ -2923,7 +6369,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         }
                                     }
 
-                                    // 2. DEVICE STORAGE SECTION (PLACED ON TOP OF SEARCH!)
+                                    // 2. DEVICE STORAGE SECTION (EXTENDED TO FULL MAX WIDTH OF DEVICE)
                                     val total = if (storageStats.totalGb.isNaN() || storageStats.totalGb <= 0.0) 128.0 else storageStats.totalGb
                                     val used = if (storageStats.usedGb.isNaN() || storageStats.usedGb < 0.0) 45.0 else storageStats.usedGb
                                     val app = if (storageStats.appGb.isNaN() || storageStats.appGb < 0.0) 1.2 else storageStats.appGb
@@ -2938,9 +6384,9 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .padding(bottom = 10.dp)
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(Color(0xFF181818))
-                                            .padding(14.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color(0xFF252930))
+                                            .padding(horizontal = 16.dp, vertical = 14.dp)
                                     ) {
                                         Column(modifier = Modifier.fillMaxWidth()) {
                                             Row(
@@ -2961,7 +6407,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                         fontSize = 12.sp,
                                                         fontWeight = FontWeight.SemiBold,
                                                         modifier = Modifier
-                                                            .clip(RoundedCornerShape(4.dp))
+                                                            .clip(RoundedCornerShape(8.dp))
                                                             .clickable { showDeleteAllDownloadsDialog = true }
                                                             .padding(horizontal = 6.dp, vertical = 2.dp)
                                                     )
@@ -3013,15 +6459,14 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         }
                                     }
 
-                                    // 3. SEARCH BAR (PLACED BELOW DEVICE STORAGE)
+                                    // 3. SEARCH BAR (EXTENDED TO FULL MAX WIDTH OF DEVICE)
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .padding(bottom = 10.dp)
                                             .height(44.dp)
-                                            .clip(RoundedCornerShape(8.dp))
                                             .background(Color(0xFF1E1E1E))
-                                            .padding(horizontal = 12.dp),
+                                            .padding(horizontal = 16.dp),
                                         contentAlignment = Alignment.CenterStart
                                     ) {
                                         Row(
@@ -3081,41 +6526,51 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         }
                                     }
 
-                                    // Category / Filter Tags (Monochrome, Single-Line Horizontally Scrollable)
+                                    // Category / Filter Tags (Monochrome, Single-Line Horizontally Scrollable, Less Rounded)
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .horizontalScroll(rememberScrollState())
+                                            .padding(horizontal = 16.dp)
                                             .padding(bottom = 8.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        val filterTags = mutableListOf("All", "Series (${downloadedGroups.size})")
-                                        val subGroupCount = savedSubtitles.groupBy { if (it.anilistId > 0) it.anilistId.toString() else it.animeTitle }.size
-                                        if (subGroupCount > 0) {
-                                            filterTags.add("Subtitles ($subGroupCount)")
-                                        } else {
-                                            filterTags.add("Subtitles")
-                                        }
-                                        if (installedAiModels.isNotEmpty()) {
-                                            filterTags.add("Tools (${installedAiModels.size})")
-                                        } else {
-                                            filterTags.add("Tools")
+                                        val filterTags = remember(downloadedGroups.size, savedSubtitles, installedAiModels.size, screenshotGroups) {
+                                            val list = mutableListOf("All", "Series (${downloadedGroups.size})")
+                                            val subGroupCount = savedSubtitles.groupBy { if (it.anilistId > 0) it.anilistId.toString() else it.animeTitle }.size
+                                            if (subGroupCount > 0) {
+                                                list.add("Subtitles ($subGroupCount)")
+                                            } else {
+                                                list.add("Subtitles")
+                                            }
+                                            if (installedAiModels.isNotEmpty()) {
+                                                list.add("Tools (${installedAiModels.size})")
+                                            } else {
+                                                list.add("Tools")
+                                            }
+                                            val totalScreenshotCount = screenshotGroups.sumOf { it.screenshots.size }
+                                            if (totalScreenshotCount > 0) {
+                                                list.add("Screenshots ($totalScreenshotCount)")
+                                            } else {
+                                                list.add("Screenshots")
+                                            }
+                                            list
                                         }
                                         filterTags.forEach { tag ->
                                             val filterKey = tag.substringBefore(" ")
                                             val isSelected = selectedDownloadFilter == filterKey
                                             Box(
                                                 modifier = Modifier
-                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .clip(RoundedCornerShape(3.dp))
                                                     .background(if (isSelected) Color.White else Color(0xFF1E1E24))
                                                     .clickable { selectedDownloadFilter = filterKey }
-                                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                                                    .padding(horizontal = 8.5.dp, vertical = 4.dp)
                                             ) {
                                                 Text(
                                                     text = tag,
                                                     color = if (isSelected) Color.Black else Color(0xFFB0B0BC),
-                                                    fontSize = 12.5.sp,
+                                                    fontSize = 11.5.sp,
                                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                                     maxLines = 1,
                                                     softWrap = false
@@ -3126,15 +6581,15 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                             val isSelected = selectedDownloadFilter == "Downloading"
                                             Box(
                                                 modifier = Modifier
-                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .clip(RoundedCornerShape(3.dp))
                                                     .background(if (isSelected) Color.White else Color(0xFF1E1E24))
                                                     .clickable { selectedDownloadFilter = "Downloading" }
-                                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                                                    .padding(horizontal = 8.5.dp, vertical = 4.dp)
                                             ) {
                                                 Text(
                                                     text = "Downloading (${activeDownloads.size})",
                                                     color = if (isSelected) Color.Black else Color.White,
-                                                    fontSize = 12.5.sp,
+                                                    fontSize = 11.5.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     maxLines = 1,
                                                     softWrap = false
@@ -3143,6 +6598,14 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         }
                                     }
 
+                                    // Downloads Content List Container (Padded to 16dp)
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .weight(1f)
+                                            .padding(horizontal = 16.dp)
+                                    ) {
+
                                     // Downloads Content List / Empty State
                                     if (selectedDownloadFilter == "Subtitles") {
                                         val subtitleGroups = remember(savedSubtitles, dQuery) {
@@ -3150,16 +6613,29 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                 it.animeTitle.lowercase().contains(dQuery) ||
                                                 it.langName.lowercase().contains(dQuery)
                                             }
+                                            val imagesDir = File(downloadManager.baseDir, "images")
                                             filtered.groupBy { if (it.anilistId > 0) it.anilistId.toString() else it.animeTitle }
                                                 .map { (_, subs) ->
                                                     val first = subs.first()
                                                     val totalSize = subs.sumOf { it.fileSizeBytes }
+                                                    val localBg = if (first.anilistId > 0) File(imagesDir, "backdrop_${first.anilistId}.jpg") else null
+                                                    val localLogo = if (first.anilistId > 0) File(imagesDir, "logo_${first.anilistId}.png") else null
+                                                    val bgPath = when {
+                                                        localBg != null && localBg.exists() && localBg.length() > 0 -> localBg.absolutePath
+                                                        first.backdropUrl.isNotEmpty() -> first.backdropUrl
+                                                        else -> ""
+                                                    }
+                                                    val logoPath = when {
+                                                        localLogo != null && localLogo.exists() && localLogo.length() > 0 -> localLogo.absolutePath
+                                                        first.logoUrl.isNotEmpty() -> first.logoUrl
+                                                        else -> ""
+                                                    }
                                                     SubtitleAnimeGroup(
                                                         anilistId = first.anilistId,
                                                         animeTitle = first.animeTitle,
                                                         coverUrl = first.coverUrl,
-                                                        backdropUrl = first.backdropUrl,
-                                                        logoUrl = first.logoUrl,
+                                                        backdropUrl = bgPath,
+                                                        logoUrl = logoPath,
                                                         subtitles = subs.sortedBy { it.episodeNum },
                                                         totalSizeBytes = totalSize
                                                     )
@@ -3178,25 +6654,17 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                     verticalArrangement = Arrangement.Center,
                                                     modifier = Modifier.padding(24.dp)
                                                 ) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(72.dp)
-                                                            .clip(CircleShape)
-                                                            .background(Color(0xFF181818)),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Icon(
-                                                            painter = androidx.compose.ui.res.painterResource(R.drawable.ic_baseline_subtitles_24),
-                                                            contentDescription = "Saved Subtitles",
-                                                            tint = Color.White,
-                                                            modifier = Modifier.size(34.dp)
-                                                        )
-                                                    }
-                                                    Spacer(modifier = Modifier.height(16.dp))
+                                                    Icon(
+                                                        imageVector = SolarSubtitlesVector,
+                                                        contentDescription = "Saved Subtitles",
+                                                        tint = Color(0xFF8E8E93),
+                                                        modifier = Modifier.size(58.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.height(18.dp))
                                                     Text(
                                                         text = if (dQuery.isNotEmpty()) "No Subtitles Found" else "No Saved Subtitles",
                                                         fontSize = 19.sp,
-                                                        fontWeight = FontWeight.Bold,
+                                                        fontWeight = FontWeight.Normal,
                                                         color = Color.White
                                                     )
                                                     Spacer(modifier = Modifier.height(6.dp))
@@ -3227,18 +6695,15 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                         modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
                                                     )
                                                 }
-                                                items(subtitleGroups) { group ->
+                                                items(subtitleGroups, key = { if (it.anilistId > 0) "sub_${it.anilistId}" else "sub_${it.animeTitle}" }) { group ->
                                                     var backdropUrl by remember(group.anilistId) { mutableStateOf(group.backdropUrl) }
                                                     var logoUrl by remember(group.anilistId) { mutableStateOf(group.logoUrl) }
 
                                                     LaunchedEffect(group.anilistId) {
-                                                        if (backdropUrl.isEmpty() && group.anilistId > 0) {
-                                                            val bg = AniZipClient.getAnimeBackdropUrl(group.anilistId)
-                                                            if (bg.isNotEmpty()) backdropUrl = bg
-                                                        }
-                                                        if (logoUrl.isEmpty() && group.anilistId > 0) {
-                                                            val logo = AniZipClient.getAnimeLogoUrl(group.anilistId)
-                                                            if (logo.isNotEmpty()) logoUrl = logo
+                                                        if (group.anilistId > 0 && (backdropUrl.isEmpty() || !backdropUrl.startsWith("/") || logoUrl.isEmpty() || !logoUrl.startsWith("/"))) {
+                                                            val (localBg, localLogo) = downloadManager.ensureAnimeBackdropAndLogo(group.anilistId, group.backdropUrl, group.logoUrl)
+                                                            if (localBg.isNotEmpty()) backdropUrl = localBg
+                                                            if (localLogo.isNotEmpty()) logoUrl = localLogo
                                                         }
                                                     }
 
@@ -3506,7 +6971,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                                     Spacer(modifier = Modifier.width(6.dp))
                                                                     Box(
                                                                         modifier = Modifier
-                                                                            .clip(RoundedCornerShape(4.dp))
+                                                                            .clip(RoundedCornerShape(8.dp))
                                                                             .background(Color(0xFF2E7D32).copy(alpha = 0.35f))
                                                                             .padding(horizontal = 5.dp, vertical = 1.dp)
                                                                     ) {
@@ -3545,7 +7010,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                                                         selectedSpeechCode = sModel.langCode
                                                                                         com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.setSelectedSpeechModel(this@AnimeBoxMainActivity, sModel.langCode)
                                                                                     } else if (!isCurrentlyDownloading) {
-                                                                                        modelWarningPrompt = sModel
+                                                                                        startDirectModelDownload(sModel, true)
                                                                                     }
                                                                                 }
                                                                                 .padding(horizontal = 10.dp, vertical = 7.dp),
@@ -3577,7 +7042,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                                                                     Box(
                                                                                         modifier = Modifier
-                                                                                            .clip(RoundedCornerShape(4.dp))
+                                                                                            .clip(RoundedCornerShape(8.dp))
                                                                                             .background(if (isSelected) Color(0xFF2E7D32).copy(alpha = 0.35f) else Color(0xFF2E7D32).copy(alpha = 0.15f))
                                                                                             .padding(horizontal = 6.dp, vertical = 2.dp)
                                                                                     ) {
@@ -3666,7 +7131,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                                                         selectedSpeechCode = sModel.langCode
                                                                                         com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.setSelectedSpeechModel(this@AnimeBoxMainActivity, sModel.langCode)
                                                                                     } else if (!isCurrentlyDownloading) {
-                                                                                        modelWarningPrompt = sModel
+                                                                                        startDirectModelDownload(sModel, true)
                                                                                     }
                                                                                 }
                                                                                 .padding(horizontal = 10.dp, vertical = 7.dp),
@@ -3698,7 +7163,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                                                                     Box(
                                                                                         modifier = Modifier
-                                                                                            .clip(RoundedCornerShape(4.dp))
+                                                                                            .clip(RoundedCornerShape(8.dp))
                                                                                             .background(if (isSelected) Color(0xFF2E7D32).copy(alpha = 0.35f) else Color(0xFF2E7D32).copy(alpha = 0.15f))
                                                                                             .padding(horizontal = 6.dp, vertical = 2.dp)
                                                                                     ) {
@@ -3764,22 +7229,23 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                         verticalAlignment = Alignment.CenterVertically,
                                                         modifier = Modifier
                                                             .fillMaxWidth()
-                                                            .clip(RoundedCornerShape(6.dp))
-                                                            .clickable {
+                                                            .clickable(
+                                                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                                                indication = null
+                                                            ) {
                                                                 isSubtitleToolExpanded = !isSubtitleToolExpanded
                                                             }
-                                                            .padding(vertical = 2.dp)
+                                                            .padding(vertical = 4.dp)
                                                     ) {
-                                                        Icon(
-                                                            painter = painterResource(R.drawable.ic_baseline_translate_24),
+                                                        androidx.compose.foundation.Image(
+                                                            painter = painterResource(R.drawable.ic_ml_kit_logo),
                                                             contentDescription = "Subtitle Tool",
-                                                            tint = Color.White,
-                                                            modifier = Modifier.size(24.dp)
+                                                            modifier = Modifier.height(24.dp)
                                                         )
                                                         Spacer(modifier = Modifier.width(12.dp))
                                                         Column(modifier = Modifier.weight(1f)) {
                                                             Text(
-                                                                text = "AI Subtitle Translator",
+                                                                text = "Subtitle Translator Model",
                                                                 color = Color.White,
                                                                 fontSize = 15.sp,
                                                                 fontWeight = FontWeight.Bold
@@ -3790,17 +7256,12 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                                 fontSize = 12.sp
                                                             )
                                                         }
-                                                        IconButton(
-                                                            onClick = { isSubtitleToolExpanded = !isSubtitleToolExpanded },
-                                                            modifier = Modifier.size(32.dp)
-                                                        ) {
-                                                            Icon(
-                                                                imageVector = if (isSubtitleToolExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                                                contentDescription = if (isSubtitleToolExpanded) "Collapse" else "Expand",
-                                                                tint = Color(0xFF8E8E93),
-                                                                modifier = Modifier.size(22.dp)
-                                                            )
-                                                        }
+                                                        Icon(
+                                                            imageVector = if (isSubtitleToolExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                                            contentDescription = if (isSubtitleToolExpanded) "Collapse" else "Expand",
+                                                            tint = Color(0xFF8E8E93),
+                                                            modifier = Modifier.size(24.dp)
+                                                        )
                                                     }
 
                                                     if (isSubtitleToolExpanded || isSubModelDownloading) {
@@ -3952,7 +7413,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                                                             Box(
                                                                                 modifier = Modifier
-                                                                                    .clip(RoundedCornerShape(4.dp))
+                                                                                    .clip(RoundedCornerShape(8.dp))
                                                                                     .background(Color(0xFF2E7D32).copy(alpha = 0.25f))
                                                                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                                                                             ) {
@@ -3979,7 +7440,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                                     } else {
                                                                         IconButton(
                                                                             onClick = {
-                                                                                modelWarningPrompt = langModel
+                                                                                startDirectModelDownload(langModel, false)
                                                                             },
                                                                             modifier = Modifier.size(28.dp)
                                                                         ) {
@@ -3998,6 +7459,19 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                 }
                                             }
                                         }
+                                    } else if (selectedDownloadFilter == "Screenshots") {
+                                        ScreenshotsDownloadSection(
+                                            screenshotGroups = screenshotGroups,
+                                            dQuery = dQuery,
+                                            downloadManager = downloadManager,
+                                            onSelectScreenshot = { list, idx ->
+                                                fullscreenScreenshotGallery = Pair(list, idx)
+                                            },
+                                            onScreenshotDeleted = { screenshotRefreshRevision++ },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .weight(1f)
+                                        )
                                     } else if (activeDownloads.isEmpty() && completedVideos.isEmpty()) {
                                         Box(
                                             modifier = Modifier
@@ -4010,30 +7484,22 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                 verticalArrangement = Arrangement.Center,
                                                 modifier = Modifier.padding(24.dp)
                                             ) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(72.dp)
-                                                        .clip(CircleShape)
-                                                        .background(Color(0xFF181818)),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Icon(
-                                                        imageVector = CloudDownloadIcon,
-                                                        contentDescription = "Downloads",
-                                                        tint = Color.White,
-                                                        modifier = Modifier.size(34.dp)
-                                                    )
-                                                }
-                                                Spacer(modifier = Modifier.height(16.dp))
+                                                Icon(
+                                                    imageVector = CustomDownloadsNavbarIcon,
+                                                    contentDescription = "Downloads",
+                                                    tint = Color(0xFF8E8E93),
+                                                    modifier = Modifier.size(64.dp)
+                                                )
+                                                Spacer(modifier = Modifier.height(18.dp))
                                                 Text(
-                                                    text = if (downloadSearchQuery.isNotEmpty()) "No Downloads Found" else "Never be without anime",
+                                                    text = if (downloadSearchQuery.isNotEmpty()) "No Downloads Found" else "Your offline library starts here",
                                                     fontSize = 19.sp,
-                                                    fontWeight = FontWeight.Bold,
+                                                    fontWeight = FontWeight.Normal,
                                                     color = Color.White
                                                 )
-                                                Spacer(modifier = Modifier.height(6.dp))
+                                                Spacer(modifier = Modifier.height(8.dp))
                                                 Text(
-                                                    text = if (downloadSearchQuery.isNotEmpty()) "Try searching with a different title." else "Download full shows and movies to watch offline on the go, anytime, anywhere.",
+                                                    text = if (downloadSearchQuery.isNotEmpty()) "Try searching with a different title." else "Download episodes to watch without internet. Firefly keeps each anime together and orders episodes by number.",
                                                     fontSize = 13.sp,
                                                     color = Color(0xFF9E9EA4),
                                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -4043,16 +7509,74 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                 if (downloadSearchQuery.isEmpty()) {
                                                     Spacer(modifier = Modifier.height(20.dp))
                                                     Button(
-                                                        onClick = { selectedTab = 0 },
-                                                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
-                                                        shape = RoundedCornerShape(6.dp),
+                                                        onClick = onExploreClick,
+                                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = Color(0xFF141414)),
+                                                        shape = RoundedCornerShape(24.dp),
                                                         contentPadding = PaddingValues(horizontal = 22.dp, vertical = 10.dp)
                                                     ) {
-                                                        Text(
-                                                            text = "Explore What to Download",
-                                                            fontSize = 13.5.sp,
-                                                            fontWeight = FontWeight.Bold
-                                                        )
+                                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                                            Icon(
+                                                                imageVector = CustomSearchIcon,
+                                                                contentDescription = null,
+                                                                tint = Color(0xFF141414),
+                                                                modifier = Modifier.size(17.dp)
+                                                            )
+                                                            Spacer(modifier = Modifier.width(6.dp))
+                                                            Text(
+                                                                text = "Find anime to download",
+                                                                fontSize = 13.5.sp,
+                                                                fontWeight = FontWeight.Medium,
+                                                                color = Color(0xFF141414)
+                                                            )
+                                                        }
+                                                    }
+                                                    Spacer(modifier = Modifier.height(28.dp))
+                                                    Card(
+                                                        shape = RoundedCornerShape(12.dp),
+                                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF141414)),
+                                                        modifier = Modifier.fillMaxWidth(0.92f)
+                                                    ) {
+                                                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                                Icon(
+                                                                    imageVector = SolarFolderWithFilesVector,
+                                                                    contentDescription = null,
+                                                                    tint = Color(0xFF9E9EA4),
+                                                                    modifier = Modifier.size(22.dp)
+                                                                )
+                                                                Spacer(modifier = Modifier.width(14.dp))
+                                                                Column {
+                                                                    Text("Organized automatically", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Normal)
+                                                                    Text("Episodes are grouped into anime folders.", color = Color(0xFF8E8E93), fontSize = 11.5.sp)
+                                                                }
+                                                            }
+                                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                                Icon(
+                                                                    imageVector = SolarPlayCircleVector,
+                                                                    contentDescription = null,
+                                                                    tint = Color(0xFF9E9EA4),
+                                                                    modifier = Modifier.size(22.dp)
+                                                                )
+                                                                Spacer(modifier = Modifier.width(14.dp))
+                                                                Column {
+                                                                    Text("Same Firefly player", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Normal)
+                                                                    Text("Offline and online playback use the same controls.", color = Color(0xFF8E8E93), fontSize = 11.5.sp)
+                                                                }
+                                                            }
+                                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                                Icon(
+                                                                    imageVector = SolarSubtitlesVector,
+                                                                    contentDescription = null,
+                                                                    tint = Color(0xFF9E9EA4),
+                                                                    modifier = Modifier.size(22.dp)
+                                                                )
+                                                                Spacer(modifier = Modifier.width(14.dp))
+                                                                Column {
+                                                                    Text("Audio and subtitles", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Normal)
+                                                                    Text("Choose language, quality, and subtitles before downloading.", color = Color(0xFF8E8E93), fontSize = 11.5.sp)
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
@@ -4076,7 +7600,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                         modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
                                                     )
                                                 }
-                                                items(activeDownloads) { downloadingEp ->
+                                                items(activeDownloads, key = { it.id }) { downloadingEp ->
                                                     Row(
                                                         modifier = Modifier
                                                             .fillMaxWidth()
@@ -4151,7 +7675,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
                                             // DOWNLOADED ANIME / MOVIE CARDS (16:9 Backdrop + Show Logo + White Phone Icon)
                                             if (downloadedGroups.isNotEmpty() && selectedDownloadFilter != "Downloading") {
-                                                items(downloadedGroups) { group ->
+                                                items(downloadedGroups, key = { if (it.anilistId > 0) "series_${it.anilistId}" else "series_${it.animeTitle.trim().lowercase()}" }) { group ->
                                                     val isSingleVideo = group.episodes.size == 1
                                                     var backdropUrl by remember(group.anilistId) { mutableStateOf(group.backdropUrl) }
                                                     var logoUrl by remember(group.anilistId) { mutableStateOf(group.logoUrl) }
@@ -4170,20 +7694,38 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                     val displayImage = group.backdropUrl.ifEmpty { backdropUrl.ifEmpty { group.coverUrl } }
                                                     val displayLogo = group.logoUrl.ifEmpty { logoUrl }
 
-                                                    Row(
+                                                    var isDeleteOverlayActive by remember { mutableStateOf(false) }
+
+                                                    Box(
                                                         modifier = Modifier
                                                             .fillMaxWidth()
                                                             .clip(RoundedCornerShape(6.dp))
-                                                            .clickable {
-                                                                if (isSingleVideo) {
-                                                                    group.episodes.firstOrNull()?.let { playEpisode(it) }
-                                                                } else {
-                                                                    selectedSeriesDrilldown = group
-                                                                }
+                                                            .background(Color.Transparent)
+                                                            .pointerInput(isSingleVideo, isDeleteOverlayActive) {
+                                                                detectTapGestures(
+                                                                    onLongPress = {
+                                                                        if (isSingleVideo) {
+                                                                            isDeleteOverlayActive = !isDeleteOverlayActive
+                                                                        }
+                                                                    },
+                                                                    onTap = {
+                                                                        if (isDeleteOverlayActive) {
+                                                                            isDeleteOverlayActive = false
+                                                                        } else if (isSingleVideo) {
+                                                                            group.episodes.firstOrNull()?.let { playEpisode(it) }
+                                                                        } else {
+                                                                            selectedSeriesDrilldown = group
+                                                                        }
+                                                                    }
+                                                                )
                                                             }
-                                                            .padding(vertical = 6.dp),
-                                                        verticalAlignment = Alignment.CenterVertically
                                                     ) {
+                                                        Row(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .padding(vertical = 6.dp),
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
                                                         // 16:9 Backdrop Thumbnail
                                                         Box(
                                                             modifier = Modifier
@@ -4255,7 +7797,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                                     contentAlignment = Alignment.Center
                                                                 ) {
                                                                     Icon(
-                                                                        imageVector = Icons.Default.PlayArrow,
+                                                                        imageVector = SolarPlayVector,
                                                                         contentDescription = "Play",
                                                                         tint = Color.White,
                                                                         modifier = Modifier.size(17.dp)
@@ -4278,10 +7820,23 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                                 lineHeight = 18.sp
                                                             )
                                                             Spacer(modifier = Modifier.height(3.dp))
+                                                            val distinctLangs = group.episodes.map { ep ->
+                                                                when (ep.streamType.lowercase()) {
+                                                                    "hindi" -> "Hindi"
+                                                                    "dub" -> "Dub"
+                                                                    "hardsub" -> "HSub"
+                                                                    else -> "Sub"
+                                                                }
+                                                            }.distinct()
+                                                            val hasMultiLangForSameEp = group.episodes.groupBy { it.episodeNumber }.any { it.value.map { e -> e.streamType.lowercase() }.distinct().size > 1 }
+                                                            val langLabel = if (hasMultiLangForSameEp || distinctLangs.size > 1) "Multi" else (distinctLangs.firstOrNull() ?: "Sub")
                                                             val metaText = if (isSingleVideo) {
-                                                                "${group.episodes.firstOrNull()?.quality ?: "HD"} | ${formatDownloadedBytes(group.totalSizeBytes)}"
+                                                                val singleEp = group.episodes.firstOrNull()
+                                                                val epLangs = group.episodes.filter { it.episodeNumber == singleEp?.episodeNumber }.map { it.streamType.lowercase() }.distinct()
+                                                                val q = if (epLangs.size > 1) "1080p Multi" else (singleEp?.quality ?: "HD")
+                                                                "$q | ${formatDownloadedBytes(group.totalSizeBytes)}"
                                                             } else {
-                                                                "${group.episodes.size} ${if (group.episodes.size == 1) "Episode" else "Episodes"} | ${formatDownloadedBytes(group.totalSizeBytes)}"
+                                                                "${group.episodes.size} ${if (group.episodes.size == 1) "Episode" else "Episodes"} • $langLabel | ${formatDownloadedBytes(group.totalSizeBytes)}"
                                                             }
                                                             Text(
                                                                 text = metaText,
@@ -4296,7 +7851,9 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                         // Right: Chevron for series, or Clean White Phone Checkmark for single download
                                                         if (isSingleVideo) {
                                                             NetflixDownloadedPhoneIcon(
-                                                                modifier = Modifier.size(24.dp),
+                                                                modifier = Modifier
+                                                                    .size(24.dp)
+                                                                    .clickable { isDeleteOverlayActive = !isDeleteOverlayActive },
                                                                 tint = Color.White
                                                             )
                                                         } else {
@@ -4308,9 +7865,49 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                             )
                                                         }
                                                     }
+
+                                                    // Single episode delete button overlay with shadow effect
+                                                    if (isSingleVideo && isDeleteOverlayActive) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .matchParentSize()
+                                                                .clip(RoundedCornerShape(6.dp))
+                                                                .background(Color.Black.copy(alpha = 0.85f))
+                                                                .clickable {
+                                                                    group.episodes.firstOrNull()?.let { episodeToDelete = it }
+                                                                    isDeleteOverlayActive = false
+                                                                },
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Text(
+                                                                text = "DELETE",
+                                                                color = Color.White,
+                                                                fontSize = 20.sp,
+                                                                fontWeight = FontWeight.Black,
+                                                                letterSpacing = 2.sp,
+                                                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                                                modifier = Modifier.padding(12.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            if (downloadedGroups.any { it.episodes.size == 1 }) {
+                                                item {
+                                                    Text(
+                                                        text = "Hold card to delete single episode",
+                                                        color = Color(0xFF6B7280),
+                                                        fontSize = 11.sp,
+                                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(top = 4.dp, bottom = 4.dp)
+                                                    )
                                                 }
                                             }
                                         }
+                                    }
                                     }
                                 }
 
@@ -4596,7 +8193,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                                         Box(
                                                             modifier = Modifier
-                                                                .clip(RoundedCornerShape(4.dp))
+                                                                .clip(RoundedCornerShape(8.dp))
                                                                 .background(
                                                                     Brush.horizontalGradient(
                                                                         listOf(Color(0xFFFF9800), Color(0xFFFF5722))
@@ -4744,981 +8341,24 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         shape = RoundedCornerShape(8.dp)
                                     )
                                 }
-                            }
-                        }
 
-                        3 -> {
-                            // LIBRARY TAB ("My List")
-                            val allCategories = listOf("All") + com.lagradost.cloudstream3.ui.animebox.library.LibraryManager.ANILIST_CATEGORIES
-                            val normalizedSelected = com.lagradost.cloudstream3.ui.animebox.library.LibraryManager.normalizeCategory(selectedMyListCategory)
-                            val filteredLibraryItems = if (selectedMyListCategory.equals("All", ignoreCase = true)) {
-                                libraryItemsList
-                            } else {
-                                libraryItemsList.filter { 
-                                    val cat = com.lagradost.cloudstream3.ui.animebox.library.LibraryManager.normalizeCategory(it.customListCategory)
-                                    cat.equals(normalizedSelected, ignoreCase = true)
-                                }
-                            }
-
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .statusBarsPadding()
-                                    .padding(horizontal = 16.dp)
-                            ) {
-                                // Top Header - Placed comfortably below status bar
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 26.dp, bottom = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = "My List",
-                                        fontSize = 22.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
-                                    if (libraryItemsList.isNotEmpty()) {
-                                        Text(
-                                            text = "${filteredLibraryItems.size} Titles",
-                                            fontSize = 12.sp,
-                                            color = primaryColor,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                }
-
-                                // Middle Anime Grid
-                                if (filteredLibraryItems.isEmpty()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .weight(1f),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = if (selectedMyListCategory == "All") "Your list is empty. Add shows to get started." else "No anime in \"$selectedMyListCategory\"",
-                                            color = Color.Gray,
-                                            fontSize = 14.sp
-                                        )
-                                    }
-                                } else {
-                                    LazyVerticalGrid(
-                                        columns = GridCells.Fixed(3),
-                                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .weight(1f)
-                                            .padding(bottom = 6.dp)
-                                    ) {
-                                        items(filteredLibraryItems) { anime ->
-                                            PremiumAnimePosterCard(
-                                                anime = anime,
-                                                inLibrary = true,
-                                                onToggleLibrary = {
-                                                    if (showOutageBanner || isOffline) {
-                                                        showServiceUnavailableDialog = true
-                                                    } else {
-                                                        showAddToListDialogForAnime = anime
-                                                    }
-                                                },
-                                                onClick = {
-                                                    if (showOutageBanner || isOffline) {
-                                                        showServiceUnavailableDialog = true
-                                                    } else {
-                                                        openDetailsPage(anime.id, anime)
-                                                    }
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // Bottom Side Category Filter Chips (Above Navbar with sleek modern look, Drag-and-Drop Reorderable)
-                                ReorderableDragTagRow(
-                                    tags = orderedCategories,
-                                    selectedTag = selectedMyListCategory,
-                                    onTagSelected = { cat ->
-                                        selectedMyListCategory = cat
-                                    },
-                                    onOrderChanged = { newOrder ->
-                                        orderedCategories = newOrder
-                                        saveCategoryOrder(this@AnimeBoxMainActivity, newOrder)
-                                    },
-                                    isCategoryStyle = true,
-                                    isCategorySelected = { cat ->
-                                        if (cat.equals("All", ignoreCase = true)) {
-                                            selectedMyListCategory.equals("All", ignoreCase = true)
-                                        } else {
-                                            !selectedMyListCategory.equals("All", ignoreCase = true) && 
-                                                com.lagradost.cloudstream3.ui.animebox.library.LibraryManager.normalizeCategory(cat) == normalizedSelected
-                                        }
-                                    },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 8.dp, bottom = 12.dp)
-                                )
-                            }
-                        }
-                        4 -> {
-                            // MY SPACE TAB (Full First-Class Screen)
-                            MySpaceScreen(
-                                activeProfileId = currentProfileId,
-                                onSwitchProfile = {
-                                    showProfileSelector = true
-                                },
-                                onProfileUpdated = {
-                                    val act = ProfileManager.getActiveProfile(this@AnimeBoxMainActivity)
-                                    currentProfileId = act
-                                    val hMgr = WatchHistoryManager(this@AnimeBoxMainActivity, act)
-                                    val lMgr = LibraryManager(this@AnimeBoxMainActivity, act)
-                                    continueWatchingList = hMgr.getWatchHistory()
-                                    libraryItemsList = lMgr.getLibraryItems()
-                                }
-                            )
-                        }
-                        else -> {
-                            LaunchedEffect(selectedTab) {
-                                selectedTab = 0
-                            }
-                        }
-                    }
-                }
-
-                // Schedule Episode Release Alert Chibi Card (shows once on opening app in chibi style)
-                AnimatedVisibility(
-                    visible = showScheduleAlertChibi && selectedTab == 0 && activeScheduleAlert != null && !isOffline && !showOutageBanner && anilistErrorMessage == null && isNetworkAvailable(this@AnimeBoxMainActivity),
-                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(animationSpec = androidx.compose.animation.core.tween(250)),
-                    exit = fadeOut(animationSpec = androidx.compose.animation.core.tween(150)),
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
-                ) {
-                    val alert = activeScheduleAlert
-                    if (alert != null) {
-                        val alertScope = rememberCoroutineScope()
-                        val alertOffsetX = remember { androidx.compose.animation.core.Animatable(0f) }
-
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .offset { IntOffset(alertOffsetX.value.roundToInt(), 0) }
-                                .alpha((1f - (abs(alertOffsetX.value) / 320f)).coerceIn(0f, 1f))
-                                .pointerInput(Unit) {
-                                    detectHorizontalDragGestures(
-                                        onDragEnd = {
-                                            alertScope.launch {
-                                                if (abs(alertOffsetX.value) > 100f) {
-                                                    val target = if (alertOffsetX.value > 0) 1200f else -1200f
-                                                    alertOffsetX.animateTo(target, androidx.compose.animation.core.tween(200))
-                                                    showScheduleAlertChibi = false
-                                                } else {
-                                                    alertOffsetX.animateTo(0f, androidx.compose.animation.core.tween(150))
-                                                }
-                                            }
-                                        },
-                                        onHorizontalDrag = { change, dragAmount ->
-                                            change.consume()
-                                            alertScope.launch {
-                                                alertOffsetX.snapTo(alertOffsetX.value + dragAmount)
-                                            }
+                                // Fullscreen Screenshot Lightbox Dialog
+                                fullscreenScreenshotGallery?.let { (list, idx) ->
+                                    ScreenshotLightboxDialog(
+                                        screenshots = list,
+                                        initialIndex = idx,
+                                        onDismiss = { fullscreenScreenshotGallery = null },
+                                        onDelete = { deletedItem ->
+                                            try {
+                                                deletedItem.file.delete()
+                                                screenshotRefreshRevision++
+                                            } catch (_: Exception) {}
                                         }
                                     )
                                 }
-                                .shadow(elevation = 18.dp, shape = RoundedCornerShape(14.dp), spotColor = Color.Black)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color(0xFF141418))
-                                .clickable {
-                                    openDetailsPage(alert.anilistId)
-                                    showScheduleAlertChibi = false
-                                }
-                                .padding(horizontal = 12.dp, vertical = 10.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Image(
-                                    painter = painterResource(id = R.drawable.firefly_chibi_suggestion),
-                                    contentDescription = "Schedule Release Alert",
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier
-                                        .size(62.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                )
-
-                                Spacer(modifier = Modifier.width(12.dp))
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.Top
-                                    ) {
-                                        Text(
-                                            text = "${alert.title} Ep ${alert.episode} is Out!",
-                                            color = Color.White,
-                                            fontSize = 12.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f)
-                                        )
-
-                                        IconButton(
-                                            onClick = { showScheduleAlertChibi = false },
-                                            modifier = Modifier.size(20.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Close,
-                                                contentDescription = "Close",
-                                                tint = Color(0xFF7A7D8F),
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    }
-
-                                    Spacer(modifier = Modifier.height(2.dp))
-
-                                    Text(
-                                        text = "Episode ${alert.episode} has aired! It could take some time to be added to servers, so it might be available in the next few hours.",
-                                        color = Color(0xFF9E9EA8),
-                                        fontSize = 10.5.sp,
-                                        fontWeight = FontWeight.Normal,
-                                        lineHeight = 14.sp
-                                    )
-
-                                    Spacer(modifier = Modifier.height(6.dp))
-
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(Color(0xFF24252E))
-                                            .clickable {
-                                                openDetailsPage(alert.anilistId)
-                                                showScheduleAlertChibi = false
-                                            }
-                                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.PlayArrow,
-                                            contentDescription = "View Details",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                        Text(
-                                            text = "View Anime Page",
-                                            color = Color.White,
-                                            fontSize = 11.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1
-                                        )
-                                    }
-                                }
                             }
-                        }
-                    }
-                }
-
-                // 15-Second Idle Floating Recommendation Card (above bottom nav, suppressed when schedule chibi is active, or offline / outage)
-                AnimatedVisibility(
-                    visible = showIdleRecommendation && !showScheduleAlertChibi && selectedTab == 0 && recommendedAnimeForIdle != null && !isOffline && !showOutageBanner && anilistErrorMessage == null && isNetworkAvailable(this@AnimeBoxMainActivity),
-                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                    exit = fadeOut(animationSpec = androidx.compose.animation.core.tween(150)),
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
-                ) {
-                    val rec = recommendedAnimeForIdle
-                    if (rec != null) {
-                        val idleScope = rememberCoroutineScope()
-                        val idleOffsetX = remember { androidx.compose.animation.core.Animatable(0f) }
-
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .offset { IntOffset(idleOffsetX.value.roundToInt(), 0) }
-                                .alpha((1f - (abs(idleOffsetX.value) / 320f)).coerceIn(0f, 1f))
-                                .pointerInput(Unit) {
-                                    detectHorizontalDragGestures(
-                                        onDragEnd = {
-                                            idleScope.launch {
-                                                if (abs(idleOffsetX.value) > 100f) {
-                                                    val target = if (idleOffsetX.value > 0) 1200f else -1200f
-                                                    idleOffsetX.animateTo(target, androidx.compose.animation.core.tween(200))
-                                                    idleDismissed = true
-                                                    showIdleRecommendation = false
-                                                } else {
-                                                    idleOffsetX.animateTo(0f, androidx.compose.animation.core.tween(150))
-                                                }
-                                            }
-                                        },
-                                        onHorizontalDrag = { change, dragAmount ->
-                                            change.consume()
-                                            idleScope.launch {
-                                                idleOffsetX.snapTo(idleOffsetX.value + dragAmount)
-                                            }
-                                        }
-                                    )
-                                }
-                                .shadow(elevation = 18.dp, shape = RoundedCornerShape(14.dp), spotColor = Color.Black)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color(0xFF141418))
-                                .clickable {
-                                    openDetailsPage(rec.id, rec)
-                                    showIdleRecommendation = false
-                                }
-                                .padding(horizontal = 12.dp, vertical = 10.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // Chibi Character Avatar (no thin borders, clean presentation)
-                                Image(
-                                    painter = painterResource(id = R.drawable.firefly_chibi_suggestion),
-                                    contentDescription = "FireFly Suggestion",
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier
-                                        .size(62.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                )
-
-                                Spacer(modifier = Modifier.width(12.dp))
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.Top
-                                    ) {
-                                        Text(
-                                            text = "Having trouble finding what to watch?",
-                                            color = Color.White,
-                                            fontSize = 12.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f)
-                                        )
-
-                                        IconButton(
-                                            onClick = {
-                                                idleDismissed = true
-                                                showIdleRecommendation = false
-                                            },
-                                            modifier = Modifier.size(20.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Close,
-                                                contentDescription = "Close",
-                                                tint = Color(0xFF7A7D8F),
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    }
-
-                                    Spacer(modifier = Modifier.height(2.dp))
-
-                                    Text(
-                                        text = "Let me recommend a show for you!",
-                                        color = Color(0xFF9E9EA8),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-
-                                    Spacer(modifier = Modifier.height(6.dp))
-
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(Color(0xFF24252E))
-                                            .clickable {
-                                                openDetailsPage(rec.id, rec)
-                                                showIdleRecommendation = false
-                                            }
-                                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.PlayArrow,
-                                            contentDescription = "Play",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                        Text(
-                                            text = rec.title,
-                                            color = Color.White,
-                                            fontSize = 11.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Continue Watching loading overlay
-                if (continueLaunchLoading) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.7f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator(color = primaryColor)
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text("Loading...", color = Color.White, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-
-                // Floating Top Header Bar (Search icon left | Notification + Profile right) — Home tab only
-                if (selectedTab == 0) {
-                    val activeProfileObj = remember(profileRevision, currentProfileId) {
-                        ProfileManager.getProfiles(this@AnimeBoxMainActivity)
-                            .find { it.id == currentProfileId }
-                    }
-                    val activeName = activeProfileObj?.name ?: "Guest"
-                    val avatarUrl = activeProfileObj?.avatarUrl ?: ""
-                    val profilePainter = remember(avatarUrl) {
-                        if (avatarUrl.startsWith("android.resource://")) {
-                            val resName = avatarUrl.substringAfterLast("/")
-                            val resId = context.resources.getIdentifier(resName, "drawable", context.packageName)
-                            if (resId != 0) resId else avatarUrl
-                        } else {
-                            avatarUrl
-                        }
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .align(Alignment.TopCenter)
-                    ) {
-                        // Minimal subtle top gradient for header visibility
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(50.dp)
-                                .background(
-                                    Brush.verticalGradient(
-                                        colors = listOf(
-                                            Color.Black.copy(alpha = 0.30f),
-                                            Color.Transparent
-                                        )
-                                    )
-                                )
-                        )
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .statusBarsPadding()
-                                .padding(horizontal = 16.dp, vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            // Left side: FireFly App Logo
-                            Image(
-                                painter = painterResource(id = R.drawable.firefly_logo),
-                                contentDescription = "FireFly",
-                                modifier = Modifier
-                                    .height(48.dp)
-                                    .wrapContentWidth()
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null
-                                    ) {
-                                        showProfileSelector = true
-                                    },
-                                contentScale = ContentScale.Fit
-                            )
-
-                            // Right side: Search + Notification bell + Profile avatar
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(14.dp)
-                            ) {
-                                // Search Icon Button
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clickable(
-                                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                            indication = null
-                                        ) { selectedTab = 1 },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = CustomSearchIcon,
-                                        contentDescription = "Search",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-
-                                // Notification Icon Button
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clickable(
-                                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                            indication = null
-                                        ) { 
-                                            showNotificationsDialog = true 
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Box(
-                                        modifier = Modifier.size(24.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = CustomNotificationIcon,
-                                            contentDescription = "Notifications",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                        if (unreadNotifCount > 0) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .align(Alignment.TopEnd)
-                                                    .offset(x = 3.dp, y = (-2).dp)
-                                                    .size(15.dp)
-                                                    .background(Color(0xFFE50914), CircleShape)
-                                                    .border(1.dp, Color.Black, CircleShape),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    text = if (unreadNotifCount > 9) "9+" else "$unreadNotifCount",
-                                                    color = Color.White,
-                                                    fontSize = 8.sp,
-                                                    fontWeight = FontWeight.ExtraBold,
-                                                    textAlign = TextAlign.Center,
-                                                    style = androidx.compose.ui.text.TextStyle(
-                                                        platformStyle = androidx.compose.ui.text.PlatformTextStyle(
-                                                            includeFontPadding = false
-                                                        )
-                                                    )
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .clickable { showProfileSelector = true },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(Color(0xFF222228)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (avatarUrl.isNotEmpty()) {
-                                            Image(
-                                                painter = rememberAsyncImagePainter(model = profilePainter),
-                                                contentDescription = activeName,
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier.fillMaxSize()
-                                            )
-                                        } else {
-                                            Text(
-                                                text = activeName.take(1).uppercase(),
-                                                color = Color.White,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 13.sp
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (showProfileSelector) {
-            ProfileSelectorDialog(
-                initialProfileForEditing = initialProfileForEditing,
-                onDismiss = { 
-                    showProfileSelector = false
-                    initialProfileForEditing = null
-                },
-                onProfileSelected = { profileId ->
-                    ProfileManager.setActiveProfile(this@AnimeBoxMainActivity, profileId)
-                    currentProfileId = profileId
-                    val hMgr = WatchHistoryManager(this@AnimeBoxMainActivity, profileId)
-                    val lMgr = LibraryManager(this@AnimeBoxMainActivity, profileId)
-                    continueWatchingList = hMgr.getWatchHistory()
-                    libraryItemsList = lMgr.getLibraryItems()
-                    showProfileSelector = false
-                    initialProfileForEditing = null
-                }
-            )
-        }
-
-        if (showNotificationsDialog) {
-            NotificationsDialog(
-                notifications = supabaseNotifications,
-                onDismiss = { showNotificationsDialog = false },
-                onMarkAllAsRead = {
-                    coroutineScope.launch {
-                        SupabaseNotificationManager.markAllAsRead(this@AnimeBoxMainActivity)
-                        supabaseNotifications = supabaseNotifications.map { it.copy(isRead = true) }
-                        unreadNotifCount = 0
-                    }
-                },
-                onNotificationClick = { notif ->
-                    coroutineScope.launch {
-                        SupabaseNotificationManager.markAsRead(this@AnimeBoxMainActivity, notif.id)
-                        supabaseNotifications = supabaseNotifications.map {
-                            if (it.id == notif.id) it.copy(isRead = true) else it
-                        }
-                        unreadNotifCount = supabaseNotifications.count { !it.isRead }
-                    }
-                    if (!notif.link.isNullOrEmpty()) {
-                        val link = notif.link
-                        val intId = link.toIntOrNull()
-                        if (intId != null) {
-                            openDetailsPage(intId)
-                            showNotificationsDialog = false
-                        } else if (link.startsWith("http://") || link.startsWith("https://")) {
-                            try {
-                                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(link))
-                                startActivity(browserIntent)
-                            } catch (_: Exception) {}
-                        }
-                    }
-                },
-                onClearAll = {
-                    SupabaseNotificationManager.clearAllNotifications(this@AnimeBoxMainActivity)
-                    supabaseNotifications = emptyList()
-                    unreadNotifCount = 0
-                }
-            )
-        }
-
-        if (showDnsDialog) {
-            AnimeBoxDnsDialog(
-                onDismiss = { showDnsDialog = false },
-                onDnsChanged = { loadHomeData() }
-            )
-        }
-
-        // Coming Soon Release Alert Dialog
-        if (comingSoonAlertAnime != null) {
-            AlertDialog(
-                onDismissRequest = { comingSoonAlertAnime = null },
-                confirmButton = {
-                    TextButton(onClick = { comingSoonAlertAnime = null }) {
-                        Text("OK", color = primaryColor, fontWeight = FontWeight.Bold)
-                    }
-                },
-                title = {
-                    Text(
-                        text = "Coming Soon",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
-                },
-                text = {
-                    Text(
-                        text = "The following anime has not been released yet.",
-                        color = Color.LightGray,
-                        fontSize = 14.sp
-                    )
-                },
-                containerColor = Color(0xFF1E1E1E),
-                titleContentColor = Color.White,
-                textContentColor = Color.LightGray
-            )
-        }
-
-        // Kitsu Mode My List Restriction Alert Dialog
-        if (showKitsuMyListRestrictionDialog) {
-            AlertDialog(
-                onDismissRequest = { showKitsuMyListRestrictionDialog = false },
-                confirmButton = {
-                    TextButton(onClick = { showKitsuMyListRestrictionDialog = false }) {
-                        Text("OK", color = primaryColor, fontWeight = FontWeight.Bold)
-                    }
-                },
-                title = {
-                    Text(
-                        text = "My List Unavailable in Fallback Mode",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp
-                    )
-                },
-                text = {
-                    Text(
-                        text = "Adding anime to My List is only supported when connected to AniList. Please try again once AniList servers are back online.",
-                        color = Color.LightGray,
-                        fontSize = 13.5.sp,
-                        lineHeight = 19.sp
-                    )
-                },
-                containerColor = Color(0xFF1E1E1E),
-                titleContentColor = Color.White,
-                textContentColor = Color.LightGray
-            )
-        }
-
-        // Kitsu Fallback Offer Prompt Dialog (Triggered on Retry Failure)
-        if (showKitsuFallbackPromptDialog) {
-            Dialog(
-                onDismissRequest = { showKitsuFallbackPromptDialog = false },
-                properties = DialogProperties(usePlatformDefaultWidth = false)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.75f))
-                        .clickable { showKitsuFallbackPromptDialog = false },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .widthIn(min = 300.dp, max = 390.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0xFF282828))
-                            .clickable(enabled = false) {}
-                            .padding(22.dp)
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(52.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF383838)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = CustomCloudOffIcon,
-                                    contentDescription = null,
-                                    tint = primaryColor,
-                                    modifier = Modifier.size(26.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(14.dp))
-
-                            Text(
-                                text = "Switch to Kitsu Fallback?",
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 17.sp,
-                                textAlign = TextAlign.Center
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Text(
-                                text = "AniList servers are still unreachable. Would you like to temporarily switch to Kitsu metadata to browse and stream anime?",
-                                color = Color(0xFFC4C4C4),
-                                fontSize = 13.sp,
-                                lineHeight = 19.sp,
-                                textAlign = TextAlign.Center
-                            )
-
-                            Spacer(modifier = Modifier.height(20.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Button(
-                                    onClick = { showKitsuFallbackPromptDialog = false },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF383838)),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f),
-                                    contentPadding = PaddingValues(vertical = 10.dp)
-                                ) {
-                                    Text("Stay Offline", color = Color(0xFFE0E0E0), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                                }
-
-                                Button(
-                                    onClick = {
-                                        showKitsuFallbackPromptDialog = false
-                                        isKitsuMode = true
-                                        loadKitsuHomeData()
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f),
-                                    contentPadding = PaddingValues(vertical = 10.dp)
-                                ) {
-                                    Text("Switch to Kitsu", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Service Unavailable / Offline Alert Dialog
-        if (showServiceUnavailableDialog) {
-            Dialog(
-                onDismissRequest = { showServiceUnavailableDialog = false },
-                properties = DialogProperties(usePlatformDefaultWidth = false)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.75f))
-                        .clickable { showServiceUnavailableDialog = false },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .widthIn(min = 300.dp, max = 380.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0xFF282828))
-                            .clickable(enabled = false) {}
-                            .padding(22.dp)
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(52.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF383838)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = if (isOffline) CustomWifiOffIcon else CustomCloudOffIcon,
-                                    contentDescription = null,
-                                    tint = primaryColor,
-                                    modifier = Modifier.size(26.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(14.dp))
-
-                            Text(
-                                text = if (isOffline) "You're Offline" else "Service Unavailable",
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 17.sp,
-                                textAlign = TextAlign.Center
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Text(
-                                text = if (isOffline) {
-                                    "You are currently offline. Online streaming and anime details cannot be loaded without an internet connection.\n\nYou can watch your downloaded anime episodes in the Downloads section."
-                                } else {
-                                    "AniList servers are currently unreachable. Online streaming and anime details cannot be accessed right now.\n\nYou can watch your downloaded anime episodes in the Downloads section."
-                                },
-                                color = Color(0xFFC4C4C4),
-                                fontSize = 12.5.sp,
-                                lineHeight = 18.sp,
-                                textAlign = TextAlign.Center
-                            )
-
-                            Spacer(modifier = Modifier.height(20.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Button(
-                                    onClick = { showServiceUnavailableDialog = false },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF383838)),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f),
-                                    contentPadding = PaddingValues(vertical = 10.dp)
-                                ) {
-                                    Text("Dismiss", color = Color(0xFFE0E0E0), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                                }
-
-                                Button(
-                                    onClick = {
-                                        showServiceUnavailableDialog = false
-                                        selectedTab = 2 // Switch to Downloads tab!
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f),
-                                    contentPadding = PaddingValues(vertical = 10.dp)
-                                ) {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.netflix_download),
-                                        contentDescription = null,
-                                        tint = Color.Black,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Downloads", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Add to My List / Watch Status Category Selector Dialog (Matching Screenshot 2)
-        if (showAddToListDialogForAnime != null) {
-            if (isKitsuMode || com.lagradost.cloudstream3.ui.animebox.api.KitsuClient.isKitsuModeActive || AniListClient.lastErrorMessage != null) {
-                showKitsuMyListRestrictionDialog = true
-                showAddToListDialogForAnime = null
-            } else {
-                val libraryManager = com.lagradost.cloudstream3.ui.animebox.library.LibraryManager(context)
-                val targetAnime = showAddToListDialogForAnime!!
-                val isInLib = libraryManager.isInLibrary(targetAnime.id)
-                val currentCat = if (isInLib) libraryManager.getAnimeCategory(targetAnime.id) else "Plan to Watch"
-
-                com.lagradost.cloudstream3.ui.animebox.library.SelectWatchStatusDialog(
-                    isInLibrary = isInLib,
-                    currentCategory = currentCat,
-                    onSelectStatus = { selectedStatus ->
-                        libraryManager.addOrUpdateLibraryItem(targetAnime, selectedStatus)
-                        libraryItemsList = libraryManager.getLibraryItems()
-                        showAddToListDialogForAnime = null
-                        Toast.makeText(context, "Added to \"$selectedStatus\"", Toast.LENGTH_SHORT).show()
-                    },
-                    onRemoveFromLibrary = {
-                        libraryManager.removeLibraryItem(targetAnime.id)
-                        libraryItemsList = libraryManager.getLibraryItems()
-                        showAddToListDialogForAnime = null
-                        Toast.makeText(context, "Removed from Library", Toast.LENGTH_SHORT).show()
-                    },
-                    onDismiss = {
-                        showAddToListDialogForAnime = null
-                    }
-                )
-            }
-        }
     }
-}
-}
+    }
 
     @Composable
     fun NetflixBottomNav(
@@ -5727,6 +8367,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
         onMySpaceClick: () -> Unit
     ) {
         val context = androidx.compose.ui.platform.LocalContext.current
+        val displayText: (String) -> String = { com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxUiText.text(context, it) }
         val profileRevision by ProfileManager.profileRevisionFlow.collectAsState()
         val activeProfId = remember(profileRevision) { ProfileManager.getActiveProfile(context) }
         val activeProfileObj = remember(profileRevision, activeProfId) {
@@ -5743,174 +8384,200 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 avatarUrl
             }
         }
+        val themeRevision by AnimeBoxThemeHelper.themeRevisionFlow.collectAsState()
+        val navBgColor = remember(themeRevision) { AnimeBoxThemeHelper.getNavbarBgColor(context) }
+        val navOutlineColor = remember(themeRevision) { AnimeBoxThemeHelper.getNavbarOutlineColor(context) }
 
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF121212))
-                .navigationBarsPadding()
-                .padding(vertical = 6.dp)
+                .navigationBarsPadding(),
+            contentAlignment = Alignment.BottomCenter
         ) {
+            // Background bar with sleek rounded top (no thin border outline)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp)
+                    .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                    .background(navBgColor)
+            )
+
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp),
                 horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Tab 0: Home
+                // Tab 0: Home (Monochrome theme: White for active, #9E9EA5 for inactive)
+                val activeColor = Color.White
                 val isHomeSelected = selectedTab == 0
-                val homeColor = if (isHomeSelected) Color.White else Color(0xFF8E8E93)
+                val homeColor = if (isHomeSelected) activeColor else Color(0xFF9E9EA5)
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                     modifier = Modifier
+                        .weight(1f)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
                         ) { onTabSelected(0) }
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
                 ) {
                     Icon(
-                        imageVector = if (isHomeSelected) CustomHomeFilledIcon else CustomHomeOutlineIcon,
-                        contentDescription = "Home",
-                        tint = if (isHomeSelected) Color.Unspecified else homeColor,
-                        modifier = Modifier.size(25.5.dp)
+                        imageVector = if (isHomeSelected) CustomHomeSmileAngleFilledIcon else CustomHomeSmileAngleOutlineIcon,
+                        contentDescription = displayText("Home"),
+                        tint = homeColor,
+                        modifier = Modifier.size(24.5.dp)
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
-                        text = "Home",
+                        text = displayText("Home"),
                         color = homeColor,
                         fontSize = 11.sp,
-                        fontWeight = if (isHomeSelected) FontWeight.SemiBold else FontWeight.Normal
+                        fontWeight = if (isHomeSelected) FontWeight.Bold else FontWeight.Medium
                     )
                 }
 
                 // Tab 1: Search
                 val isSearchSelected = selectedTab == 1
-                val searchColor = if (isSearchSelected) Color.White else Color(0xFF8E8E93)
+                val searchColor = if (isSearchSelected) activeColor else Color(0xFF9E9EA5)
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                     modifier = Modifier
+                        .weight(1f)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
                         ) { onTabSelected(1) }
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
                 ) {
                     Icon(
                         imageVector = CustomSearchIcon,
-                        contentDescription = "Search",
+                        contentDescription = displayText("Search"),
                         tint = searchColor,
                         modifier = Modifier.size(24.dp)
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
-                        text = "Search",
+                        text = displayText("Search"),
                         color = searchColor,
                         fontSize = 11.sp,
-                        fontWeight = if (isSearchSelected) FontWeight.SemiBold else FontWeight.Normal
+                        fontWeight = if (isSearchSelected) FontWeight.Bold else FontWeight.Medium
                     )
+                }
+
+                // Profile sits in middle - larger and naturally fills navbar without empty bottom space
+                val isSpaceSelected = selectedTab == 4
+                val decUrl = activeProfileObj?.decorationUrl ?: ""
+                val hasAnimatedAvatar = (decUrl.isNotBlank() && !decUrl.equals("none", ignoreCase = true)) ||
+                    avatarUrl.endsWith(".gif", ignoreCase = true) ||
+                    avatarUrl.endsWith(".webp", ignoreCase = true) ||
+                    avatarUrl.contains("animated", ignoreCase = true)
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onMySpaceClick() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    val profileBoxModifier = if (hasAnimatedAvatar) {
+                        Modifier
+                            .offset(y = (-5).dp)
+                            .size(54.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onMySpaceClick() }
+                    } else {
+                        Modifier
+                            .offset(y = (-5).dp)
+                            .size(52.dp)
+                            .shadow(10.dp, CircleShape)
+                            .clip(CircleShape)
+                            .background(navBgColor)
+                            .border(2.5.dp, Color.White, CircleShape)
+                            .padding(3.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onMySpaceClick() }
+                    }
+
+                    Box(
+                        modifier = profileBoxModifier,
+                        contentAlignment = Alignment.Center
+                    ) {
+                        com.lagradost.cloudstream3.ui.animebox.profiles.DecoratedProfilePicture(
+                            avatarUrl = avatarUrl,
+                            decorationUrl = decUrl,
+                            size = if (hasAnimatedAvatar) 54.dp else 44.dp,
+                            fallbackInitial = activeName,
+                            forceCircle = true
+                        )
+                    }
                 }
 
                 // Tab 2: Downloads
                 val isDownloadsSelected = selectedTab == 2
-                val downloadsColor = if (isDownloadsSelected) Color.White else Color(0xFF8E8E93)
+                val downloadsColor = if (isDownloadsSelected) activeColor else Color(0xFF9E9EA5)
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                     modifier = Modifier
+                        .weight(1f)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
                         ) { onTabSelected(2) }
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
                 ) {
                     Icon(
-                        imageVector = CustomDownloadsNavbarIcon,
+                        imageVector = if (isDownloadsSelected) CustomDownloadsNavbarBoldIcon else CustomDownloadsNavbarIcon,
                         contentDescription = "Downloads",
                         tint = downloadsColor,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(25.dp)
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = "Downloads",
                         color = downloadsColor,
                         fontSize = 11.sp,
-                        fontWeight = if (isDownloadsSelected) FontWeight.SemiBold else FontWeight.Normal
+                        fontWeight = if (isDownloadsSelected) FontWeight.Bold else FontWeight.Medium
                     )
                 }
 
-                // Tab 3: My Lists (Shopping Bag icon matching reference screenshot)
+                // Tab 3: My Lists
                 val isListSelected = selectedTab == 3
-                val listColor = if (isListSelected) Color.White else Color(0xFF8E8E93)
+                val listColor = if (isListSelected) activeColor else Color(0xFF9E9EA5)
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                     modifier = Modifier
+                        .weight(1f)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
                         ) { onTabSelected(3) }
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
                 ) {
                     Icon(
-                        imageVector = CustomMyListIcon,
+                        imageVector = if (isListSelected) CustomMyListBoldIcon else CustomMyListIcon,
                         contentDescription = "My Lists",
                         tint = listColor,
                         modifier = Modifier.size(24.dp)
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = "My Lists",
                         color = listColor,
                         fontSize = 11.sp,
-                        fontWeight = if (isListSelected) FontWeight.SemiBold else FontWeight.Normal
-                    )
-                }
-
-                // Tab 4: My Space (Profile Avatar)
-                val isSpaceSelected = selectedTab == 4
-                val spaceColor = if (isSpaceSelected) Color.White else Color(0xFF8E8E93)
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                    modifier = Modifier
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { onTabSelected(4) }
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0xFF222228))
-                            .then(if (isSpaceSelected) Modifier.border(1.2.dp, Color.White, RoundedCornerShape(6.dp)) else Modifier),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (avatarUrl.isNotEmpty()) {
-                            Image(
-                                painter = rememberAsyncImagePainter(model = profilePainter),
-                                contentDescription = activeName,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            Text(
-                                text = activeName.take(1).uppercase(),
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "My Space",
-                        color = spaceColor,
-                        fontSize = 11.sp,
-                        fontWeight = if (isSpaceSelected) FontWeight.SemiBold else FontWeight.Normal
+                        fontWeight = if (isListSelected) FontWeight.Bold else FontWeight.Medium
                     )
                 }
             }
@@ -5919,26 +8586,12 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
     @Composable
     fun CustomSubtitlesIcon(color: Color, modifier: Modifier = Modifier) {
-        Box(
+        Icon(
+            imageVector = CustomSubVector,
+            contentDescription = "Subtitles",
+            tint = color,
             modifier = modifier
-                .size(16.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .border(1.2.dp, color, RoundedCornerShape(2.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(1.5.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(modifier = Modifier.size(3.dp, 1.2.dp).background(color))
-                    Box(modifier = Modifier.size(3.dp, 1.2.dp).background(color))
-                }
-            }
-        }
+        )
     }
 
     @Composable
@@ -5956,44 +8609,110 @@ class AnimeBoxMainActivity : ComponentActivity() {
         anime: AnimeBrief,
         inLibrary: Boolean,
         onToggleLibrary: () -> Unit,
-        onClick: () -> Unit
+        onClick: () -> Unit,
+        onLongClick: (() -> Unit)? = null
     ) {
-        val isInvalidCover = anime.coverUrl.isBlank() ||
+        val isShinChan = com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.isShinChan(anime.id)
+        val isInvalidCover = isShinChan || anime.coverUrl.isBlank() ||
                 anime.coverUrl.contains("backdrop", ignoreCase = true) ||
                 anime.coverUrl.contains("banner", ignoreCase = true) ||
                 anime.coverUrl.contains("episode", ignoreCase = true) ||
+                anime.coverUrl.contains("okcdn.ru", ignoreCase = true) ||
+                anime.coverUrl.contains("videoPreview", ignoreCase = true) ||
                 anime.coverUrl.contains("cover_${anime.id}_")
 
         var resolvedPoster by remember(anime.id, anime.coverUrl) {
-            mutableStateOf(if (!isInvalidCover) anime.coverUrl else "")
+            mutableStateOf(if (isShinChan) com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.SHINCHAN_POSTER_URL else if (!isInvalidCover) anime.coverUrl else "")
         }
 
-        LaunchedEffect(anime.id) {
-            if (resolvedPoster.isEmpty()) {
+        val isNullTitle = anime.title.isBlank() || anime.title.equals("null", ignoreCase = true)
+        var resolvedTitle by remember(anime.id, anime.title) {
+            mutableStateOf(if (isNullTitle) "Anime #${anime.id}" else anime.title)
+        }
+
+        val needsAsyncResolve = (isNullTitle || resolvedTitle.startsWith("Anime #")) ||
+                (resolvedPoster.isBlank() || isInvalidCover)
+        if (needsAsyncResolve) {
+            LaunchedEffect(anime.id, anime.title) {
+            if (isNullTitle || resolvedTitle.startsWith("Anime #")) {
+                kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    try {
+                        val aniDetails = AniListClient.getAnimeDetails(anime.id)
+                        var realName: String? = null
+                        if (aniDetails != null) {
+                            val media = org.json.JSONObject(aniDetails).optJSONObject("data")?.optJSONObject("Media")
+                            val tObj = media?.optJSONObject("title")
+                            realName = com.lagradost.cloudstream3.ui.animebox.sync.AnimeBoxAccountSyncManager.optCleanString(tObj, "english")
+                                ?: com.lagradost.cloudstream3.ui.animebox.sync.AnimeBoxAccountSyncManager.optCleanString(tObj, "romaji")
+                                ?: com.lagradost.cloudstream3.ui.animebox.sync.AnimeBoxAccountSyncManager.optCleanString(tObj, "native")
+                        }
+                        if (realName.isNullOrBlank()) {
+                            val aniZip = AniZipClient.getAniZipJson(anime.id)
+                            val titlesObj = aniZip?.optJSONObject("titles")
+                            realName = titlesObj?.optString("en", "")?.ifEmpty { null }
+                                ?: titlesObj?.optString("ro", "")?.ifEmpty { null }
+                        }
+                        if (!realName.isNullOrBlank() && !realName.equals("null", ignoreCase = true)) {
+                            resolvedTitle = realName
+                            val lib = com.lagradost.cloudstream3.ui.animebox.library.LibraryManager(this@AnimeBoxMainActivity)
+                            val items = lib.getLibraryItems().toMutableList()
+                            val idx = items.indexOfFirst { it.id == anime.id }
+                            if (idx >= 0) {
+                                items[idx] = items[idx].copy(title = realName)
+                                getSharedPreferences("AnimeBoxLibrary_${ProfileManager.getActiveProfile(this@AnimeBoxMainActivity)}", Context.MODE_PRIVATE)
+                                    .edit().putString("library_list", items.toJson()).apply()
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+            if (isShinChan) {
+                resolvedPoster = com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.SHINCHAN_POSTER_URL
+            } else if (resolvedPoster.isBlank() || isInvalidCover) {
                 val cached = continueWatchingPosterCache[anime.id]
-                if (!cached.isNullOrEmpty() && !cached.contains("backdrop", ignoreCase = true) && !cached.contains("banner", ignoreCase = true) && !cached.contains("episode", ignoreCase = true)) {
+                if (!cached.isNullOrEmpty()) {
                     resolvedPoster = cached
                 } else {
-                    val p = AniZipClient.getAnimeCover(anime.id)
-                    if (p.isNotEmpty()) {
-                        continueWatchingPosterCache[anime.id] = p
-                        resolvedPoster = p
+                    kotlinx.coroutines.withContext(Dispatchers.IO) {
+                        try {
+                            val aniListCover = AniListClient.getAnimeCover(anime.id)
+                            if (aniListCover.isNotBlank()) {
+                                continueWatchingPosterCache[anime.id] = aniListCover
+                                resolvedPoster = aniListCover
+                            } else {
+                                val p = AniZipClient.getAnimeCover(anime.id)
+                                if (p.isNotEmpty()) {
+                                    continueWatchingPosterCache[anime.id] = p
+                                    resolvedPoster = p
+                                }
+                            }
+                        } catch (_: Exception) {}
                     }
                 }
             } else {
                 continueWatchingPosterCache[anime.id] = resolvedPoster
             }
         }
+        }
 
-        val displayPoster = resolvedPoster.ifEmpty { 
-            val fallback = continueWatchingPosterCache[anime.id] ?: ""
-            if (fallback.isNotEmpty() && !fallback.contains("backdrop", ignoreCase = true) && !fallback.contains("banner", ignoreCase = true)) fallback else anime.coverUrl 
+        val displayPoster = when {
+            isShinChan -> com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.SHINCHAN_POSTER_URL
+            resolvedPoster.isNotEmpty() -> resolvedPoster
+            else -> {
+                val fallback = continueWatchingPosterCache[anime.id] ?: ""
+                if (fallback.isNotEmpty() && !fallback.contains("backdrop", ignoreCase = true) && !fallback.contains("banner", ignoreCase = true) && !fallback.contains("episode", ignoreCase = true) && !fallback.contains("okcdn.ru", ignoreCase = true) && !fallback.contains("videoPreview", ignoreCase = true)) fallback else anime.coverUrl
+            }
         }
 
         Column(
             modifier = Modifier
                 .width(118.dp)
-                .clickable(onClick = onClick)
+                .pointerInput(anime.id) {
+                    detectTapGestures(
+                        onTap = { onClick() },
+                        onLongPress = { onLongClick?.invoke() }
+                    )
+                }
         ) {
             Box(
                 modifier = Modifier
@@ -6009,42 +8728,58 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Firefly logo badge on top-left corner
-                Image(
-                    painter = androidx.compose.ui.res.painterResource(id = com.lagradost.cloudstream3.R.drawable.firefly_logo),
-                    contentDescription = "Firefly",
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(6.dp)
-                        .size(16.dp)
-                )
-
-                // Top-right circular add button (gold '+', or gold checkmark '✓' if in library)
+                // Top-right flush corner badge matching user reference image
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(6.dp)
-                        .size(26.dp)
-                        .clip(CircleShape)
+                        .clip(RoundedCornerShape(bottomStart = 8.dp))
                         .background(Color.Black.copy(alpha = 0.65f))
-                        .clickable { onToggleLibrary() },
+                        .clickable { onToggleLibrary() }
+                        .padding(horizontal = 7.dp, vertical = 6.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = if (inLibrary) Icons.Default.Check else Icons.Default.Add,
                         contentDescription = "My List Toggle",
-                        tint = Color(0xFFFFB300), // Netflix style gold/yellow
-                        modifier = Modifier.size(16.dp)
+                        tint = Color(0xFFFFB300),
+                        modifier = Modifier.size(17.dp)
                     )
                 }
 
-                // Semi-transparent bottom audio/subtitle bar
+                // Semi-transparent bottom audio/subtitle bar (CC and Dub count from AnililiDubManager)
+                val isHentaiItem = anime.isAdult ||
+                    (anime.id >= 90000000) ||
+                    anime.genres.any { it.equals("Hentai", ignoreCase = true) || it.equals("Ecchi 18+", ignoreCase = true) } ||
+                    com.lagradost.cloudstream3.ui.animebox.api.AniListClient.isAdultAnimeCached(anime.id)
+
+                val resolvedSubCount: String
+                val resolvedDubCount: String
+
+                if (isHentaiItem) {
+                    resolvedSubCount = if (anime.episodes > 0) "${anime.episodes}" else "?"
+                    resolvedDubCount = "?"
+                } else {
+                    val isMovieCard = anime.format.equals("MOVIE", ignoreCase = true) || com.lagradost.cloudstream3.ui.animebox.api.AnimeMovieTmdbMapping.isStaticMovie(anime.id) || anime.id == 1689
+                    val subCountInt = remember(anime.id, anime.episodes, anime.status, anime.nextEpisode, isMovieCard) {
+                        if (isMovieCard) {
+                            1
+                        } else {
+                            com.lagradost.cloudstream3.ui.animebox.api.AnililiDubManager.getAiredSubCount(anime.id, anime.episodes, anime.status, anime.nextEpisode)
+                        }
+                    }
+                    val hasDubConfirmed = remember(anime.id) {
+                        com.lagradost.cloudstream3.ui.animebox.api.AnililiDubManager.isDubConfirmed(anime.id)
+                    }
+                    resolvedSubCount = "$subCountInt"
+                    resolvedDubCount = if (hasDubConfirmed) "✓" else "0"
+                }
+
                 Row(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .height(24.dp)
-                        .background(Color.Black.copy(alpha = 0.75f)),
+                        .height(26.dp)
+                        .background(Color.Black.copy(alpha = 0.85f)),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -6058,34 +8793,34 @@ class AnimeBoxMainActivity : ComponentActivity() {
                         Text(
                             text = "CC",
                             color = Color.White,
-                            fontSize = 7.5.sp,
-                            fontWeight = FontWeight.Black,
-                            lineHeight = 8.sp
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
-                    Spacer(modifier = Modifier.width(3.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = if (anime.episodes > 0) "${anime.episodes}" else "?",
+                        text = resolvedSubCount,
                         color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold
                     )
 
                     Spacer(modifier = Modifier.width(7.dp))
-                    Text("|", color = Color.Gray.copy(alpha = 0.5f), fontSize = 10.sp)
+                    Text("|", color = Color(0xFF686C78), fontSize = 10.sp)
                     Spacer(modifier = Modifier.width(7.dp))
 
+                    // Headphones icon + accurate dub count
                     CustomMicIcon(
                         color = Color.White,
-                        modifier = Modifier.size(11.dp)
+                        modifier = Modifier.size(13.dp)
                     )
-                    Spacer(modifier = Modifier.width(3.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = if (anime.episodes > 0) "${anime.episodes}" else "?",
+                        text = resolvedDubCount,
                         color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold
                     )
                 }
             }
             Text(
-                text = anime.title,
+                text = resolvedTitle,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = Color.White,
@@ -6097,14 +8832,28 @@ class AnimeBoxMainActivity : ComponentActivity() {
     }
 
     @Composable
-    fun SectionHeader(title: String) {
-        Text(
-            text = title,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Black,
-            color = Color.White,
-            modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 8.dp)
-        )
+    fun SectionHeader(title: String, color: Color = Color.White) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxUiText.text(context, title),
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Normal,
+                color = color
+            )
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = Color(0xFF757575),
+                modifier = Modifier.size(20.dp)
+            )
+        }
     }
 
     @Composable
@@ -6150,7 +8899,6 @@ class AnimeBoxMainActivity : ComponentActivity() {
                         .wrapContentHeight()
                         .clip(RoundedCornerShape(14.dp))
                         .background(Color(0xFF141416))
-                        .border(1.dp, Color(0xFF27272A), RoundedCornerShape(14.dp))
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
@@ -6184,7 +8932,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
+                                            .clip(RoundedCornerShape(8.dp))
                                             .clickable { onMarkAllAsRead() }
                                             .padding(horizontal = 4.dp, vertical = 2.dp)
                                     )
@@ -6195,7 +8943,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
+                                            .clip(RoundedCornerShape(8.dp))
                                             .clickable { onClearAll() }
                                             .padding(horizontal = 4.dp, vertical = 2.dp)
                                     )
@@ -6349,6 +9097,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
     @Composable
     fun FaqSection() {
+        val context = androidx.compose.ui.platform.LocalContext.current
         val faqs = remember {
             listOf(
                 "What is FireFly?" to "FireFly is a premium streaming service that allows you to watch a wide variety of anime shows, movies, and more on thousands of internet-connected devices.",
@@ -6368,7 +9117,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 .padding(horizontal = 16.dp, vertical = 24.dp)
         ) {
             Text(
-                text = "Frequently Asked Questions",
+                text = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxUiText.text(context, "Frequently Asked Questions"),
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
@@ -6400,7 +9149,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(4.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .background(Color(0xFF2D2D2D))
         ) {
             Row(
@@ -6548,24 +9297,63 @@ class AnimeBoxMainActivity : ComponentActivity() {
             label = "studio_card_scale"
         )
 
-        val studioFontFamily = remember {
-            try {
-                androidx.compose.ui.text.font.FontFamily(
-                    androidx.compose.ui.text.font.Font(R.font.futura, FontWeight.Normal),
-                    androidx.compose.ui.text.font.Font(R.font.futura, FontWeight.Bold)
-                )
-            } catch (_: Throwable) {
-                try {
-                    androidx.compose.ui.text.font.FontFamily(
-                        androidx.compose.ui.text.font.Font(R.font.netflix_sans, FontWeight.Bold)
-                    )
-                } catch (_: Throwable) {
-                    AnimeBoxThemeHelper.MotoGoogleSansFontFamily
-                }
+        val studioFontFamily = cachedStudioFontFamily
+        val studioColor = Color(studio.themeColor)
+        var cardPosterUrl by remember(studio.name, studio.posterUrl) { mutableStateOf(studio.posterUrl) }
+        var cardAnimeTitle by remember(studio.name, studio.popularAnimeTitle) { mutableStateOf(studio.popularAnimeTitle) }
+
+        LaunchedEffect(studio.name, studio.isAdultStudio) {
+            if (!studio.isAdultStudio || cardPosterUrl.isNotBlank()) return@LaunchedEffect
+            val preferredMedia = if (studio.popularAnimeTitle.isNotBlank() && studio.popularAnimeTitle != "Popular Adult Releases") {
+                runCatching {
+                    val response = AniListClient.searchAnime(studio.popularAnimeTitle) ?: return@runCatching null
+                    val root = JSONObject(response)
+                    val nodes = root.optJSONObject("data")?.optJSONObject("Page")?.optJSONArray("media")
+                    val preferred = studio.popularAnimeTitle.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()
+                    (0 until (nodes?.length() ?: 0)).asSequence()
+                        .mapNotNull { nodes?.optJSONObject(it) }
+                        .firstOrNull { media ->
+                            val titles = media.optJSONObject("title")
+                            listOf(titles?.optString("english"), titles?.optString("romaji"), titles?.optString("native"))
+                                .filterNotNull().any { title -> title.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim() == preferred }
+                        }
+                }.getOrNull()
+            } else null
+            val response = runCatching { AniListClient.getAnimeByStudio(studio.queryName, 1) }.getOrNull()
+            val studioMedia = runCatching {
+                val root = JSONObject(response ?: return@runCatching null)
+                root.optJSONObject("data")?.optJSONObject("Studio")
+                    ?.optJSONObject("media")?.optJSONArray("nodes")?.let { nodes ->
+                        val mediaItems = (0 until nodes.length()).asSequence()
+                            .mapNotNull { nodes.optJSONObject(it) }
+                            .filter { media -> media.optJSONObject("coverImage")?.optString("large").orEmpty().isNotBlank() }
+                            .toList()
+                        val preferred = studio.popularAnimeTitle
+                            .lowercase()
+                            .replace(Regex("[^a-z0-9]+"), " ")
+                            .trim()
+                        mediaItems.firstOrNull { media ->
+                            val titles = media.optJSONObject("title")
+                            listOf(titles?.optString("english"), titles?.optString("romaji"), titles?.optString("native"))
+                                .filterNotNull()
+                                .any { title ->
+                                    val normalized = title.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()
+                                    preferred.isNotBlank() && preferred != "popular adult releases" &&
+                                        (normalized == preferred || normalized.contains(preferred) || preferred.contains(normalized))
+                                }
+                        } ?: mediaItems.firstOrNull()
+                    }
+            }.getOrNull()
+            val firstMedia = preferredMedia ?: studioMedia
+            firstMedia?.let { media ->
+                val cover = media.optJSONObject("coverImage")?.optString("extraLarge").orEmpty()
+                    .ifBlank { media.optJSONObject("coverImage")?.optString("large").orEmpty() }
+                if (cover.isNotBlank()) cardPosterUrl = cover
+                val title = media.optJSONObject("title")?.optString("english").orEmpty()
+                    .ifBlank { media.optJSONObject("title")?.optString("romaji").orEmpty() }
+                if (title.isNotBlank()) cardAnimeTitle = title
             }
         }
-
-        val studioColor = Color(studio.themeColor)
 
         Box(
             modifier = Modifier
@@ -6579,14 +9367,23 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     indication = null
                 ) { onClick() }
         ) {
-            // High-res AniList Anime Poster (All 100% verified working)
-            Image(
-                painter = rememberAsyncImagePainter(model = studio.posterUrl),
-                contentDescription = studio.name,
-                contentScale = ContentScale.Crop,
-                alignment = Alignment.Center,
-                modifier = Modifier.fillMaxSize()
-            )
+            // Adult studio artwork is resolved from each studio's current AniList releases.
+            if (cardPosterUrl.isNotBlank()) {
+                Image(
+                    painter = rememberAsyncImagePainter(model = cardPosterUrl),
+                    contentDescription = "$cardAnimeTitle — ${studio.name}",
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.Center,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else if (studio.isAdultStudio) {
+                Image(
+                    painter = painterResource(R.drawable.ic_hentai_bunny_raster),
+                    contentDescription = studio.name,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().padding(24.dp).alpha(0.35f)
+                )
+            }
 
             // Colorful Genre-Style Bottom Shadow & Vignette
             Box(
@@ -6630,7 +9427,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     .padding(horizontal = 6.dp, vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(
+                                                Text(
                     text = studio.name.uppercase(),
                     color = Color.White,
                     fontSize = 13.sp,
@@ -6649,6 +9446,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                         )
                     )
                 )
+
+
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = "COLLECTION",
@@ -6658,6 +9457,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     fontFamily = studioFontFamily,
                     letterSpacing = 2.0.sp,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     style = TextStyle(
                         shadow = androidx.compose.ui.graphics.Shadow(
                             color = Color.Black,
@@ -6750,7 +9551,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Default.PlayArrow,
+                    imageVector = SolarPlayVector,
                     contentDescription = "Play",
                     tint = Color.White,
                     modifier = Modifier.size(22.dp)
@@ -6867,7 +9668,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                         modifier = Modifier.height(36.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.PlayArrow,
+                            imageVector = SolarPlayVector,
                             contentDescription = "Play",
                             tint = Color.White,
                             modifier = Modifier.size(16.dp)
@@ -6904,6 +9705,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
         onToggleLibrary: () -> Unit,
         onPlayClick: () -> Unit
     ) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val displayText: (String) -> String = { com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxUiText.text(context, it) }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -6951,6 +9754,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     .padding(horizontal = 20.dp, vertical = 10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // Spotlight shows the text title only (no logo).
                 Text(
                     text = spotlight.title,
                     fontSize = 19.sp,
@@ -6989,13 +9793,13 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     ) {
                         Icon(
                             imageVector = if (inLibrary) Icons.Default.Check else Icons.Default.Add,
-                            contentDescription = "My List",
+                            contentDescription = displayText("My List"),
                             tint = Color.White,
                             modifier = Modifier.size(22.dp)
                         )
                         Spacer(modifier = Modifier.height(3.dp))
                         Text(
-                            text = if (inLibrary) "In List" else "None",
+                            text = displayText(if (inLibrary) "In List" else "None"),
                             color = Color.White,
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.Normal
@@ -7013,14 +9817,14 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = Icons.Default.PlayArrow,
+                                imageVector = SolarPlayVector,
                                 contentDescription = "Play",
                                 tint = Color.White,
                                 modifier = Modifier.size(20.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Play",
+                                text = displayText("Play"),
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp
@@ -7062,27 +9866,43 @@ class AnimeBoxMainActivity : ComponentActivity() {
         return String.format("%02d:%02d", minutes, seconds)
     }
 
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
     @Composable
     fun ContinueWatchingCard(
         item: WatchHistoryItem,
+        screenshotRevision: Long = 0L,
         onDeleteClick: () -> Unit,
         onInfoClick: () -> Unit,
         onClick: (String) -> Unit
     ) {
         val primaryColor = MaterialTheme.colorScheme.primary
-        val cachedEpThumb = continueWatchingPosterCache[item.anilistId * 1000 + item.episodeNumber] ?: ""
+        val customDirect = remember(item.anilistId, item.episodeNumber, screenshotRevision) {
+            com.lagradost.cloudstream3.ui.animebox.api.EpisodeCoverUploader.getLocalOrUploadedEpisodeCover(
+                this@AnimeBoxMainActivity,
+                item.anilistId,
+                item.episodeNumber,
+                item.animeTitle
+            )
+        }
+        val cachedEpThumb = customDirect ?: (continueWatchingPosterCache[item.anilistId * 1000 + item.episodeNumber] ?: "")
         val cachedLogo = continueWatchingLogoCache[item.anilistId] ?: ""
-        var episodeThumbUrl by remember(item.anilistId, item.episodeNumber) { 
+        var episodeThumbUrl by remember(item.anilistId, item.episodeNumber, screenshotRevision) { 
             mutableStateOf(cachedEpThumb.ifEmpty { item.coverImageUrl }) 
         }
         var animeLogoUrl by remember(item.anilistId) { mutableStateOf(cachedLogo) }
+        var episodeTitle by remember(item.anilistId, item.episodeNumber) { mutableStateOf("") }
+        val isKnownLongRunningTv = com.lagradost.cloudstream3.ui.animebox.api.AniZipClient.getLongRunningTmdbId(item.anilistId) != null
         var isMovie by remember(item.anilistId) {
-            mutableStateOf(com.lagradost.cloudstream3.ui.animebox.api.AnimeMovieTmdbMapping.isStaticMovie(item.anilistId))
+            mutableStateOf(if (isKnownLongRunningTv) false else com.lagradost.cloudstream3.ui.animebox.api.AnimeMovieTmdbMapping.isStaticMovie(item.anilistId))
         }
 
-        LaunchedEffect(item.anilistId, item.episodeNumber) {
-            var movieDetected = isMovie
-            if (!movieDetected) {
+        LaunchedEffect(item.anilistId, item.episodeNumber, screenshotRevision) {
+            val isAdultEp = AniListClient.isAdultAnime(item.anilistId, item.animeTitle)
+            var movieDetected = if (isAdultEp || isKnownLongRunningTv) false else isMovie
+            if (isKnownLongRunningTv) {
+                isMovie = false
+                movieDetected = false
+            } else if (!movieDetected) {
                 try {
                     val aniJson = AniZipClient.getAniZipJson(item.anilistId)
                     val mapType = aniJson?.optJSONObject("mappings")?.optString("type", "") ?: ""
@@ -7098,7 +9918,10 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 } catch (_: Exception) {}
             }
 
-            if (cachedLogo.isEmpty() || animeLogoUrl.isEmpty()) {
+            if (item.anilistId == 10250 || item.anilistId == 4216) {
+                continueWatchingLogoCache.remove(item.anilistId)
+                animeLogoUrl = ""
+            } else if (cachedLogo.isEmpty() || animeLogoUrl.isEmpty()) {
                 val logo = AniZipClient.getAnimeLogoUrl(item.anilistId, isMovie = movieDetected)
                 if (logo.isNotEmpty()) {
                     continueWatchingLogoCache[item.anilistId] = logo
@@ -7106,10 +9929,18 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 }
             }
             try {
+                val epMetaMap = AniZipClient.getEpisodeMetadata(item.anilistId)
+                val epMeta = epMetaMap[item.episodeNumber]
+                if (epMeta != null && epMeta.title.isNotBlank()) {
+                    episodeTitle = epMeta.title.trim()
+                }
+            } catch (_: Exception) {}
+
+            try {
                 var resolvedThumb = ""
 
-                // 0. For movies, official high-res TMDB backdrop is top priority!
-                if (movieDetected) {
+                // 0. For movies, official high-res TMDB backdrop is priority!
+                if (!isAdultEp && movieDetected) {
                     val movieBackdrop = AniZipClient.getBestBackdropUrl(item.anilistId, isMovie = true)
                     if (movieBackdrop.isNotEmpty()) {
                         resolvedThumb = movieBackdrop
@@ -7159,10 +9990,58 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     } catch (_: Exception) {}
                 }
 
-                // 4. Check saved cover if it's already an episode still (contains tmdb.org or /episodes/)
+                // 3.5 Screenshot/ImgBB cover — only use when no proper episode cover was found above
+                if (resolvedThumb.isEmpty()) {
+                    val customCover = com.lagradost.cloudstream3.ui.animebox.api.EpisodeCoverUploader.getLocalOrUploadedEpisodeCover(
+                        this@AnimeBoxMainActivity,
+                        item.anilistId,
+                        item.episodeNumber,
+                        item.animeTitle
+                    ) ?: com.lagradost.cloudstream3.ui.animebox.api.EpisodeCoverUploader.getCustomEpisodeCover(
+                        this@AnimeBoxMainActivity,
+                        item.anilistId,
+                        item.episodeNumber,
+                        item.animeTitle
+                    )
+                    if (!customCover.isNullOrEmpty()) {
+                        resolvedThumb = customCover
+                    }
+                }
+
+                // 4. Check saved cover if it's already an episode still, ImgBB, Supabase, or screenshot file
                 if (resolvedThumb.isEmpty() && !movieDetected && item.coverImageUrl.isNotEmpty()) {
-                    if (item.coverImageUrl.contains("tmdb.org") || item.coverImageUrl.contains("/episodes/")) {
+                    if (item.coverImageUrl.contains("tmdb.org") || 
+                        item.coverImageUrl.contains("/episodes/") || 
+                        item.coverImageUrl.contains("ibb.co") || 
+                        item.coverImageUrl.contains("supabase") || 
+                        item.coverImageUrl.contains("screenshots") ||
+                        item.coverImageUrl.startsWith("/")) {
                         resolvedThumb = item.coverImageUrl
+                    }
+                }
+
+                // 4.5 For adult/hentai anime, resolve real episode thumbnail from TMDB adult or HentaiMama/HentaiHaven
+                val isAdultEp = AniListClient.isAdultAnime(item.anilistId, item.animeTitle)
+                if (isAdultEp && resolvedThumb.isEmpty() && item.episodeNumber > 0) {
+                    val tmdbAdult = AniZipClient.getTmdbAdultEpisodeImage(item.animeTitle, item.episodeNumber)
+                    if (tmdbAdult.isNotEmpty()) {
+                        resolvedThumb = tmdbAdult
+                    } else {
+                        val hmEps = try {
+                            com.lagradost.cloudstream3.ui.animebox.extractors.HentaiMamaExtractor.getEpisodeListForAnime(item.animeTitle, listOf(item.animeTitle))
+                        } catch (_: Exception) { emptyList() }
+                        val hmEp = hmEps.firstOrNull { it.episodeNumber == item.episodeNumber }
+                        if (hmEp != null && hmEp.thumbnail.isNotEmpty()) {
+                            resolvedThumb = hmEp.thumbnail
+                        } else {
+                            val hhEps = try {
+                                com.lagradost.cloudstream3.ui.animebox.extractors.HentaiHavenExtractor.getEpisodeListForAnime(item.animeTitle, listOf(item.animeTitle))
+                            } catch (_: Exception) { emptyList() }
+                            val hhEp = hhEps.firstOrNull { it.episodeNumber == item.episodeNumber }
+                            if (hhEp != null && hhEp.thumbnail.isNotEmpty()) {
+                                resolvedThumb = hhEp.thumbnail
+                            }
+                        }
                     }
                 }
 
@@ -7198,18 +10077,54 @@ class AnimeBoxMainActivity : ComponentActivity() {
         val displayThumb = episodeThumbUrl.ifEmpty { item.coverImageUrl }
         val percentage = if (item.totalDurationMs > 0) (item.progressPositionMs.toFloat() / item.totalDurationMs).coerceIn(0f, 1f) else 0f
 
-        Column(
-            modifier = Modifier
-                .width(204.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFF141418))
-        ) {
+        val watchedSeconds = item.progressPositionMs / 1000
+        val totalSeconds = if (item.totalDurationMs > 0) item.totalDurationMs / 1000 else 0
+        val remainingSeconds = if (totalSeconds > watchedSeconds) totalSeconds - watchedSeconds else 0
+
+        fun formatDuration(seconds: Long): String {
+            if (seconds <= 0) return "0:00"
+            val m = seconds / 60
+            val s = seconds % 60
+            val h = m / 60
+            val remM = m % 60
+            return if (h > 0) {
+                String.format(java.util.Locale.getDefault(), "%d:%02d:%02d", h, remM, s)
+            } else {
+                String.format(java.util.Locale.getDefault(), "%d:%02d", remM, s)
+            }
+        }
+
+        val timeLabel = when {
+            totalSeconds > 0 -> "${formatDuration(watchedSeconds)} watched · ${formatDuration(remainingSeconds)} left"
+            watchedSeconds > 0 -> "${formatDuration(watchedSeconds)} watched"
+            else -> null
+        }
+
+        val episodeSubtitle = when {
+            isMovie -> if (episodeTitle.isNotEmpty() && !episodeTitle.startsWith("Episode", ignoreCase = true)) episodeTitle else "Movie"
+            episodeTitle.isNotEmpty() && !episodeTitle.equals("Episode ${item.episodeNumber}", ignoreCase = true) -> "E${item.episodeNumber} - $episodeTitle"
+            else -> "Episode ${item.episodeNumber}"
+        }
+
+        var showRemovePopup by remember { mutableStateOf(false) }
+
+        Box {
+            Column(
+                modifier = Modifier
+                    .width(240.dp)
+                    .pointerInput(displayThumb) {
+                        detectTapGestures(
+                            onTap = { onClick(displayThumb) },
+                            onLongPress = { showRemovePopup = true }
+                        )
+                    }
+            ) {
             // 16:9 Thumbnail Block
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(115.dp)
-                    .clickable { onClick(displayThumb) }
+                    .height(135.dp)
+                    .clip(RoundedCornerShape(8.dp))
             ) {
                 if (displayThumb.isEmpty()) {
                     Box(
@@ -7226,19 +10141,19 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     )
                 }
 
-                // Dark vignette overlay
+                // Subtle dark vignette overlay
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.30f))
+                        .background(Color.Black.copy(alpha = 0.20f))
                 )
 
-                // Anime PNG Logo hovering if available
+                // Anime PNG Logo hovering if available (smaller, height 22.dp)
                 if (animeLogoUrl.isNotEmpty()) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(0.65f)
-                            .height(34.dp)
+                            .fillMaxWidth(0.50f)
+                            .height(20.dp)
                             .align(Alignment.BottomStart)
                             .padding(bottom = 6.dp, start = 8.dp),
                         contentAlignment = Alignment.CenterStart
@@ -7252,7 +10167,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     }
                 }
 
-                // Netflix Firefly badge top-left
+                // Firefly badge top-left
                 Image(
                     painter = androidx.compose.ui.res.painterResource(id = com.lagradost.cloudstream3.R.drawable.firefly_logo),
                     contentDescription = "Firefly",
@@ -7262,65 +10177,46 @@ class AnimeBoxMainActivity : ComponentActivity() {
                         .size(16.dp)
                 )
 
-                // Netflix-style center ring play button
+                // Centered play button (theme color with broken play icon)
                 Box(
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(42.dp)
                         .align(Alignment.Center)
-                        .background(Color.Black.copy(alpha = 0.55f), CircleShape)
-                        .border(1.5.dp, Color.White, CircleShape),
+                        .background(primaryColor.copy(alpha = 0.75f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.PlayArrow,
+                        imageVector = CustomAniDashBrokenPlayIcon,
                         contentDescription = "Play",
                         tint = Color.White,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
 
-                // Delete / Remove 'x' button on top-right
+                // EP badge in top-right corner with grey color background
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(top = 5.dp, end = 5.dp)
-                        .size(22.dp)
-                        .background(Color.Black.copy(alpha = 0.75f), CircleShape)
-                        .clickable { onDeleteClick() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Remove",
-                        tint = Color.White,
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
-
-                // Episode/Movie badge in bottom-right corner: half-circle quadrant touching corner with bold text
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .clip(RoundedCornerShape(topStart = 10.dp))
-                        .background(Color.Black.copy(alpha = 0.85f))
-                        .padding(horizontal = 7.dp, vertical = 2.5.dp)
+                        .padding(top = 6.dp, end = 6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(Color(0xFF383842).copy(alpha = 0.92f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = if (isMovie) "Movie" else "Ep ${item.episodeNumber}",
-                        color = Color.White,
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = 0.2.sp
+                        text = if (isMovie) "MOVIE" else "EP ${item.episodeNumber}",
+                        color = Color(0xFFE5E5EA),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
 
-                // Lavender Progress Bar at bottom of thumbnail (Dynamic app theme accent)
+                // Video progress bar at bottom of thumbnail
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(3.dp)
                         .align(Alignment.BottomStart)
-                        .background(Color(0xFF33333E))
+                        .background(Color.Transparent)
                 ) {
                     Box(
                         modifier = Modifier
@@ -7331,27 +10227,65 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 }
             }
 
-            // Bottom title and episode info in card
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onClick(displayThumb) }
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
-            ) {
+            // Bottom title, episode info and duration
+            Spacer(modifier = Modifier.height(7.dp))
+            Text(
+                text = item.animeTitle,
+                color = Color.White,
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = episodeSubtitle,
+                color = Color(0xFF9E9EA4),
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (timeLabel != null) {
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = item.animeTitle,
-                    color = Color.White,
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    text = timeLabel,
+                    color = primaryColor.copy(alpha = 0.85f),
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Normal,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Text(
-                    text = if (isMovie) "Movie" else "Episode ${item.episodeNumber}",
-                    color = Color(0xFF9E9EA4),
-                    fontSize = 11.sp,
-                    maxLines = 1
-                )
+            }
+        }
+
+            // Rectangular Remove popup (clean light surface, no thin border outline)
+            if (showRemovePopup) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(Color.Black.copy(alpha = 0.5f))
+                        .clickable { showRemovePopup = false },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFF262832))
+                            .clickable {
+                                showRemovePopup = false
+                                onDeleteClick()
+                            }
+                            .padding(horizontal = 16.dp, vertical = 9.dp)
+                    ) {
+                        Text(
+                            text = "Remove",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
             }
         }
     }
@@ -7373,12 +10307,15 @@ class AnimeBoxMainActivity : ComponentActivity() {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .background(Color(0xFF1B1B20))
-                .then(
-                    if (onClick != null && trailingType != CardTrailingType.SWITCH) Modifier.clickable { onClick() }
-                    else Modifier
-                )
+                .clip(RoundedCornerShape(2.dp))
+                .background(Color(0xFF252930))
+                .clickable {
+                    if (trailingType == CardTrailingType.SWITCH) {
+                        onSwitchChanged?.invoke(!switchChecked)
+                    } else {
+                        onClick?.invoke()
+                    }
+                }
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -7391,7 +10328,21 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     is ImageVector -> Icon(imageVector = icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
                     is androidx.compose.ui.graphics.painter.Painter -> Icon(painter = icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
                     is Int -> {
-                        if (icon == R.drawable.ic_anilist_official) {
+                        if (icon == R.drawable.ic_hentai_bunny) {
+                            Icon(
+                                painter = painterResource(id = icon),
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.requiredSize(48.dp)
+                            )
+                        } else if (icon == R.drawable.ic_groq_logo) {
+                            Image(
+                                painter = painterResource(id = icon),
+                                contentDescription = null,
+                                modifier = Modifier.height(16.dp).width(38.dp),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                            )
+                        } else if (icon == R.drawable.ic_anilist_official || icon == R.drawable.ic_animebox_news || icon == R.drawable.ic_graphics_enhancer_logo) {
                             Image(painter = painterResource(id = icon), contentDescription = null, modifier = Modifier.size(24.dp))
                         } else {
                             Icon(painter = painterResource(id = icon), contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
@@ -7413,8 +10364,17 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 Text(
                     text = subtitle,
                     color = Color(0xFFA0A0AB),
-                    fontSize = 12.5.sp,
-                    lineHeight = 16.sp
+                    fontSize = 12.sp,
+                    lineHeight = 15.5.sp,
+                    style = TextStyle(
+                        lineBreak = LineBreak(
+                            strategy = LineBreak.Strategy.Balanced,
+                            strictness = LineBreak.Strictness.Loose,
+                            wordBreak = LineBreak.WordBreak.Default
+                        )
+                    ),
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
@@ -7432,12 +10392,12 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 CardTrailingType.SWITCH -> {
                     Switch(
                         checked = switchChecked,
-                        onCheckedChange = { onSwitchChanged?.invoke(it) },
+                        onCheckedChange = null,
                         colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.Black,
-                            checkedTrackColor = Color.White,
-                            uncheckedThumbColor = Color.LightGray,
-                            uncheckedTrackColor = Color(0xFF33333C)
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFF525661),
+                            uncheckedThumbColor = Color.White,
+                            uncheckedTrackColor = Color(0xFF383C48)
                         )
                     )
                 }
@@ -7474,6 +10434,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
     fun ProfileSelectorDialog(
         initialProfileForEditing: UserProfile? = null,
         onDismiss: () -> Unit,
+        onOpenMySpace: ((String) -> Unit)? = null,
         onProfileSelected: (String) -> Unit
     ) {
         ProfileSelectorCore(
@@ -7481,6 +10442,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
             isTabMode = false,
             onDismiss = onDismiss,
             onSwitchProfile = {},
+            onOpenMySpace = onOpenMySpace,
             onProfileSelected = onProfileSelected
         )
     }
@@ -7491,9 +10453,11 @@ class AnimeBoxMainActivity : ComponentActivity() {
         isTabMode: Boolean = false,
         onDismiss: () -> Unit,
         onSwitchProfile: () -> Unit = {},
+        onOpenMySpace: ((String) -> Unit)? = null,
         onProfileSelected: (String) -> Unit
     ) {
         val context = LocalContext.current
+        val coroutineScope = rememberCoroutineScope()
         val themeRevision by AnimeBoxThemeHelper.themeRevisionFlow.collectAsState()
         val profileRevision by ProfileManager.profileRevisionFlow.collectAsState()
         val primaryColor = remember(themeRevision) { com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getAppThemeColor(context) }
@@ -7507,20 +10471,41 @@ class AnimeBoxMainActivity : ComponentActivity() {
         var editingProfile by remember(initialProfileForEditing, profileRevision) {
             mutableStateOf<UserProfile?>(
                 if (initialProfileForEditing != null) {
-                    ProfileManager.getProfiles(context).find { it.id == initialProfileForEditing.id } ?: initialProfileForEditing
+                    profilesList.find { it.id == initialProfileForEditing.id } ?: initialProfileForEditing
                 } else null
             )
         }
         var editProfileName by remember(editingProfile) { mutableStateOf(editingProfile?.name ?: "") }
         var editProfileAvatarUrl by remember(editingProfile) { mutableStateOf(editingProfile?.avatarUrl ?: "") }
+        var editProfileDecorationUrl by remember(editingProfile) { mutableStateOf(editingProfile?.decorationUrl ?: "") }
+
+        val availableProfileIcons = remember {
+            com.lagradost.cloudstream3.ui.animebox.profiles.SupabaseProfileIconsManager.getProfileIconsSync(context)
+        }
+        val isLoadingProfileIcons = false
 
         // Settings States
         var autoplayNextEpisode by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAutoplayNextEpisodeEnabled(context)) }
         var autoplayPreviews by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAutoplayPreviewsEnabled(context)) }
         var autoSkipIntro by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isSkipIntroEnabled(context)) }
+        var fastDetailLoading by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isFastDetailLoadingEnabled(context)) }
         var lowPerfMode by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isLowPerformanceMode(context)) }
+
+        val mySpaceLifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+        DisposableEffect(mySpaceLifecycleOwner) {
+            val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                    lowPerfMode = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isLowPerformanceMode(context)
+                }
+            }
+            mySpaceLifecycleOwner.lifecycle.addObserver(observer)
+            onDispose {
+                mySpaceLifecycleOwner.lifecycle.removeObserver(observer)
+            }
+        }
         var maturityRating by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getMaturityRating(context)) }
-        var displayLanguage by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getDisplayLanguage(context)) }
+        val displayLanguage = "English"
+        var defaultEpViewMode by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getDefaultEpisodeViewMode(context)) }
         var currentTheme by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getAppTheme(context)) }
         var currentAudio by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getLastUsedAudio(context)) }
         var currentSubMode by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getLastUsedSubMode(context)) }
@@ -7529,13 +10514,36 @@ class AnimeBoxMainActivity : ComponentActivity() {
         var volumeMode by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getVolumeMode(context)) }
         var timelineTheme by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getPlayerTimelineTheme(context)) }
         var dnsMode by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getDnsMode(context)) }
+        var autoResumePlayback by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAutoResumeEnabled(context)) }
+        var externalPlayerEnabled by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isExternalPlayerEnabled(context)) }
         var blurEpisodeSpoilers by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isBlurEpisodeSpoilersEnabled(context)) }
 
-        // Subtitle Appearance States
-        var subFontSize by remember { mutableFloatStateOf(context.getSharedPreferences("AnimeBoxPrefs", Context.MODE_PRIVATE).getFloat("sub_font_size", 18f)) }
-        var subColor by remember { mutableStateOf(context.getSharedPreferences("AnimeBoxPrefs", Context.MODE_PRIVATE).getString("sub_color", "White") ?: "White") }
-        var subBgOpacity by remember { mutableIntStateOf(context.getSharedPreferences("AnimeBoxPrefs", Context.MODE_PRIVATE).getInt("sub_bg_opacity", 50)) }
-        var subEdgeStyle by remember { mutableStateOf(context.getSharedPreferences("AnimeBoxPrefs", Context.MODE_PRIVATE).getString("sub_edge_style", "Drop Shadow") ?: "Drop Shadow") }
+        // Subtitle Appearance States (Synced with AnimeBoxPlayerPrefs for 100% parity with Video Player)
+        val playerPrefs = remember { context.getSharedPreferences("AnimeBoxPlayerPrefs", Context.MODE_PRIVATE) }
+        var subPreset by remember { mutableStateOf(playerPrefs.getString("subPreset", "Default") ?: "Default") }
+        var subFontSize by remember { mutableFloatStateOf(playerPrefs.getFloat("subFontSize", 24f)) }
+        var subTextColor by remember { mutableIntStateOf(playerPrefs.getInt("subTextColor", android.graphics.Color.WHITE)) }
+        var subBgOpacity by remember { mutableIntStateOf(playerPrefs.getInt("subBgOpacity", 128)) }
+        var subEdgeType by remember { mutableIntStateOf(playerPrefs.getInt("subEdgeType", androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE)) }
+        var subOutlineWidth by remember { mutableFloatStateOf(playerPrefs.getFloat("subOutlineWidth", 12f)) }
+        var subFontFamily by remember { mutableStateOf(playerPrefs.getString("subFontFamily", "Default (Google Sans)") ?: "Default (Google Sans)") }
+        var showFontSelectorDialogInMain by remember { mutableStateOf(false) }
+
+        val fontPickerLauncherInMain = androidx.activity.compose.rememberLauncherForActivityResult(
+            contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+        ) { uri ->
+            if (uri != null) {
+                val res = com.lagradost.cloudstream3.ui.animebox.subtitles.SubtitleFontManager.importFontFromUri(context, uri)
+                if (res.isSuccess) {
+                    subFontFamily = "Custom Imported Font"
+                    playerPrefs.edit().putString("subFontFamily", "Custom Imported Font").apply()
+                    com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setSubFontFamily(context, "Custom Imported Font")
+                    Toast.makeText(context, "Font imported successfully!", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "Import failed: ${res.exceptionOrNull()?.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
 
         // Storage / Downloads States
         var wifiOnlyDownloads by remember { mutableStateOf(context.getSharedPreferences("AnimeBoxPrefs", Context.MODE_PRIVATE).getBoolean("wifi_only_downloads", false)) }
@@ -7543,322 +10551,759 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
         // Subdialog modals
         var showMaturityDialog by remember { mutableStateOf(false) }
-        var showLanguageDialog by remember { mutableStateOf(false) }
+        var showEpisodeViewDialog by remember { mutableStateOf(false) }
         var showAudioSubDialog by remember { mutableStateOf(false) }
         var showSubtitleAppearanceDialog by remember { mutableStateOf(false) }
         var showThemeDialog by remember { mutableStateOf(false) }
+        var showNavbarThemeDialog by remember { mutableStateOf(false) }
         var showPlayerControlsDialog by remember { mutableStateOf(false) }
+        val currentPlayerStyle = remember {
+            com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getPlayerStyle(context)
+        }
+        var showDownloadQualityDialog by remember { mutableStateOf(false) }
+        var currentDownloadQuality by remember {
+            mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getDownloadQuality(context))
+        }
+        var automaticMlKitLanguage by remember {
+            mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getAutomaticMlKitTranslationLanguage(context))
+        }
+        var showAutomaticMlKitDialog by remember { mutableStateOf(false) }
+        var installedMlKitLanguages by remember { mutableStateOf<List<com.lagradost.cloudstream3.ui.animebox.api.AiModelInfo>>(emptyList()) }
+        LaunchedEffect(showAutomaticMlKitDialog) {
+            if (showAutomaticMlKitDialog) {
+                installedMlKitLanguages = withContext(Dispatchers.IO) {
+                    com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.NORMAL_TRANSLATION_LANGUAGES.filter { model ->
+                        val isSupported = com.lagradost.cloudstream3.ui.animebox.api.GoogleMlKitTranslatorManager.mapLanguageCodeToMlKit(model.langCode) != null
+                        if (!isSupported) {
+                            false
+                        } else {
+                            val localFlag = com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.isModelDownloaded(context, model.langCode)
+                            val mlKitFlag = com.lagradost.cloudstream3.ui.animebox.api.GoogleMlKitTranslatorManager.isModelDownloaded(model.langCode)
+                            localFlag || mlKitFlag
+                        }
+                    }
+                }
+            }
+        }
+        var player2TimelineTheme by remember {
+            mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getPlayer2TimelineTheme(context))
+        }
+        var playerStyle by remember {
+            mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getPlayerStyle(context))
+        }
+        var showPlayerStyleDialog by remember { mutableStateOf(false) }
         var showTimelineColorDialog by remember { mutableStateOf(false) }
         var showDnsDialog by remember { mutableStateOf(false) }
+        var showGraphicsEnhancerPresetDialog by remember { mutableStateOf(false) }
+        var showAudioEnhancerPresetDialog by remember { mutableStateOf(false) }
+        var defaultAudioEnhancerPreset by remember {
+            mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getDefaultAudioEnhancerPreset(this@AnimeBoxMainActivity))
+        }
+        var defaultEnhancerPreset by remember {
+            mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getDefaultGraphicsEnhancerPreset(context))
+        }
         var showDownloadsStorageDialog by remember { mutableStateOf(false) }
         var showBackupRestoreDialog by remember { mutableStateOf(false) }
         var showSyncModal by remember { mutableStateOf(false) }
         var targetSyncProvider by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.sync.SyncProvider.ALL) }
+        LaunchedEffect(pendingAniListConnect.value) {
+            if (pendingAniListConnect.value) {
+                targetSyncProvider = com.lagradost.cloudstream3.ui.animebox.sync.SyncProvider.ANILIST
+                showSyncModal = true
+                pendingAniListConnect.value = false
+            }
+        }
         var showDeleteConfirmDialog by remember { mutableStateOf(false) }
         var showTicketsModal by remember { mutableStateOf(false) }
         var showAniListPromptForTickets by remember { mutableStateOf(false) }
         var showServerPriorityDialog by remember { mutableStateOf(false) }
+        var showGroqApiKeyDialog by remember { mutableStateOf(false) }
+        var currentGroqApiKey by remember {
+            mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getGroqApiKey(context))
+        }
+        var showOpenRouterApiKeyDialog by remember { mutableStateOf(false) }
+        var currentOpenRouterApiKey by remember {
+            mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getOpenRouterApiKey(context))
+        }
+        var showRedeemFeatureDialog by remember { mutableStateOf(false) }
+        var isHentaiUnlocked by remember {
+            mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isHentaiFeatureUnlocked(context))
+        }
 
         fun loc(key: String): String {
             return when (displayLanguage.lowercase()) {
                 "japanese", "ja" -> when (key) {
+                    "my_space" -> "マイスペース"
+                    "whos_watching" -> "誰が観ますか？"
+                    "switch_profile" -> "プロファイル切替"
                     "edit_profile" -> "プロフィール編集"
                     "profile_name" -> "プロフィール名"
                     "maturity_rating" -> "年齢制限設定"
+                    "release_schedule" -> "配信スケジュール"
+                    "release_schedule_sub" -> "放送時間と週間配信カレンダーを確認"
                     "display_language" -> "表示言語"
                     "display_language_sub" -> "アプリ全体の表示言語を変更します"
                     "audio_sub_lang" -> "音声と字幕の言語"
                     "audio_sub_sub" -> "デフォルトの音声トラックと字幕設定"
+                    "server_priority" -> "サーバー優先度"
+                    "server_priority_sub" -> "字幕、吹替、ハードサブ、ヒンディー語の優先サーバーを設定"
                     "subtitle_appearance" -> "字幕の表示設定"
                     "subtitle_appearance_sub" -> "フォントサイズ、色、背景、スタイルをカスタマイズ"
                     "theme_accent" -> "テーマアクセントカラー"
                     "player_controls" -> "プレイヤーとジェスチャー設定"
                     "player_controls_sub" -> "シーク時間、明るさ・音量スワイプ操作"
+                    "player_timeline_color" -> "タイムラインの色"
+                    "player_timeline_color_sub" -> "プレイヤーのシークバーの色をカスタマイズ"
                     "network_dns" -> "ネットワークとDNS設定"
                     "downloads_storage" -> "ダウンロードとストレージ"
                     "downloads_storage_sub" -> "Wi-Fiのみダウンロード、ストレージとキャッシュ管理"
+                    "anilist_sync" -> "AniList 同期"
+                    "anilist_sync_connected" -> "接続中 @"
+                    "anilist_sync_sub" -> "AniListアカウントと視聴履歴・ライブラリを同期"
+                    "support_tickets" -> "サポート＆フィードバック"
+                    "support_tickets_sub" -> "チケット作成、不具合報告、ライブチャット"
+                    "support_tickets_anon" -> "AniListでログインしてチケットを作成"
                     "backup_restore" -> "バックアップとデータ管理"
                     "backup_restore_sub" -> "マイリスト、履歴、設定のエクスポート/インポート"
+                    "episode_screenshots" -> "エピソード スクリーンショット"
+                    "episode_screenshots_sub" -> "プレイヤーに撮影ボタンを表示して場面をキャプチャ"
                     "autoplay_next" -> "次のエピソードを自動再生"
                     "autoplay_next_sub" -> "次のエピソードを自動的に読み込んで再生します"
-                    "autoplay_previews" -> "プレビューと予告編の自動再生"
+                    "autoplay_previews" -> "予告編の自動再生"
                     "autoplay_previews_sub" -> "ホーム画面で予告動画を自動再生"
                     "auto_skip_intro" -> "OP/EDの自動スキップ"
                     "auto_skip_intro_sub" -> "オープニングとエンディングを自動的にスキップ"
+                    "blur_spoilers" -> "ネタバレサムネイルのぼかし"
+                    "blur_spoilers_sub" -> "サムネイルをぼかしてネタバレを防止"
                     "low_perf" -> "低パフォーマンスモード"
                     "low_perf_sub" -> "低スペック端末向けにアニメーションを軽減"
-                    "delete_profile" -> "プロフィールを削除"
+                    "firefly_updater" -> "FireFly アップデータ"
+                    "firefly_updater_sub" -> "最新リリースの更新を確認"
+                    "check_update" -> "確認"
                     "save_changes" -> "変更を保存"
+                    "delete_profile" -> "プロフィールを削除"
+                    "delete_confirm_title" -> "プロフィールを削除しますか？"
+                    "delete_confirm_msg" -> "本当にこのプロフィールを削除しますか？この操作は取り消せません。"
+                    "cancel" -> "キャンセル"
+                    "delete" -> "削除"
+                    "close" -> "閉じる"
+                    "done" -> "完了"
+                    "style_presets" -> "プリセットスタイル"
+                    "font_size" -> "フォントサイズ"
+                    "text_color" -> "テキストの色"
+                    "background_opacity" -> "背景の透明度"
+                    "outline_thickness" -> "縁取りの太さ"
+                    "choose_theme" -> "テーマカラーを選択"
+                    "default_audio_sub" -> "デフォルトの音声と字幕"
+                    "preferred_audio" -> "優先音声トラック"
+                    "preferred_sub" -> "優先字幕トラック"
+                    "auto_resume" -> "自動レジューム再生"
+                    "auto_resume_sub" -> "前回の停止位置から自動的に再生を再開します"
                     else -> key
                 }
                 "hindi", "hi" -> when (key) {
+                    "my_space" -> "माई स्पेस"
+                    "whos_watching" -> "कौन देख रहा है?"
+                    "switch_profile" -> "प्रोफ़ाइल बदलें"
                     "edit_profile" -> "प्रोफ़ाइल संपादित करें"
                     "profile_name" -> "प्रोफ़ाइल नाम"
                     "maturity_rating" -> "आयु रेटिंग"
+                    "release_schedule" -> "रिलीज़ शेड्यूल"
+                    "release_schedule_sub" -> "प्रसारण समय और साप्ताहिक कैलेंडर देखें"
                     "display_language" -> "प्रदर्शन भाषा"
                     "display_language_sub" -> "ऐप में प्रदर्शित भाषा बदलें"
                     "audio_sub_lang" -> "ऑडियो और उपशीर्षक भाषाएँ"
                     "audio_sub_sub" -> "पसंदीदा ऑडियो और उपशीर्षक प्राथमिकताएं"
+                    "server_priority" -> "सर्वर प्राथमिकता"
+                    "server_priority_sub" -> "सब, डब, हार्ड सब और हिंदी के लिए प्राथमिक सर्वर चुनें"
                     "subtitle_appearance" -> "उपशीर्षक दिखावट"
                     "subtitle_appearance_sub" -> "फ़ॉन्ट आकार, रंग, पृष्ठभूमि और शैली अनुकूलित करें"
                     "theme_accent" -> "थीम एक्सेंट रंग"
                     "player_controls" -> "प्लेयर और जेस्चर नियंत्रण"
                     "player_controls_sub" -> "सीक अवधि, चमक और वॉल्यूम जेस्चर"
+                    "player_timeline_color" -> "प्लेयर टाइमलाइन रंग"
+                    "player_timeline_color_sub" -> "वीडियो प्लेयर में सीकबार का रंग बदलें"
                     "network_dns" -> "नेटवर्क और डीएनएस रूटिंग"
                     "downloads_storage" -> "डाउनलोड और स्टोरेज"
                     "downloads_storage_sub" -> "वाई-फ़ाई डाउनलोड, कैश साफ़ करें"
+                    "anilist_sync" -> "AniList सिंक"
+                    "anilist_sync_connected" -> "कनेक्टेड @"
+                    "anilist_sync_sub" -> "लाइब्रेरी और प्रगति सिंक के लिए AniList कनेक्ट करें"
+                    "support_tickets" -> "सहायता और फीडबैक टिकट"
+                    "support_tickets_sub" -> "टिकट बनाएं, बग रिपोर्ट करें और चैट करें"
+                    "support_tickets_anon" -> "टिकट बनाने के लिए AniList से लॉगिन करें"
                     "backup_restore" -> "बैकअप और डेटा प्रबंधन"
                     "backup_restore_sub" -> "वॉचलिस्ट, इतिहास और सेटिंग्स JSON बैकअप"
+                    "episode_screenshots" -> "एपिसोड स्क्रीनशॉट"
+                    "episode_screenshots_sub" -> "वीडियो प्लेयर में स्नैपशॉट कैमरा बटन दिखाएं"
                     "autoplay_next" -> "अगला एपिसोड ऑटोप्ले करें"
                     "autoplay_next_sub" -> "स्वचालित रूप से अगला एपिसोड चलाएं"
                     "autoplay_previews" -> "ट्रेलर ऑटोप्ले करें"
                     "autoplay_previews_sub" -> "होम कार्ड पर वीडियो पूर्वावलोकन चलाएं"
                     "auto_skip_intro" -> "इंट्रो / आउट्रो ऑटो-स्किप करें"
                     "auto_skip_intro_sub" -> "ओपनिंग और एंडिंग अपने आप छोड़ें"
+                    "blur_spoilers" -> "स्पॉइलर धुंधला करें"
+                    "blur_spoilers_sub" -> "स्पॉइलर से बचने के लिए थंबनेल धुंधले करें"
                     "low_perf" -> "लो परफॉर्मेंस मोड"
                     "low_perf_sub" -> "धीमे फोन के लिए भारी एनिमेशन बंद करें"
-                    "delete_profile" -> "प्रोफ़ाइल हटाएं"
+                    "firefly_updater" -> "FireFly अपडेटर"
+                    "firefly_updater_sub" -> "नवीनतम अपडेट के लिए जांचें"
+                    "check_update" -> "जांचें"
                     "save_changes" -> "बदलाव सहेजें"
+                    "delete_profile" -> "प्रोफ़ाइल हटाएं"
+                    "delete_confirm_title" -> "प्रोफ़ाइल हटाएं?"
+                    "delete_confirm_msg" -> "क्या आप वाकई इस प्रोफ़ाइल को हटाना चाहते हैं? यह वापस नहीं लाया जा सकता।"
+                    "cancel" -> "रद्द करें"
+                    "delete" -> "हटाएं"
+                    "close" -> "बंद करें"
+                    "done" -> "संपन्न"
+                    "style_presets" -> "स्टाइल प्रीसेट"
+                    "font_size" -> "फ़ॉन्ट का आकार"
+                    "text_color" -> "टेक्स्ट का रंग"
+                    "background_opacity" -> "पृष्ठभूमि अपारदर्शिता"
+                    "outline_thickness" -> "आउटलाइन मोटाई"
+                    "choose_theme" -> "थीम का रंग चुनें"
+                    "default_audio_sub" -> "डिफ़ॉल्ट ऑडियो और उपशीर्षक"
+                    "preferred_audio" -> "पसंदीदा ऑडियो"
+                    "preferred_sub" -> "पसंदीदा उपशीर्षक"
                     else -> key
                 }
                 "spanish", "es" -> when (key) {
+                    "my_space" -> "Mi Espacio"
+                    "whos_watching" -> "¿Quién está viendo?"
+                    "switch_profile" -> "Cambiar perfil"
                     "edit_profile" -> "Editar perfil"
                     "profile_name" -> "Nombre del perfil"
                     "maturity_rating" -> "Clasificación por edad"
+                    "release_schedule" -> "Calendario de estrenos"
+                    "release_schedule_sub" -> "Horarios de emisión y calendario semanal"
                     "display_language" -> "Idioma de visualización"
                     "display_language_sub" -> "Cambiar el idioma del texto en la app"
                     "audio_sub_lang" -> "Idiomas de audio y subtítulos"
                     "audio_sub_sub" -> "Audio y subtítulos predeterminados"
+                    "server_priority" -> "Prioridad del servidor"
+                    "server_priority_sub" -> "Configurar servidor principal para Sub, Dub y Hard Sub"
                     "subtitle_appearance" -> "Apariencia de subtítulos"
                     "subtitle_appearance_sub" -> "Personalizar tamaño, color, fondo y estilo"
                     "theme_accent" -> "Color de acento del tema"
                     "player_controls" -> "Controles del reproductor"
                     "player_controls_sub" -> "Duración de búsqueda, gestos de brillo y volumen"
+                    "player_timeline_color" -> "Color de la línea de tiempo"
+                    "player_timeline_color_sub" -> "Personalizar la barra de progreso del reproductor"
                     "network_dns" -> "Red y enrutamiento DNS"
                     "downloads_storage" -> "Descargas y almacenamiento"
                     "downloads_storage_sub" -> "Descargas por Wi-Fi, borrar caché"
+                    "anilist_sync" -> "Sincronización AniList"
+                    "anilist_sync_connected" -> "Conectado como @"
+                    "anilist_sync_sub" -> "Conectar AniList para sincronizar biblioteca y progreso"
+                    "support_tickets" -> "Soporte y sugerencias"
+                    "support_tickets_sub" -> "Crear tickets, reportar errores y chat en vivo"
+                    "support_tickets_anon" -> "Inicia sesión con AniList para crear tickets de soporte"
                     "backup_restore" -> "Copia de seguridad y datos"
                     "backup_restore_sub" -> "Exportar e importar lista, historial y ajustes"
+                    "episode_screenshots" -> "Capturas de pantalla"
+                    "episode_screenshots_sub" -> "Mostrar botón de captura en los controles del reproductor"
                     "autoplay_next" -> "Reproducir siguiente episodio"
                     "autoplay_next_sub" -> "Cargar y reproducir automáticamente"
                     "autoplay_previews" -> "Avances automáticos"
                     "autoplay_previews_sub" -> "Reproducir avances de video en inicio"
                     "auto_skip_intro" -> "Saltar intro / outro automáticamente"
                     "auto_skip_intro_sub" -> "Omitir aperturas y cierres"
+                    "blur_spoilers" -> "Desenfocar spoilers"
+                    "blur_spoilers_sub" -> "Desenfoca miniaturas para evitar spoilers"
                     "low_perf" -> "Modo de bajo rendimiento"
                     "low_perf_sub" -> "Desactivar animaciones pesadas"
-                    "delete_profile" -> "Eliminar perfil"
+                    "firefly_updater" -> "Actualizador FireFly"
+                    "firefly_updater_sub" -> "Buscar actualizaciones en GitHub"
+                    "check_update" -> "BUSCAR"
                     "save_changes" -> "Guardar cambios"
+                    "delete_profile" -> "Eliminar perfil"
+                    "delete_confirm_title" -> "¿Eliminar perfil?"
+                    "delete_confirm_msg" -> "¿Estás seguro de eliminar este perfil? Esta acción no se puede deshacer."
+                    "cancel" -> "Cancelar"
+                    "delete" -> "Eliminar"
+                    "close" -> "Cerrar"
+                    "done" -> "Listo"
+                    "style_presets" -> "Estilos predefinidos"
+                    "font_size" -> "Tamaño de fuente"
+                    "text_color" -> "Color de texto"
+                    "background_opacity" -> "Opacidad de fondo"
+                    "outline_thickness" -> "Grosor del contorno"
+                    "choose_theme" -> "Elegir color de tema"
+                    "default_audio_sub" -> "Audio y subtítulos por defecto"
+                    "preferred_audio" -> "Pista de audio preferida"
+                    "preferred_sub" -> "Pista de subtítulos preferida"
                     else -> key
                 }
                 "french", "fr" -> when (key) {
+                    "my_space" -> "Mon Espace"
+                    "whos_watching" -> "Qui regarde ?"
+                    "switch_profile" -> "Changer de profil"
                     "edit_profile" -> "Modifier le profil"
                     "profile_name" -> "Nom du profil"
                     "maturity_rating" -> "Classification d'âge"
+                    "release_schedule" -> "Calendrier des sorties"
+                    "release_schedule_sub" -> "Horaires de diffusion et calendrier hebdomadaire"
                     "display_language" -> "Langue d'affichage"
                     "display_language_sub" -> "Changer la langue du texte dans l'application"
                     "audio_sub_lang" -> "Langues audio et sous-titres"
                     "audio_sub_sub" -> "Piste audio et sous-titres préférés"
+                    "server_priority" -> "Priorité des serveurs"
+                    "server_priority_sub" -> "Configurer le serveur principal pour VOSTFR, VF et Hard Sub"
                     "subtitle_appearance" -> "Apparence des sous-titres"
                     "subtitle_appearance_sub" -> "Personnaliser la taille, la couleur, le fond"
                     "theme_accent" -> "Couleur d'accentuation"
                     "player_controls" -> "Commandes du lecteur"
                     "player_controls_sub" -> "Durée du saut, gestes de luminosité et volume"
+                    "player_timeline_color" -> "Couleur de la barre de lecture"
+                    "player_timeline_color_sub" -> "Personnaliser la couleur de la barre de progression"
                     "network_dns" -> "Réseau et routage DNS"
                     "downloads_storage" -> "Téléchargements et stockage"
                     "downloads_storage_sub" -> "Téléchargement Wi-Fi, vider le cache"
+                    "anilist_sync" -> "Synchronisation AniList"
+                    "anilist_sync_connected" -> "Connecté en tant que @"
+                    "anilist_sync_sub" -> "Connecter AniList pour synchroniser votre bibliothèque"
+                    "support_tickets" -> "Support & Commentaires"
+                    "support_tickets_sub" -> "Créer des tickets, signaler des bugs et chat en direct"
+                    "support_tickets_anon" -> "Connectez-vous avec AniList pour créer un ticket"
                     "backup_restore" -> "Sauvegarde et données"
                     "backup_restore_sub" -> "Exporter et importer la liste et l'historique"
+                    "episode_screenshots" -> "Captures d'écran d'épisode"
+                    "episode_screenshots_sub" -> "Afficher le bouton photo dans les commandes du lecteur"
                     "autoplay_next" -> "Lecture auto épisode suivant"
                     "autoplay_next_sub" -> "Charger et lire automatiquement le suivant"
                     "autoplay_previews" -> "Aperçus automatiques"
                     "autoplay_previews_sub" -> "Lire les bandes-annonces sur l'accueil"
                     "auto_skip_intro" -> "Passer l'intro / outro auto"
                     "auto_skip_intro_sub" -> "Ignorer automatiquement génériques"
+                    "blur_spoilers" -> "Flouter les spoilers"
+                    "blur_spoilers_sub" -> "Flouter les miniatures d'épisodes pour éviter les spoilers"
                     "low_perf" -> "Mode basse performance"
                     "low_perf_sub" -> "Désactiver les animations lourdes"
-                    "delete_profile" -> "Supprimer le profil"
+                    "firefly_updater" -> "Mise à jour FireFly"
+                    "firefly_updater_sub" -> "Vérifier les dernières versions sur GitHub"
+                    "check_update" -> "VÉRIFIER"
                     "save_changes" -> "Enregistrer les modifications"
+                    "delete_profile" -> "Supprimer le profil"
+                    "delete_confirm_title" -> "Supprimer le profil ?"
+                    "delete_confirm_msg" -> "Voulez-vous vraiment supprimer ce profil ? Cette action est irréversible."
+                    "cancel" -> "Annuler"
+                    "delete" -> "Supprimer"
+                    "close" -> "Fermer"
+                    "done" -> "Terminé"
+                    "style_presets" -> "Préréglages de style"
+                    "font_size" -> "Taille de police"
+                    "text_color" -> "Couleur du texte"
+                    "background_opacity" -> "Opacité de l'arrière-plan"
+                    "outline_thickness" -> "Épaisseur du contour"
+                    "choose_theme" -> "Choisir la couleur du thème"
+                    "default_audio_sub" -> "Audio et sous-titres par défaut"
+                    "preferred_audio" -> "Piste audio préférée"
+                    "preferred_sub" -> "Piste de sous-titres préférée"
                     else -> key
                 }
                 "german", "de" -> when (key) {
+                    "my_space" -> "Mein Bereich"
+                    "whos_watching" -> "Wer schaut zu?"
+                    "switch_profile" -> "Profil wechseln"
                     "edit_profile" -> "Profil bearbeiten"
                     "profile_name" -> "Profilname"
                     "maturity_rating" -> "Altersfreigabe"
+                    "release_schedule" -> "Veröffentlichungsplan"
+                    "release_schedule_sub" -> "Sendezeiten und wöchentlichen Kalender erkunden"
                     "display_language" -> "Anzeigesprache"
                     "display_language_sub" -> "Ändern Sie die Textsprache in der App"
                     "audio_sub_lang" -> "Audio- und Untertitelsprachen"
                     "audio_sub_sub" -> "Bevorzugte Audio- und Untertitelspuren"
+                    "server_priority" -> "Server-Priorität"
+                    "server_priority_sub" -> "Bevorzugten Server für Sub, Dub und Hard Sub konfigurieren"
                     "subtitle_appearance" -> "Untertitel-Erscheinungsbild"
                     "subtitle_appearance_sub" -> "Schriftgröße, Farbe, Hintergrund anpassen"
                     "theme_accent" -> "Design-Akzentfarbe"
                     "player_controls" -> "Player- und Gestensteuerung"
                     "player_controls_sub" -> "Suchdauer, Wischgesten für Helligkeit und Lautstärke"
+                    "player_timeline_color" -> "Player-Timeline-Farbe"
+                    "player_timeline_color_sub" -> "Farbe der Fortschrittsleiste im Videoplayer anpassen"
                     "network_dns" -> "Netzwerk- und DNS-Routing"
                     "downloads_storage" -> "Downloads und Speicher"
                     "downloads_storage_sub" -> "Nur WLAN-Downloads, Cache leeren"
+                    "anilist_sync" -> "AniList-Synchronisation"
+                    "anilist_sync_connected" -> "Verbunden als @"
+                    "anilist_sync_sub" -> "AniList verbinden für Bibliotheks- und Fortschrittssynchronisation"
+                    "support_tickets" -> "Support & Feedback"
+                    "support_tickets_sub" -> "Tickets erstellen, Fehler melden und Live-Chat"
+                    "support_tickets_anon" -> "Mit AniList anmelden, um Support-Tickets zu erstellen"
                     "backup_restore" -> "Sicherung und Daten"
                     "backup_restore_sub" -> "Watchlist, Verlauf und Einstellungen exportieren"
+                    "episode_screenshots" -> "Episoden-Screenshots"
+                    "episode_screenshots_sub" -> "Kamera-Taste im Player anzeigen, um Frames aufzunehmen"
                     "autoplay_next" -> "Nächste Folge automatisch"
                     "autoplay_next_sub" -> "Nächste Folge automatisch abspielen"
                     "autoplay_previews" -> "Vorschau automatisch abspielen"
                     "autoplay_previews_sub" -> "Videovorschauen auf der Startseite"
                     "auto_skip_intro" -> "Intro / Outro automatisch überspringen"
                     "auto_skip_intro_sub" -> "Openings und Endings überspringen"
+                    "blur_spoilers" -> "Episoden-Spoiler verbergen"
+                    "blur_spoilers_sub" -> "Episodenvorschauen weichzeichnen, um Spoiler zu verhindern"
                     "low_perf" -> "Energiesparmodus"
                     "low_perf_sub" -> "Schwere Animationen deaktivieren"
-                    "delete_profile" -> "Profil löschen"
+                    "firefly_updater" -> "FireFly Updater"
+                    "firefly_updater_sub" -> "Auf GitHub nach neuesten Updates suchen"
+                    "check_update" -> "PRÜFEN"
                     "save_changes" -> "Änderungen speichern"
+                    "delete_profile" -> "Profil löschen"
+                    "delete_confirm_title" -> "Profil löschen?"
+                    "delete_confirm_msg" -> "Sind Sie sicher, dass Sie dieses Profil löschen möchten? Dies kann nicht rückgängig gemacht werden."
+                    "cancel" -> "Abbrechen"
+                    "delete" -> "Löschen"
+                    "close" -> "Schließen"
+                    "done" -> "Fertig"
+                    "style_presets" -> "Stil-Voreinstellungen"
+                    "font_size" -> "Schriftgröße"
+                    "text_color" -> "Textfarbe"
+                    "background_opacity" -> "Hintergrundtransparenz"
+                    "outline_thickness" -> "Konturstärke"
+                    "choose_theme" -> "Designfarbe wählen"
+                    "default_audio_sub" -> "Standard-Audio & Untertitel"
+                    "preferred_audio" -> "Bevorzugte Audiospur"
+                    "preferred_sub" -> "Bevorzugte Untertitelspur"
                     else -> key
                 }
                 "portuguese", "pt" -> when (key) {
+                    "my_space" -> "Meu Espaço"
+                    "whos_watching" -> "Quem está assistindo?"
+                    "switch_profile" -> "Trocar de perfil"
                     "edit_profile" -> "Editar perfil"
                     "profile_name" -> "Nome do perfil"
                     "maturity_rating" -> "Classificação etária"
+                    "release_schedule" -> "Calendário de lançamentos"
+                    "release_schedule_sub" -> "Horários de transmissão e calendário semanal"
                     "display_language" -> "Idioma de exibição"
                     "display_language_sub" -> "Alterar o idioma do texto no aplicativo"
                     "audio_sub_lang" -> "Idiomas de áudio e legendas"
                     "audio_sub_sub" -> "Áudio e legendas padrão"
+                    "server_priority" -> "Prioridade do servidor"
+                    "server_priority_sub" -> "Configurar servidor principal para Sub, Dub e Hard Sub"
                     "subtitle_appearance" -> "Aparência da legenda"
                     "subtitle_appearance_sub" -> "Personalizar tamanho, cor, fundo e estilo"
                     "theme_accent" -> "Cor de destaque do tema"
                     "player_controls" -> "Controles do reprodutor"
                     "player_controls_sub" -> "Tempo de busca, gestos de brilho e volume"
+                    "player_timeline_color" -> "Cor da linha do tempo"
+                    "player_timeline_color_sub" -> "Personalizar a barra de progresso no reprodutor"
                     "network_dns" -> "Rede e roteamento DNS"
                     "downloads_storage" -> "Downloads e armazenamento"
                     "downloads_storage_sub" -> "Downloads apenas Wi-Fi, limpar cache"
+                    "anilist_sync" -> "Sincronização AniList"
+                    "anilist_sync_connected" -> "Conectado como @"
+                    "anilist_sync_sub" -> "Conectar AniList para sincronizar progresso e biblioteca"
+                    "support_tickets" -> "Suporte e Feedback"
+                    "support_tickets_sub" -> "Criar tickets, relatar erros e chat ao vivo"
+                    "support_tickets_anon" -> "Faça login com AniList para criar tickets de suporte"
                     "backup_restore" -> "Backup e gerenciamento de dados"
                     "backup_restore_sub" -> "Exportar e importar dados em JSON"
+                    "episode_screenshots" -> "Capturas de tela"
+                    "episode_screenshots_sub" -> "Mostrar botão de câmera no reprodutor para capturar cenas"
                     "autoplay_next" -> "Próximo episódio automático"
                     "autoplay_next_sub" -> "Carregar e reproduzir automaticamente"
                     "autoplay_previews" -> "Reprodução automática de prévias"
                     "autoplay_previews_sub" -> "Vídeos de prévia na página inicial"
                     "auto_skip_intro" -> "Pular abertura / encerramento auto"
                     "auto_skip_intro_sub" -> "Pular introduções automaticamente"
+                    "blur_spoilers" -> "Desfocar spoilers"
+                    "blur_spoilers_sub" -> "Desfoca miniaturas para evitar spoilers"
                     "low_perf" -> "Modo de baixo desempenho"
                     "low_perf_sub" -> "Desativar animações pesadas"
-                    "delete_profile" -> "Excluir perfil"
+                    "firefly_updater" -> "Atualizador FireFly"
+                    "firefly_updater_sub" -> "Verificar atualizações no GitHub"
+                    "check_update" -> "VERIFICAR"
                     "save_changes" -> "Salvar alterações"
+                    "delete_profile" -> "Excluir perfil"
+                    "delete_confirm_title" -> "Excluir perfil?"
+                    "delete_confirm_msg" -> "Tem certeza de que deseja excluir este perfil? Esta ação não pode ser desfeita."
+                    "cancel" -> "Cancelar"
+                    "delete" -> "Excluir"
+                    "close" -> "Fechar"
+                    "done" -> "Concluído"
+                    "style_presets" -> "Estilos predefinidos"
+                    "font_size" -> "Tamanho da fonte"
+                    "text_color" -> "Cor do texto"
+                    "background_opacity" -> "Opacidade do fundo"
+                    "outline_thickness" -> "Espessura do contorno"
+                    "choose_theme" -> "Escolher cor do tema"
+                    "default_audio_sub" -> "Áudio e legendas padrão"
+                    "preferred_audio" -> "Faixa de áudio preferida"
+                    "preferred_sub" -> "Faixa de legenda preferida"
                     else -> key
                 }
                 "indonesian", "id" -> when (key) {
+                    "my_space" -> "Ruang Saya"
+                    "whos_watching" -> "Siapa yang menonton?"
+                    "switch_profile" -> "Ganti Profil"
                     "edit_profile" -> "Edit Profil"
                     "profile_name" -> "Nama Profil"
                     "maturity_rating" -> "Rating Usia"
+                    "release_schedule" -> "Jadwal Rilis Anime"
+                    "release_schedule_sub" -> "Jadwal siaran dan kalender rilis mingguan"
                     "display_language" -> "Bahasa Tampilan"
                     "display_language_sub" -> "Ubah bahasa teks di seluruh aplikasi"
                     "audio_sub_lang" -> "Bahasa Audio & Subtitel"
                     "audio_sub_sub" -> "Preferensi trek audio dan subtitel"
+                    "server_priority" -> "Prioritas Server"
+                    "server_priority_sub" -> "Konfigurasi server utama untuk Sub, Dub, dan Hard Sub"
                     "subtitle_appearance" -> "Tampilan Subtitel"
                     "subtitle_appearance_sub" -> "Sesuaikan ukuran font, warna, latar belakang"
                     "theme_accent" -> "Warna Aksen Tema"
                     "player_controls" -> "Kontrol Pemutar & Gestur"
                     "player_controls_sub" -> "Durasi seek, kontrol gestur kecerahan & volume"
+                    "player_timeline_color" -> "Warna Timeline Pemutar"
+                    "player_timeline_color_sub" -> "Sesuaikan warna progress bar pada pemutar video"
                     "network_dns" -> "Jaringan & Perutean DNS"
                     "downloads_storage" -> "Unduhan & Penyimpanan"
                     "downloads_storage_sub" -> "Unduh hanya Wi-Fi, hapus cache"
+                    "anilist_sync" -> "Sinkronisasi AniList"
+                    "anilist_sync_connected" -> "Terhubung sebagai @"
+                    "anilist_sync_sub" -> "Hubungkan akun AniList untuk sinkronisasi daftar dan progres"
+                    "support_tickets" -> "Dukungan & Umpan Balik"
+                    "support_tickets_sub" -> "Buat tiket, laporkan bug, dan obrolan langsung"
+                    "support_tickets_anon" -> "Masuk dengan AniList untuk membuat tiket dukungan"
                     "backup_restore" -> "Cadangan & Data"
                     "backup_restore_sub" -> "Ekspor/impor daftar tonton dan riwayat"
+                    "episode_screenshots" -> "Tangkapan Layar Episode"
+                    "episode_screenshots_sub" -> "Tampilkan tombol kamera di pemutar untuk mengambil tangkapan layar"
                     "autoplay_next" -> "Putar Otomatis Episode Berikutnya"
                     "autoplay_next_sub" -> "Muat dan putar episode berikutnya otomatis"
                     "autoplay_previews" -> "Putar Otomatis Pratinjau"
                     "autoplay_previews_sub" -> "Putar video pratinjau di beranda"
                     "auto_skip_intro" -> "Lewati Intro / Outro Otomatis"
                     "auto_skip_intro_sub" -> "Lewati lagu pembuka dan penutup otomatis"
+                    "blur_spoilers" -> "Buramkan Spoiler Episode"
+                    "blur_spoilers_sub" -> "Buramkan gambar thumbnail episode untuk menghindari spoiler"
                     "low_perf" -> "Mode Performa Rendah"
                     "low_perf_sub" -> "Nonaktifkan animasi berat untuk HP hemat daya"
-                    "delete_profile" -> "Hapus Profil"
+                    "firefly_updater" -> "Pembaruan FireFly"
+                    "firefly_updater_sub" -> "Periksa pembaruan rilis terbaru di GitHub"
+                    "check_update" -> "PERIKSA"
                     "save_changes" -> "Simpan Perubahan"
+                    "delete_profile" -> "Hapus Profil"
+                    "delete_confirm_title" -> "Hapus Profil?"
+                    "delete_confirm_msg" -> "Apakah Anda yakin ingin menghapus profil ini? Tindakan ini tidak dapat dibatalkan."
+                    "cancel" -> "Batal"
+                    "delete" -> "Hapus"
+                    "close" -> "Tutup"
+                    "done" -> "Selesai"
+                    "style_presets" -> "Preset Gaya"
+                    "font_size" -> "Ukuran Font"
+                    "text_color" -> "Warna Teks"
+                    "background_opacity" -> "Opasitas Latar Belakang"
+                    "outline_thickness" -> "Ketebalan Garis Tepi"
+                    "choose_theme" -> "Pilih Warna Tema"
+                    "default_audio_sub" -> "Audio & Subtitel Default"
+                    "preferred_audio" -> "Trek Audio Pilihan"
+                    "preferred_sub" -> "Trek Subtitel Pilihan"
                     else -> key
                 }
                 "arabic", "ar" -> when (key) {
+                    "my_space" -> "مساحتي"
+                    "whos_watching" -> "من يشاهد؟"
+                    "switch_profile" -> "تبديل الملف الشخصي"
                     "edit_profile" -> "تعديل الملف الشخصي"
                     "profile_name" -> "اسم الملف الشخصي"
                     "maturity_rating" -> "تصنيف النضج"
+                    "release_schedule" -> "جدول المواعيد"
+                    "release_schedule_sub" -> "أوقات البث وجدول العرض الأسبوعي"
                     "display_language" -> "لغة العرض"
                     "display_language_sub" -> "تغيير لغة النصوص في التطبيق"
                     "audio_sub_lang" -> "لغات الصوت والترجمة"
                     "audio_sub_sub" -> "المسار الصوتي والترجمات المفضلة"
+                    "server_priority" -> "أولوية الخوادم"
+                    "server_priority_sub" -> "تعيين الخادم الأساسي المفضل للترجمة والدبلجة"
                     "subtitle_appearance" -> "مظهر الترجمة"
                     "subtitle_appearance_sub" -> "تخصيص حجم الخط واللون والخلفية"
                     "theme_accent" -> "لون السمة المميز"
                     "player_controls" -> "عناصر تحكم المشغل"
                     "player_controls_sub" -> "مدة التخطي وإيماءات السطوع والصوت"
+                    "player_timeline_color" -> "لون شريط التقدم"
+                    "player_timeline_color_sub" -> "تخصيص لون شريط التقدم داخل المشغل"
                     "network_dns" -> "الشبكة وتوجيه DNS"
                     "downloads_storage" -> "التنزيلات وسعة التخزين"
                     "downloads_storage_sub" -> "تنزيل عبر Wi-Fi فقط ومسح الذاكرة المؤقتة"
+                    "anilist_sync" -> "مزامنة AniList"
+                    "anilist_sync_connected" -> "متصل باسم @"
+                    "anilist_sync_sub" -> "ربط حساب AniList لمزامنة المكتبة والتقدم"
+                    "support_tickets" -> "الدعم والملاحظات"
+                    "support_tickets_sub" -> "إنشاء تذاكر، الإبلاغ عن أخطاء والدردشة المباشرة"
+                    "support_tickets_anon" -> "سجل الدخول بواسطة AniList لإنشاء تذاكر"
                     "backup_restore" -> "النسخ الاحتياطي والبيانات"
                     "backup_restore_sub" -> "تصدير واستيراد قائمة المشاهدة والإعدادات"
+                    "episode_screenshots" -> "لقطات الشاشة"
+                    "episode_screenshots_sub" -> "إظهار زر الكاميرا في المشغل لالتقاط لقطات الشاشة"
                     "autoplay_next" -> "التشغيل التلقائي للحلقة التالية"
                     "autoplay_next_sub" -> "تشغيل الحلقة التالية تلقائيًا"
                     "autoplay_previews" -> "التشغيل التلقائي للمقاطع الدعائية"
                     "autoplay_previews_sub" -> "تشغيل مقاطع الفيديو في الصفحة الرئيسية"
                     "auto_skip_intro" -> "تخطي المقدمة / الخاتمة تلقائيًا"
                     "auto_skip_intro_sub" -> "تخطي شارات البداية والنهاية"
+                    "blur_spoilers" -> "طمس حرق الحلقات"
+                    "blur_spoilers_sub" -> "طمس الصور المصغرة لتجنب الحرق"
                     "low_perf" -> "وضع الأداء المنخفض"
                     "low_perf_sub" -> "تعطيل التأثيرات البصرية للأجهزة الضعيفة"
-                    "delete_profile" -> "حذف الملف الشخصي"
+                    "firefly_updater" -> "محدث FireFly"
+                    "firefly_updater_sub" -> "التحقق من التحديثات على GitHub"
+                    "check_update" -> "تحقق"
                     "save_changes" -> "حفظ التغييرات"
+                    "delete_profile" -> "حذف الملف الشخصي"
+                    "delete_confirm_title" -> "حذف الملف الشخصي؟"
+                    "delete_confirm_msg" -> "هل أنت متأكد من حذف هذا الملف الشخصي؟ لا يمكن التراجع عن هذا الإجراء."
+                    "cancel" -> "إلغاء"
+                    "delete" -> "حذف"
+                    "close" -> "إغلاق"
+                    "done" -> "تم"
+                    "style_presets" -> "أنماط مسبقة الضبط"
+                    "font_size" -> "حجم الخط"
+                    "text_color" -> "لون النص"
+                    "background_opacity" -> "عتامة الخلفية"
+                    "outline_thickness" -> "سماكة الحدود"
+                    "choose_theme" -> "اختر لون السمة"
+                    "default_audio_sub" -> "الصوت والترجمة الافتراضية"
+                    "preferred_audio" -> "المسار الصوتي المفضل"
+                    "preferred_sub" -> "مسار الترجمة المفضل"
                     else -> key
                 }
                 "russian", "ru" -> when (key) {
+                    "my_space" -> "Моё Пространство"
+                    "whos_watching" -> "Кто смотрит?"
+                    "switch_profile" -> "Сменить профиль"
                     "edit_profile" -> "Редактировать профиль"
                     "profile_name" -> "Имя профиля"
                     "maturity_rating" -> "Возрастной рейтинг"
+                    "release_schedule" -> "Расписание релизов"
+                    "release_schedule_sub" -> "Время показа и еженедельный календарь выхода серий"
                     "display_language" -> "Язык интерфейса"
                     "display_language_sub" -> "Изменить язык текста во всем приложении"
                     "audio_sub_lang" -> "Языки аудио и субтитров"
                     "audio_sub_sub" -> "Предпочитаемая озвучка и субтитры"
+                    "server_priority" -> "Приоритет серверов"
+                    "server_priority_sub" -> "Настройка приоритетного сервера для озвучки и субтитров"
                     "subtitle_appearance" -> "Внешний вид субтитров"
                     "subtitle_appearance_sub" -> "Настройка размера, цвета, фона и стиля"
                     "theme_accent" -> "Акцентный цвет темы"
                     "player_controls" -> "Управление плеером"
                     "player_controls_sub" -> "Длительность перемотки и жесты"
+                    "player_timeline_color" -> "Цвет шкалы плеера"
+                    "player_timeline_color_sub" -> "Настройка цвета полосы прогресса в видеоплеере"
                     "network_dns" -> "Сеть и DNS-маршрутизация"
                     "downloads_storage" -> "Загрузки и память"
                     "downloads_storage_sub" -> "Загрузка только по Wi-Fi, очистка кэша"
+                    "anilist_sync" -> "Синхронизация с AniList"
+                    "anilist_sync_connected" -> "Подключено как @"
+                    "anilist_sync_sub" -> "Подключить AniList для синхронизации библиотеки и прогресса"
+                    "support_tickets" -> "Поддержка и отзывы"
+                    "support_tickets_sub" -> "Создать тикет, сообщить об ошибке и онлайн-чат"
+                    "support_tickets_anon" -> "Войдите через AniList для создания тикетов поддержки"
                     "backup_restore" -> "Резервное копирование"
                     "backup_restore_sub" -> "Экспорт и импорт закладок и истории"
+                    "episode_screenshots" -> "Скриншоты эпизодов"
+                    "episode_screenshots_sub" -> "Кнопка скриншота в элементах управления плеером"
                     "autoplay_next" -> "Автовоспроизведение серии"
                     "autoplay_next_sub" -> "Автоматически воспроизводить следующую серию"
                     "autoplay_previews" -> "Автовоспроизведение трейлеров"
                     "autoplay_previews_sub" -> "Воспроизводить видео на главном экране"
                     "auto_skip_intro" -> "Автопропуск опенинга / эндинга"
                     "auto_skip_intro_sub" -> "Автоматически пропускать заставки"
+                    "blur_spoilers" -> "Размывать спойлеры"
+                    "blur_spoilers_sub" -> "Размытие миниатюр серий во избежание спойлеров"
                     "low_perf" -> "Режим экономии ресурсов"
                     "low_perf_sub" -> "Отключение тяжелых эффектов и анимаций"
-                    "delete_profile" -> "Удалить профиль"
+                    "firefly_updater" -> "Обновление FireFly"
+                    "firefly_updater_sub" -> "Проверить последние релизы на GitHub"
+                    "check_update" -> "ПРОВЕРИТЬ"
                     "save_changes" -> "Сохранить изменения"
+                    "delete_profile" -> "Удалить профиль"
+                    "delete_confirm_title" -> "Удалить профиль?"
+                    "delete_confirm_msg" -> "Вы уверены, что хотите удалить этот профиль? Это действие нельзя отменить."
+                    "cancel" -> "Отмена"
+                    "delete" -> "Удалить"
+                    "close" -> "Закрыть"
+                    "done" -> "Готово"
+                    "style_presets" -> "Стили субтитров"
+                    "font_size" -> "Размер шрифта"
+                    "text_color" -> "Цвет текста"
+                    "background_opacity" -> "Прозрачность фона"
+                    "outline_thickness" -> "Толщина контура"
+                    "choose_theme" -> "Выбрать цвет темы"
+                    "default_audio_sub" -> "Аудио и субтитры по умолчанию"
+                    "preferred_audio" -> "Предпочитаемая дорожка"
+                    "preferred_sub" -> "Предпочитаемые субтитры"
                     else -> key
                 }
                 else -> when (key) {
+                    "my_space" -> "My Space"
+                    "whos_watching" -> "Who's watching?"
+                    "switch_profile" -> "Switch Profile"
                     "edit_profile" -> "Edit Profile"
                     "profile_name" -> "Profile Name"
                     "maturity_rating" -> "Maturity Rating"
+                    "release_schedule" -> "Anime Release Schedule"
+                    "release_schedule_sub" -> "Explore broadcast times & weekly airing calendar."
                     "display_language" -> "Display Language"
-                    "display_language_sub" -> "Change the language of the text across the app ($displayLanguage)"
+                    "display_language_sub" -> "Change the language of text across the app"
                     "audio_sub_lang" -> "Audio & Subtitle Languages"
                     "audio_sub_sub" -> "Preferred audio track and subtitles"
+                    "server_priority" -> "Server Priority"
+                    "server_priority_sub" -> "Configure preferred primary server for Sub, Dub, Hard Sub & Hindi."
                     "subtitle_appearance" -> "Subtitle Appearance"
                     "subtitle_appearance_sub" -> "Customize font size, color, background & styling"
                     "theme_accent" -> "Theme Accent Color"
                     "player_controls" -> "Player & Gesture Controls"
                     "player_controls_sub" -> "Seek duration, brightness & volume swipe gestures"
+                    "player_timeline_color" -> "Player Timeline Color"
+                    "player_timeline_color_sub" -> "Customize the progress seekbar color inside the video player."
                     "network_dns" -> "Network & DNS Routing"
                     "downloads_storage" -> "Downloads & Cache Storage"
                     "downloads_storage_sub" -> "Internal storage, Wi-Fi downloads, clear cache"
+                    "anilist_sync" -> "AniList Sync"
+                    "anilist_sync_connected" -> "Connected as @"
+                    "anilist_sync_sub" -> "Connect AniList account for bidirectional library & progress sync."
+                    "support_tickets" -> "Support & Feedback Tickets"
+                    "support_tickets_sub" -> "Create tickets, submit bugs/suggestions & live chat"
+                    "support_tickets_anon" -> "Log in with AniList to create tickets & chat with support"
                     "backup_restore" -> "Backup & Data Management"
                     "backup_restore_sub" -> "Export watchlist, history & settings to JSON or restore backup"
+                    "episode_screenshots" -> "Episode Screenshots"
+                    "episode_screenshots_sub" -> "Show snapshot camera button in video player controls to capture episode frames."
                     "autoplay_next" -> "Autoplay Next Episode"
                     "autoplay_next_sub" -> "Automatically load and play next episode"
                     "autoplay_previews" -> "Autoplay Previews & Trailers"
                     "autoplay_previews_sub" -> "Play video previews on home banner cards"
                     "auto_skip_intro" -> "Auto-Skip Intro / Outro"
                     "auto_skip_intro_sub" -> "Automatically skip opening and ending sequences"
+                    "blur_spoilers" -> "Blur Episode Spoilers"
+                    "blur_spoilers_sub" -> "Blurs episode thumbnails in details and player drawer to avoid spoilers"
                     "low_perf" -> "Low Performance Mode"
                     "low_perf_sub" -> "Disable blur shaders and heavy animations for budget devices"
-                    "delete_profile" -> "Delete Profile"
+                    "firefly_updater" -> "FireFly Updater"
+                    "firefly_updater_sub" -> "Check GitHub releases for latest updates"
+                    "check_update" -> "CHECK"
                     "save_changes" -> "Save Changes"
+                    "delete_profile" -> "Delete Profile"
+                    "delete_confirm_title" -> "Delete Profile?"
+                    "delete_confirm_msg" -> "Are you sure you want to delete this profile? This action cannot be undone."
+                    "cancel" -> "Cancel"
+                    "delete" -> "Delete"
+                    "close" -> "Close"
+                    "done" -> "Done"
+                    "style_presets" -> "Style Presets"
+                    "font_size" -> "Font Size"
+                    "text_color" -> "Text Color"
+                    "background_opacity" -> "Background Opacity"
+                    "outline_thickness" -> "Outline Thickness"
+                    "choose_theme" -> "Choose Theme Color"
+                    "default_audio_sub" -> "Default Audio & Subtitles"
+                    "preferred_audio" -> "Preferred Audio Track"
+                    "preferred_sub" -> "Preferred Subtitle Track"
+                    "auto_resume" -> "Auto-Resume Playback"
+                    "auto_resume_sub" -> "Automatically resume episodes from where you left off"
                     else -> key
                 }
             }
@@ -7945,20 +11390,77 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
         @Composable
         fun SelectorBody() {
+            var showNewsFeedScreen by remember { mutableStateOf(false) }
+            var showAnimeGamesScreen by remember { mutableStateOf(false) }
+            var showAppUsageScreen by remember { mutableStateOf(false) }
+
+            if (showAppUsageScreen) {
+                androidx.activity.compose.BackHandler {
+                    showAppUsageScreen = false
+                }
+                com.lagradost.cloudstream3.ui.animebox.usage.AnimeWatchUsageScreen(
+                    activeProfileId = editingProfile?.id,
+                    onClose = { showAppUsageScreen = false },
+                    onOpenAnimeDetails = { anilistId ->
+                        showAppUsageScreen = false
+                        openDetailsPage(anilistId, null)
+                    }
+                )
+                return
+            }
+
+            if (showAnimeGamesScreen) {
+                androidx.activity.compose.BackHandler {
+                    showAnimeGamesScreen = false
+                }
+                com.lagradost.cloudstream3.ui.animebox.games.AnimeGamesScreen(
+                    onClose = { showAnimeGamesScreen = false }
+                )
+                return
+            }
+
+            if (showNewsFeedScreen) {
+                androidx.activity.compose.BackHandler {
+                    showNewsFeedScreen = false
+                }
+                com.lagradost.cloudstream3.ui.animebox.news.AnimeBoxNewsFeedView(
+                    onClose = { showNewsFeedScreen = false }
+                )
+                return
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black)
             ) {
+                // Ambient top background glow effect matching "Who's watching?" screen
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(360.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    primaryColor.copy(alpha = 0.35f),
+                                    primaryColor.copy(alpha = 0.18f),
+                                    primaryColor.copy(alpha = 0.05f),
+                                    Color.Transparent
+                                )
+                            )
+                        )
+                )
+
                 if (editingProfile != null) {
                     // EDIT PROFILE VIEW (Netflix Style Match - Opens from Top like Home & Detail)
-                    val p = editingProfile!!
+                    val p = editingProfile ?: initialProfileForEditing ?: UserProfile("default", "User", "")
                     val currentAniListUser = remember(p.id, profileRevision) { 
                         com.lagradost.cloudstream3.ui.animebox.sync.AnimeBoxAccountSyncManager.getAniListUser(context, p.id) 
                     }
                     val editProfilePainter = remember(editProfileAvatarUrl) {
-                        if (editProfileAvatarUrl.startsWith("android.resource://")) {
-                            val resName = editProfileAvatarUrl.substringAfterLast("/")
+                        val resName = com.lagradost.cloudstream3.ui.animebox.profiles.SupabaseProfileIconsManager.getDrawableNameForAvatar(editProfileAvatarUrl)
+                            ?: if (editProfileAvatarUrl.startsWith("android.resource://")) editProfileAvatarUrl.substringAfterLast("/") else null
+                        if (resName != null) {
                             val resId = context.resources.getIdentifier(resName, "drawable", context.packageName)
                             if (resId != 0) resId else editProfileAvatarUrl
                         } else {
@@ -7970,9 +11472,9 @@ class AnimeBoxMainActivity : ComponentActivity() {
                         modifier = Modifier
                             .fillMaxSize()
                             .statusBarsPadding()
-                            .navigationBarsPadding()
+                            .then(if (!isTabMode) Modifier.navigationBarsPadding() else Modifier)
                             .verticalScroll(rememberScrollState())
-                            .padding(top = 10.dp, start = 20.dp, end = 20.dp, bottom = 32.dp),
+                            .padding(top = 10.dp, start = 20.dp, end = 20.dp, bottom = if (isTabMode) 8.dp else 32.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Top
                     ) {
@@ -7986,33 +11488,39 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = "My Space",
+                                    text = loc("my_space"),
                                     color = Color.White,
                                     fontSize = 22.sp,
                                     fontWeight = FontWeight.Bold
                                 )
 
                                 Row(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(Color(0xFF222228))
-                                        .clickable { onSwitchProfile() }
-                                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.AccountCircle,
-                                        contentDescription = "Switch Profile",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(15.dp)
-                                    )
-                                    Text(
-                                        text = "Switch Profile",
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
+                                    // Switch Profile Button
+                                    Row(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color(0xFF222228))
+                                            .clickable { onSwitchProfile() }
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.AccountCircle,
+                                            contentDescription = loc("switch_profile"),
+                                            tint = Color.White,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Text(
+                                            text = loc("switch_profile"),
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
                                 }
                             }
                         } else {
@@ -8045,108 +11553,435 @@ class AnimeBoxMainActivity : ComponentActivity() {
                             }
                         }
 
-                        // Avatar with Edit Badge on bottom-right
+                        // -------------------------------------------------------------
+                        // PROFILE PICTURE SECTION (PLACED AT THE VERY TOP OF MY SPACE)
+                        // Heading: "Profile Picture" (No avatar mention in heading)
+                        // -------------------------------------------------------------
                         Box(
                             modifier = Modifier
-                                .size(105.dp)
-                                .padding(2.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(96.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFF1E1E22))
-                                    .clickable { galleryLauncher.launch("image/*") },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (editProfileAvatarUrl.isNotEmpty()) {
-                                    Image(
-                                        painter = rememberAsyncImagePainter(model = editProfilePainter),
-                                        contentDescription = "Avatar Preview",
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize()
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(
+                                    Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color(0xFF1B1B22),
+                                            Color(0xFF141418),
+                                            Color(0xFF101014)
+                                        )
                                     )
-                                } else {
-                                    Box(
+                                )
+                                .padding(16.dp)
+                        ) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                // Section Header: "Profile Picture"
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = "Profile Picture",
+                                        color = Color.White,
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+
+                                    // Upload Custom button (Monochrome theme)
+                                    Row(
                                         modifier = Modifier
-                                            .fillMaxSize()
-                                            .background(primaryColor),
-                                        contentAlignment = Alignment.Center
+                                            .clip(RoundedCornerShape(20.dp))
+                                            .background(Color(0xFF22222A))
+                                            .clickable { galleryLauncher.launch("image/*") }
+                                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = "Upload Custom",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(14.dp)
+                                        )
                                         Text(
-                                            text = editProfileName.take(1).uppercase().ifEmpty { "P" },
+                                            text = "Upload Custom",
                                             color = Color.White,
-                                            fontSize = 36.sp,
+                                            fontSize = 11.5.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
-                            }
 
-                            // White pencil badge at bottom-right
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .offset(x = 2.dp, y = 2.dp)
-                                    .size(28.dp)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Color.White)
-                                    .clickable { galleryLauncher.launch("image/*") },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Edit,
-                                    contentDescription = "Change Avatar",
-                                    tint = Color.Black,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
+                                Spacer(modifier = Modifier.height(14.dp))
 
-                        Spacer(modifier = Modifier.height(20.dp))
+                                // Live Hero Preview & Profile Name Card Row
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0xFF1E1E24))
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Live Decorated Hero Profile Picture Preview
+                                    Box(
+                                        modifier = Modifier
+                                            .size(84.dp)
+                                            .clickable { galleryLauncher.launch("image/*") },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        com.lagradost.cloudstream3.ui.animebox.profiles.DecoratedProfilePicture(
+                                            avatarUrl = editProfileAvatarUrl,
+                                            decorationUrl = editProfileDecorationUrl,
+                                            size = 84.dp,
+                                            fallbackInitial = editProfileName,
+                                            primaryColor = primaryColor
+                                        )
 
-                        // Profile Name input box (Dark pill/card with rounded corners)
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(52.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF26262B))
-                                .padding(horizontal = 16.dp),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            BasicTextField(
-                                value = editProfileName,
-                                onValueChange = { editProfileName = it },
-                                singleLine = true,
-                                textStyle = TextStyle(
-                                    color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Medium
-                                ),
-                                cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
-                                modifier = Modifier.fillMaxWidth(),
-                                decorationBox = { innerTextField ->
-                                    if (editProfileName.isEmpty()) {
+                                        // Pencil edit badge (Monochrome theme)
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .size(22.dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(Color.White),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = SolarEditVector,
+                                                contentDescription = "Edit Picture",
+                                                tint = Color.Black,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(14.dp))
+
+                                    // Profile Name input column
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = loc("profile_name"),
-                                            color = Color(0xFF8E8E93),
-                                            fontSize = 16.sp
+                                            color = Color(0xFF9E9EA8),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(42.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFF282832))
+                                                .padding(horizontal = 12.dp),
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            BasicTextField(
+                                                value = editProfileName,
+                                                onValueChange = { newName ->
+                                                    editProfileName = newName
+                                                    val targetIdx = profilesList.indexOfFirst { it.id == p.id }
+                                                    if (targetIdx != -1 && newName.isNotBlank()) {
+                                                        val updatedList = profilesList.toMutableList()
+                                                        val updatedProf = UserProfile(p.id, newName.trim(), editProfileAvatarUrl, editProfileDecorationUrl)
+                                                        updatedList[targetIdx] = updatedProf
+                                                        ProfileManager.saveProfiles(context, updatedList)
+                                                        profilesList = updatedList
+                                                    }
+                                                },
+                                                singleLine = true,
+                                                textStyle = TextStyle(
+                                                    color = Color.White,
+                                                    fontSize = 15.sp,
+                                                    fontWeight = FontWeight.SemiBold
+                                                ),
+                                                cursorBrush = SolidColor(Color.White),
+                                                modifier = Modifier.fillMaxWidth(),
+                                                decorationBox = { innerTextField ->
+                                                    if (editProfileName.isEmpty()) {
+                                                        Text(
+                                                            text = loc("profile_name"),
+                                                            color = Color(0xFF72727C),
+                                                            fontSize = 15.sp
+                                                        )
+                                                    }
+                                                    innerTextField()
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                // Subheading: Select Profile Picture
+                                Text(
+                                    text = "Select Profile Picture",
+                                    color = Color(0xFFCCCCCC),
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(bottom = 10.dp)
+                                )
+
+                                if (isLoadingProfileIcons) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 12.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        ThemeDotCircularProgressIndicator(
+                                            modifier = Modifier.size(24.dp),
+                                            color = Color.White,
+                                            size = 24.dp
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "Loading Profile Pictures...",
+                                            color = Color(0xFF888894),
+                                            fontSize = 12.5.sp
                                         )
                                     }
-                                    innerTextField()
+                                } else {
+                                    // Profile Pictures Horizontal Grid Palette
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        contentPadding = PaddingValues(start = 6.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        items(availableProfileIcons, key = { it.url }) { item ->
+                                            val isSelected = editProfileAvatarUrl == item.url ||
+                                                    (item.isPrimaryDefault && (editProfileAvatarUrl.isBlank() || editProfileAvatarUrl.contains("default_profile_picture") || editProfileAvatarUrl.contains("drawable/images")))
+
+                                            val itemPainterModel: Any = remember(item.url) {
+                                                val resName = com.lagradost.cloudstream3.ui.animebox.profiles.SupabaseProfileIconsManager.getDrawableNameForAvatar(item.url)
+                                                    ?: if (item.url.startsWith("android.resource://")) item.url.substringAfterLast("/") else null
+                                                if (resName != null) {
+                                                    val resId = context.resources.getIdentifier(resName, "drawable", context.packageName)
+                                                    if (resId != 0) resId else item.url
+                                                } else {
+                                                    item.url
+                                                }
+                                            }
+
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(68.dp)
+                                                    .clickable {
+                                                        editProfileAvatarUrl = item.url
+                                                        val targetIdx = profilesList.indexOfFirst { it.id == p.id }
+                                                        if (targetIdx != -1) {
+                                                            val updatedList = profilesList.toMutableList()
+                                                            val updatedProf = UserProfile(p.id, editProfileName.trim().ifEmpty { p.name }, item.url, editProfileDecorationUrl)
+                                                            updatedList[targetIdx] = updatedProf
+                                                            ProfileManager.saveProfiles(context, updatedList)
+                                                            editingProfile = updatedProf
+                                                            profilesList = updatedList
+                                                            onProfileSelected(p.id)
+                                                        }
+                                                    }
+                                                    .scale(if (isSelected) 1.04f else 1.0f)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(Color(0xFF16161C))
+                                                    .then(
+                                                        if (isSelected) {
+                                                            Modifier.border(1.5.dp, Color.White, RoundedCornerShape(6.dp))
+                                                        } else {
+                                                            Modifier.border(1.dp, Color(0xFF282832), RoundedCornerShape(6.dp))
+                                                        }
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Image(
+                                                    painter = rememberAsyncImagePainter(model = itemPainterModel),
+                                                    contentDescription = "Profile Picture Option",
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+
+                                                if (item.isPrimaryDefault) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .align(Alignment.TopStart)
+                                                            .padding(3.dp)
+                                                            .clip(RoundedCornerShape(3.dp))
+                                                            .background(Color.White)
+                                                            .padding(horizontal = 4.dp, vertical = 1.5.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "PRIMARY",
+                                                            color = Color.Black,
+                                                            fontSize = 7.5.sp,
+                                                            fontWeight = FontWeight.ExtraBold
+                                                        )
+                                                    }
+                                                }
+
+                                                if (isSelected) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .align(Alignment.BottomEnd)
+                                                            .padding(3.dp)
+                                                            .size(18.dp)
+                                                            .clip(CircleShape)
+                                                            .background(Color.White),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Check,
+                                                            contentDescription = "Selected",
+                                                            tint = Color.Black,
+                                                            modifier = Modifier.size(12.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // Upload Custom Gallery Item
+                                        item {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(68.dp)
+                                                    .clickable { galleryLauncher.launch("image/*") }
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(Color(0xFF16161C))
+                                                    .border(1.5.dp, Color(0xFF444454), RoundedCornerShape(6.dp)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.AddCircle,
+                                                        contentDescription = "Upload Custom",
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(24.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    Text(
+                                                        text = "Gallery",
+                                                        color = Color.White,
+                                                        fontSize = 9.5.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
-                            )
+
+                                Spacer(modifier = Modifier.height(18.dp))
+
+                                // -------------------------------------------------------------
+                                // ANIMATED AVATAR DECORATION SECTION (Discord-Style Overlay Frames)
+                                // -------------------------------------------------------------
+                                Text(
+                                    text = "Animated Avatar Decoration",
+                                    color = Color.White,
+                                    fontSize = 14.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Tap any frame to preview Discord-style animated decorations on your profile picture",
+                                    color = Color(0xFF8E8E98),
+                                    fontSize = 11.5.sp,
+                                    modifier = Modifier.padding(bottom = 10.dp)
+                                )
+
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    contentPadding = PaddingValues(start = 6.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    items(com.lagradost.cloudstream3.ui.animebox.profiles.SupabaseProfileIconsManager.AVATAR_DECORATIONS, key = { it.id }) { decItem ->
+                                        val isDecSelected = editProfileDecorationUrl == decItem.url
+
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            modifier = Modifier
+                                                .width(72.dp)
+                                                .clickable {
+                                                    editProfileDecorationUrl = decItem.url
+                                                    val targetIdx = profilesList.indexOfFirst { it.id == p.id }
+                                                    if (targetIdx != -1) {
+                                                        val updatedList = profilesList.toMutableList()
+                                                        val updatedProf = UserProfile(p.id, editProfileName.trim().ifEmpty { p.name }, editProfileAvatarUrl, decItem.url)
+                                                        updatedList[targetIdx] = updatedProf
+                                                        ProfileManager.saveProfiles(context, updatedList)
+                                                        editingProfile = updatedProf
+                                                        profilesList = updatedList
+                                                        onProfileSelected(p.id)
+                                                    }
+                                                }
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(68.dp)
+                                                    .scale(if (isDecSelected) 1.04f else 1.0f),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                com.lagradost.cloudstream3.ui.animebox.profiles.DecoratedProfilePicture(
+                                                    avatarUrl = editProfileAvatarUrl,
+                                                    decorationUrl = decItem.url,
+                                                    size = 64.dp,
+                                                    fallbackInitial = editProfileName,
+                                                    primaryColor = primaryColor,
+                                                    forceCircle = true
+                                                )
+
+                                                if (isDecSelected) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .align(Alignment.BottomEnd)
+                                                            .padding(2.dp)
+                                                            .size(16.dp)
+                                                            .clip(CircleShape)
+                                                            .background(Color.White),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Check,
+                                                            contentDescription = "Selected",
+                                                            tint = Color.Black,
+                                                            modifier = Modifier.size(10.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            Spacer(modifier = Modifier.height(4.dp))
+
+                                            Text(
+                                                text = decItem.name,
+                                                color = if (isDecSelected) Color.White else Color(0xFF8E8E98),
+                                                fontSize = 10.sp,
+                                                fontWeight = if (isDecSelected) FontWeight.Bold else FontWeight.Normal,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(18.dp))
 
+                        // App Activity Details (Digital Wellbeing screen time & anime usage)
+                        EditProfileOptionCard(
+                            icon = SettingsIconType.APP_ACTIVITY,
+                            title = "App Activity Details",
+                            subtitle = "Screen time, daily watch breakdown & anime activity.",
+                            trailingType = CardTrailingType.CHEVRON,
+                            onClick = { showAppUsageScreen = true }
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
                         // Release Schedule Option Card (Aligned with other My Space options)
                         EditProfileOptionCard(
-                            icon = Icons.Default.DateRange,
-                            title = "Anime Release Schedule",
-                            subtitle = "Explore broadcast times & weekly airing calendar.",
+                            icon = SolarCalendarVector,
+                            title = loc("release_schedule"),
+                            subtitle = loc("release_schedule_sub"),
                             trailingType = CardTrailingType.CHEVRON,
                             onClick = {
                                 val intent = Intent(context, AnimeBoxScheduleActivity::class.java)
@@ -8156,23 +11991,53 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // COMPLETE SETTINGS CARDS
-                        // 1. Display Language Card
+                        // Anime News Feed Option Card (Below Anime Release Schedule)
                         EditProfileOptionCard(
-                            icon = painterResource(id = R.drawable.ic_baseline_translate_24),
-                            title = loc("display_language"),
-                            subtitle = "${loc("display_language_sub")} ($displayLanguage).",
+                            icon = R.drawable.ic_animebox_news,
+                            title = "Anime News Feed",
+                            subtitle = "Latest news and stories from Anime Corner.",
                             trailingType = CardTrailingType.CHEVRON,
-                            onClick = { showLanguageDialog = true }
+                            onClick = { showNewsFeedScreen = true }
                         )
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // 3. Audio & Subtitle Languages Card
+                        // Anime Games Option Card (Below Anime News Feed)
                         EditProfileOptionCard(
-                            icon = SettingsIconType.REMEMBER_PREFS,
+                            icon = SettingsIconType.ANIME_GAMES,
+                            title = "Anime Games",
+                            subtitle = "Popular anime gacha & mobile games on Play Store.",
+                            trailingType = CardTrailingType.CHEVRON,
+                            onClick = { showAnimeGamesScreen = true }
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // COMPLETE SETTINGS CARDS
+                        // 1. Default episode layout
+                        EditProfileOptionCard(
+                            icon = SettingsIconType.EPISODE_VIEW,
+                            title = "Default Episode View",
+                            subtitle = if (defaultEpViewMode == "number") "Numbered episode tiles" else "Episode image tiles",
+                            trailingType = CardTrailingType.CHEVRON,
+                            onClick = { showEpisodeViewDialog = true }
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // 3. Audio & Subtitle Languages Card (Uses poster mic vector)
+                        val cleanSubDisplay = currentSubMode
+                            .replace(Regex("""\s*\(Public Subtitle from Groq\)""", RegexOption.IGNORE_CASE), "")
+                            .replace(Regex("""\s*\(Public Subtitle\)""", RegexOption.IGNORE_CASE), "")
+                            .replace(Regex("""\s*\(Groq\)""", RegexOption.IGNORE_CASE), "")
+                            .replace(Regex("""\s*\(Public[^\)]*\)""", RegexOption.IGNORE_CASE), "")
+                            .trim()
+                            .ifEmpty { "English" }
+
+                        EditProfileOptionCard(
+                            icon = SolarMicrophoneLargeBoldVector,
                             title = loc("audio_sub_lang"),
-                            subtitle = "${loc("audio_sub_sub")} ($currentAudio, $currentSubMode).",
+                            subtitle = "${loc("audio_sub_sub")} ($currentAudio, $cleanSubDisplay).",
                             trailingType = CardTrailingType.CHEVRON,
                             onClick = { showAudioSubDialog = true }
                         )
@@ -8182,21 +12047,43 @@ class AnimeBoxMainActivity : ComponentActivity() {
                         // 3b. Server Priority Card
                         EditProfileOptionCard(
                             icon = SettingsIconType.DNS_SERVER,
-                            title = "Server Priority",
-                            subtitle = "Configure preferred primary server for Sub, Dub, Hard Sub & Hindi.",
+                            title = loc("server_priority"),
+                            subtitle = loc("server_priority_sub"),
                             trailingType = CardTrailingType.CHEVRON,
                             onClick = { showServerPriorityDialog = true }
                         )
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // 4. Subtitle Appearance Card (Dedicated In-App Styling Panel)
+                        // 4. Subtitle Appearance Card (Uses poster subtitle vector)
                         EditProfileOptionCard(
-                            icon = SettingsIconType.ABOUT_DEVICE,
+                            icon = CustomSubVector,
                             title = loc("subtitle_appearance"),
-                            subtitle = "${loc("subtitle_appearance_sub")} (${subFontSize.toInt()}sp, $subColor).",
+                            subtitle = "${loc("subtitle_appearance_sub")} ($subPreset, ${subFontSize.toInt()}sp).",
                             trailingType = CardTrailingType.CHEVRON,
                             onClick = { showSubtitleAppearanceDialog = true }
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // 4b. Cloud AI Transcription API Key Card
+                        EditProfileOptionCard(
+                            icon = R.drawable.ic_groq_logo,
+                            title = "Cloud AI Transcribe",
+                            subtitle = if (currentGroqApiKey.isNotBlank()) "API Key: Configured • Tap to change key" else "Whisper Cloud AI • Tap to setup API Key",
+                            trailingType = CardTrailingType.CHEVRON,
+                            onClick = { showGroqApiKeyDialog = true }
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // 4c. Atlas Watch Order Guide Card
+                        EditProfileOptionCard(
+                            icon = R.drawable.ic_openrouter_logo,
+                            title = "Atlas Watch Order Guide",
+                            subtitle = if (currentOpenRouterApiKey.isNotBlank()) "OpenRouter API Key: Configured • Tap to change key" else "Atlas Guide • Tap to setup API Key",
+                            trailingType = CardTrailingType.CHEVRON,
+                            onClick = { showOpenRouterApiKeyDialog = true }
                         )
 
                         Spacer(modifier = Modifier.height(10.dp))
@@ -8240,17 +12127,30 @@ class AnimeBoxMainActivity : ComponentActivity() {
                         Spacer(modifier = Modifier.height(10.dp))
 
                         // 6b. Video Player Timeline Accent Color
-                        val timelineTitle = when (timelineTheme) {
+                        val activeTimelineTheme = if (currentPlayerStyle == "player2") player2TimelineTheme else timelineTheme
+                        val timelineTitle = when (activeTimelineTheme) {
                             "red" -> "Netflix Crimson Red"
                             "cyan" -> "Ocean Cyan"
                             "emerald" -> "Emerald Green"
                             "amber" -> "Golden Amber"
                             "white" -> "Pure White"
-                            else -> "Lavender Purple (Default)"
+                            "light_green", "green" -> "Vivid Light Green"
+                            else -> "Lavender Purple"
                         }
+                        // Video Player Style (SolarVideoLibraryBoldDuotoneVector)
                         EditProfileOptionCard(
-                            icon = SettingsIconType.TIMELINE_COLOR,
-                            title = "Player Timeline Color",
+                            icon = SolarVideoLibraryBoldDuotoneVector,
+                            title = "Video Player Style",
+                            subtitle = if (playerStyle == com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.PLAYER_STYLE_YOUTUBE) "YouTube Style" else "Default Player",
+                            trailingType = CardTrailingType.CHEVRON,
+                            onClick = { showPlayerStyleDialog = true }
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        EditProfileOptionCard(
+                            icon = SolarStopwatchPauseBrokenIcon,
+                            title = loc("player_timeline_color"),
                             subtitle = timelineTitle,
                             trailingType = CardTrailingType.CHEVRON,
                             onClick = { showTimelineColorDialog = true }
@@ -8258,16 +12158,22 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // 7. Network & DNS Routing (Official Material WiFi fan icon)
+                        // 7. Network & DNS Routing (wi-fi-router-minimalistic-bold)
+                        val customDnsUrlStored = remember(dnsMode, showDnsDialog) {
+                            com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getCustomDnsUrl(context)
+                        }
                         val dnsTitle = when (dnsMode) {
                             "cloudflare" -> "Cloudflare DoH (1.1.1.1)"
                             "google" -> "Google Public DNS (8.8.8.8)"
                             "adguard" -> "AdGuard DNS (Ad-block)"
                             "quad9" -> "Quad9 DNS (9.9.9.9)"
+                            "controld" -> "ControlD (High Speed & Secure)"
+                            "dnssb" -> "DNS.SB (Privacy-first)"
+                            "custom" -> if (customDnsUrlStored.isNotBlank()) "Custom DoH (${customDnsUrlStored.removePrefix("https://").take(22)}...)" else "Custom DoH (User Configured)"
                             else -> "System Default / Auto"
                         }
                         EditProfileOptionCard(
-                            icon = SettingsIconType.WIFI,
+                            icon = SolarWifiLinearIcon,
                             title = loc("network_dns"),
                             subtitle = dnsTitle,
                             trailingType = CardTrailingType.CHEVRON,
@@ -8275,6 +12181,53 @@ class AnimeBoxMainActivity : ComponentActivity() {
                         )
 
                         Spacer(modifier = Modifier.height(10.dp))
+
+                        // 7b. Graphic Enhancer Preset (Default: off)
+                        val enhancerPresetSubtitle = when (defaultEnhancerPreset) {
+                            "off" -> "Off (Default)"
+                            "ultra_clarity" -> "Ultra Anime HD (Studio Clarity)"
+                            "anime4k_a" -> "Anime 4K · Mode A (Line Recovery)"
+                            "anime4k_b" -> "Anime 4K · Mode B (Soft Deblur)"
+                            "anime4k_c" -> "Anime 4K · Mode C (Upscale Denoise)"
+                            "ink_master_hdr" -> "Dynamic Ink HDR (Deep Inked)"
+                            "cas_razor_sharp" -> "Razor Sharp CAS (Adaptive)"
+                            "oled_vivid" -> "OLED Vivid Pop (Inky Blacks)"
+                            "custom" -> "Custom Tuning (Manual GPU)"
+                            else -> "Off (Default)"
+                        }
+                        EditProfileOptionCard(
+                            icon = SolarFourKLinearIcon,
+                            title = "Graphic Enhancer Preset",
+                            subtitle = enhancerPresetSubtitle,
+                            trailingType = CardTrailingType.CHEVRON,
+                            onClick = { showGraphicsEnhancerPresetDialog = true }
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Audio Enhancer Preset Option Card
+                        val audioPresetSubtitle = when (defaultAudioEnhancerPreset) {
+                            "off" -> "Off (Default)"
+                            "studio_balanced" -> "Studio Balanced"
+                            "bass_boost" -> "Thunder Bass"
+                            "vocal_clarity" -> "Dialogue & Dub Clarity"
+                            "cinematic_surround" -> "Cinematic Theater"
+                            "anime_action" -> "Shonen Action Crisp"
+                            "night_mode" -> "Night Mode"
+                            "custom" -> "Custom Tuning"
+                            else -> "Off (Default)"
+                        }
+                        EditProfileOptionCard(
+                            icon = SolarSmartSpeakerBoldIcon,
+                            title = "Audio Enhancer Preset",
+                            subtitle = audioPresetSubtitle,
+                            trailingType = CardTrailingType.CHEVRON,
+                            onClick = { showAudioEnhancerPresetDialog = true }
+                        )
+
+                        Spacer(modifier = Modifier.height(7.dp))
+
+
 
                         // 8. Downloads & Storage Manager
                         EditProfileOptionCard(
@@ -8287,11 +12240,45 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
                         Spacer(modifier = Modifier.height(10.dp))
 
+                        // 8a. Preferred Download Quality
+                        val downloadQualitySubtitle = when (currentDownloadQuality) {
+                            "1080p" -> "1080p Full HD (High Quality)"
+                            "720p" -> "720p HD (Balanced Data & Quality)"
+                            "480p" -> "480p SD (Data & Storage Saver)"
+                            "360p" -> "360p (Maximum Data Saver)"
+                            "ask" -> "Always Ask (Prompt quality before each download)"
+                            else -> "1080p Full HD (High Quality)"
+                        }
+                        EditProfileOptionCard(
+                            icon = SettingsIconType.DOWNLOAD_QUALITY,
+                            title = "Download Video Quality",
+                            subtitle = downloadQualitySubtitle,
+                            trailingType = CardTrailingType.CHEVRON,
+                            onClick = { showDownloadQualityDialog = true }
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        val automaticMlKitSubtitle = if (automaticMlKitLanguage == "off") {
+                            "Off"
+                        } else {
+                            "Auto-translate English subtitles to ${com.lagradost.cloudstream3.ui.animebox.api.AiSubtitleModelManager.getLanguageName(automaticMlKitLanguage)}"
+                        }
+                        EditProfileOptionCard(
+                            icon = R.drawable.ic_ml_kit_logo,
+                            title = "Automatic ML Kit Translation",
+                            subtitle = automaticMlKitSubtitle,
+                            trailingType = CardTrailingType.CHEVRON,
+                            onClick = { showAutomaticMlKitDialog = true }
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
                         // 8b. AniList Sync Card
                         EditProfileOptionCard(
                             icon = R.drawable.ic_anilist_official,
-                            title = "AniList Sync",
-                            subtitle = if (currentAniListUser != null) "Connected as @${currentAniListUser.username} • Watchlist synced" else "Connect AniList account for bidirectional library & progress sync.",
+                            title = loc("anilist_sync"),
+                            subtitle = if (currentAniListUser != null) "${loc("anilist_sync_connected")}${currentAniListUser.username} • Watchlist synced" else loc("anilist_sync_sub"),
                             trailingType = CardTrailingType.CHEVRON,
                             onClick = {
                                 targetSyncProvider = com.lagradost.cloudstream3.ui.animebox.sync.SyncProvider.ANILIST
@@ -8304,8 +12291,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                         // 8c. Support & Feedback Tickets Card
                         EditProfileOptionCard(
                             icon = R.drawable.ic_support_chat_bubble,
-                            title = "Support & Feedback Tickets",
-                            subtitle = if (currentAniListUser != null) "Create tickets, submit bugs/suggestions & live chat" else "Log in with AniList to create tickets & chat with support",
+                            title = loc("support_tickets"),
+                            subtitle = if (currentAniListUser != null) loc("support_tickets_sub") else loc("support_tickets_anon"),
                             trailingType = CardTrailingType.CHEVRON,
                             onClick = {
                                 if (currentAniListUser != null) {
@@ -8329,9 +12316,42 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // 10. Autoplay Next Episode Card
+                        // 9b. Episode Screenshots Camera Card (Default: On)
+                        var playerScreenshotEnabled by remember {
+                            mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isPlayerScreenshotEnabled(context))
+                        }
                         EditProfileOptionCard(
-                            icon = SettingsIconType.EPISODE_VIEW,
+                            icon = R.drawable.ic_player_screenshot_camera,
+                            title = loc("episode_screenshots"),
+                            subtitle = loc("episode_screenshots_sub"),
+                            trailingType = CardTrailingType.SWITCH,
+                            switchChecked = playerScreenshotEnabled,
+                            onSwitchChanged = {
+                                playerScreenshotEnabled = it
+                                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setPlayerScreenshotEnabled(context, it)
+                            }
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // 9c. Auto-Resume Playback Card
+                        EditProfileOptionCard(
+                            icon = SettingsIconType.AUTO_RESUME,
+                            title = loc("auto_resume"),
+                            subtitle = loc("auto_resume_sub"),
+                            trailingType = CardTrailingType.SWITCH,
+                            switchChecked = autoResumePlayback,
+                            onSwitchChanged = {
+                                autoResumePlayback = it
+                                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setAutoResumeEnabled(context, it)
+                            }
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // 10. Autoplay Next Episode Card (square-double-alt-arrow-right-linear)
+                        EditProfileOptionCard(
+                            icon = SolarSquareDoubleAltArrowRightLinearIcon,
                             title = loc("autoplay_next"),
                             subtitle = loc("autoplay_next_sub"),
                             trailingType = CardTrailingType.SWITCH,
@@ -8344,16 +12364,15 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // 11. Autoplay Previews & Trailers Card
                         EditProfileOptionCard(
-                            icon = SettingsIconType.TRAILERS_TV,
-                            title = loc("autoplay_previews"),
-                            subtitle = loc("autoplay_previews_sub"),
+                            icon = SettingsIconType.EXTERNAL_PLAYER,
+                            title = "Open in External Player",
+                            subtitle = "Choose an installed video player when you start an episode",
                             trailingType = CardTrailingType.SWITCH,
-                            switchChecked = autoplayPreviews,
+                            switchChecked = externalPlayerEnabled,
                             onSwitchChanged = {
-                                autoplayPreviews = it
-                                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setAutoplayPreviewsEnabled(context, it)
+                                externalPlayerEnabled = it
+                                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setExternalPlayerEnabled(context, it)
                             }
                         )
 
@@ -8361,7 +12380,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
                         // 12. Auto-Skip Intro / Outro Card
                         EditProfileOptionCard(
-                            icon = SettingsIconType.SKIP_INTRO,
+                            icon = SettingsIconType.BOLD_FAST_FORWARD,
                             title = loc("auto_skip_intro"),
                             subtitle = loc("auto_skip_intro_sub"),
                             trailingType = CardTrailingType.SWITCH,
@@ -8376,14 +12395,30 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
                         // 12b. Blur Episode Spoilers Card
                         EditProfileOptionCard(
-                            icon = painterResource(id = R.drawable.ic_eye_spoiler),
-                            title = "Blur Episode Spoilers",
-                            subtitle = "Blurs episode thumbnails in details and player drawer to avoid spoilers",
+                            icon = SettingsIconType.EYE_OFF,
+                            title = loc("blur_spoilers"),
+                            subtitle = loc("blur_spoilers_sub"),
                             trailingType = CardTrailingType.SWITCH,
                             switchChecked = blurEpisodeSpoilers,
                             onSwitchChanged = {
                                 blurEpisodeSpoilers = it
                                 com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setBlurEpisodeSpoilersEnabled(context, it)
+                            }
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Fast detail loading is part of My Space so the detail skeleton behavior
+                        // can be changed without opening the advanced settings dialog.
+                        EditProfileOptionCard(
+                            icon = SolarSpeedometerMaxBrokenIcon,
+                            title = "Fast Detail Loading",
+                            subtitle = "Show anime details immediately while remaining data finishes loading",
+                            trailingType = CardTrailingType.SWITCH,
+                            switchChecked = fastDetailLoading,
+                            onSwitchChanged = {
+                                fastDetailLoading = it
+                                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setFastDetailLoadingEnabled(context, it)
                             }
                         )
 
@@ -8399,22 +12434,80 @@ class AnimeBoxMainActivity : ComponentActivity() {
                             onSwitchChanged = {
                                 lowPerfMode = it
                                 com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setLowPerformanceMode(context, it)
+                                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setTrailerEnabled(context, !it)
                             }
                         )
 
                         Spacer(modifier = Modifier.height(10.dp))
 
+                        // 13b. Clustered Watch History Card (Default: OFF)
+                        var clusteredWatchHistory by remember {
+                            mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isClusteredWatchHistoryEnabled(context))
+                        }
+                        EditProfileOptionCard(
+                            icon = ClusteredHistoryVector,
+                            title = "Clustered Watch History",
+                            subtitle = if (clusteredWatchHistory) "Showing all watched episodes per anime" else "Only keeping latest unfinished episode per anime (Clean mode)",
+                            trailingType = CardTrailingType.SWITCH,
+                            switchChecked = clusteredWatchHistory,
+                            onSwitchChanged = {
+                                clusteredWatchHistory = it
+                                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setClusteredWatchHistoryEnabled(context, it)
+                            }
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // 13c. Redeem Feature Section
+                        EditProfileOptionCard(
+                            icon = R.drawable.ic_redeem_feature,
+                            title = "Redeem Feature",
+                            subtitle = "Use Support & Feedback ticket to get a feature code, or use codes shared on the internet",
+                            trailingType = CardTrailingType.ARROW,
+                            onClick = { showRedeemFeatureDialog = true }
+                        )
+
+                        // 13d. Hentai Animes Toggle (Visible ONLY when unlocked via Redeem Code, Default: OFF)
+                        if (isHentaiUnlocked) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            var adultContentEnabled by remember(isHentaiUnlocked) {
+                                mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAdultContentEnabled(context))
+                            }
+                            var toggleDebounceJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+                            EditProfileOptionCard(
+                                icon = R.drawable.ic_hentai_bunny,
+                                title = "Hentai Animes",
+                                subtitle = if (adultContentEnabled) "Showing hentai animes in search and schedule" else "Hentai animes hidden across search and schedule",
+                                trailingType = CardTrailingType.SWITCH,
+                                switchChecked = adultContentEnabled,
+                                onSwitchChanged = { newValue ->
+                                    if (adultContentEnabled != newValue) {
+                                        adultContentEnabled = newValue
+                                        toggleDebounceJob?.cancel()
+                                        toggleDebounceJob = coroutineScope.launch {
+                                            kotlinx.coroutines.delay(220)
+                                            withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setAdultContentEnabled(context, newValue)
+                                                saveGenreOrder(context, getSavedGenreOrder(context))
+                                                com.lagradost.cloudstream3.ui.animebox.api.AniListClient.refreshClient()
+                                            }
+                                        }
+                                    }
+                                }
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
                         // 14. Check for App Updates Card (Special FireFly Update Card)
                         val mainAct = context as? Activity
-                        val coroutineScope = rememberCoroutineScope()
                         val currentVersionName = com.lagradost.cloudstream3.BuildConfig.VERSION_NAME
 
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFF222228))
-                                .border(1.dp, Color(0xFF383842), RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFF252930))
                                 .clickable {
                                     if (mainAct != null) {
                                         Toast.makeText(context, "Checking for updates...", Toast.LENGTH_SHORT).show()
@@ -8461,14 +12554,14 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Text(
-                                        text = "FireFly Updater",
+                                        text = loc("firefly_updater"),
                                         color = Color.White,
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                     Box(
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
+                                            .clip(RoundedCornerShape(8.dp))
                                             .background(Color(0xFF35353E))
                                             .padding(horizontal = 6.dp, vertical = 2.dp)
                                     ) {
@@ -8482,7 +12575,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                 }
                                 Spacer(modifier = Modifier.height(3.dp))
                                 Text(
-                                    text = "Check GitHub releases for latest updates",
+                                    text = loc("firefly_updater_sub"),
                                     color = Color(0xFFA0A0AB),
                                     fontSize = 12.sp,
                                     lineHeight = 15.sp
@@ -8498,7 +12591,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                     .padding(horizontal = 10.dp, vertical = 6.dp)
                             ) {
                                 Text(
-                                    text = "CHECK",
+                                    text = loc("check_update"),
                                     color = Color.Black,
                                     fontSize = 11.5.sp,
                                     fontWeight = FontWeight.Bold
@@ -8567,7 +12660,9 @@ class AnimeBoxMainActivity : ComponentActivity() {
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(20.dp))
+                        if (!isTabMode) {
+                            Spacer(modifier = Modifier.height(20.dp))
+                        }
                     }
 
                     // -------------------------------------------------------------
@@ -8576,10 +12671,35 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
                     // 1. Subtitle Appearance Modal with Live Preview
                     if (showSubtitleAppearanceDialog) {
-                        val selChipTextColor = if (primaryColor == AnimeBoxThemeHelper.COLOR_CRIMSON || primaryColor == AnimeBoxThemeHelper.COLOR_LIGHT_RED) Color.White else Color.Black
+                        val isHardsubPrev = subPreset.equals("Hardsub", ignoreCase = true)
+                        val previewFontFamily = remember(subFontFamily, isHardsubPrev) {
+                            if (subFontFamily != "Default (Google Sans)") {
+                                com.lagradost.cloudstream3.ui.animebox.subtitles.SubtitleFontManager.getFontFamily(context, subFontFamily)
+                            } else if (isHardsubPrev) {
+                                try { androidx.compose.ui.text.font.FontFamily(androidx.compose.ui.text.font.Font(R.font.trebuchet_ms_bold)) }
+                                catch (_: Throwable) {
+                                    try { androidx.compose.ui.text.font.FontFamily(androidx.compose.ui.text.font.Font(R.font.productsans_bold)) }
+                                    catch (_: Throwable) { androidx.compose.ui.text.font.FontFamily.Default }
+                                }
+                            } else {
+                                com.lagradost.cloudstream3.ui.animebox.subtitles.SubtitleFontManager.getFontFamily(context, subFontFamily)
+                            }
+                        }
+                        val previewTextColor = when (subTextColor) {
+                            android.graphics.Color.YELLOW -> Color(0xFFFFD54F)
+                            android.graphics.Color.CYAN -> Color(0xFF80DEEA)
+                            android.graphics.Color.GREEN -> Color(0xFFA5D6A7)
+                            android.graphics.Color.rgb(208, 188, 255) -> Color(0xFFD0BCFF)
+                            android.graphics.Color.WHITE -> Color.White
+                            else -> Color(subTextColor.toLong() and 0xFFFFFFFFL)
+                        }
+                        val previewFontSize = (subFontSize * 0.78f).coerceIn(12f, 24f).sp
+
                         AlertDialog(
                             onDismissRequest = { showSubtitleAppearanceDialog = false },
-                            title = { Text("Subtitle Appearance", color = Color.White, fontWeight = FontWeight.Bold) },
+                            title = {
+                                Text(loc("subtitle_appearance"), color = Color.White, fontWeight = FontWeight.Bold)
+                            },
                             text = {
                                 Column(
                                     modifier = Modifier
@@ -8587,167 +12707,466 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         .verticalScroll(rememberScrollState()),
                                     verticalArrangement = Arrangement.spacedBy(14.dp)
                                 ) {
-                                    // Live Preview Card
-                                    Text("Preview:", color = Color.Gray, fontSize = 12.5.sp)
-                                    val previewTextColor = when (subColor) {
-                                        "Yellow" -> Color(0xFFFFEB3B)
-                                        "Cyan" -> Color(0xFF00E5FF)
-                                        "Green", "Light Green" -> Color(0xFF76FF03)
-                                        else -> Color.White
-                                    }
-                                    val previewBgAlpha = subBgOpacity / 100f
-
+                                    // ─── LIVE SHOWCASE PREVIEW ─────────────────────────
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .height(90.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(Color(0xFF141418)),
-                                        contentAlignment = Alignment.Center
+                                            .height(130.dp)
+                                            .clip(RoundedCornerShape(2.dp))
+                                            .background(Color(0xFF0D0E12))
                                     ) {
+                                        Image(
+                                            painter = painterResource(id = R.drawable.enhancer_subtitle_preview),
+                                            contentDescription = "Subtitle Live Preview Showcase",
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+
+                                        // Dark gradient bottom overlay
                                         Box(
                                             modifier = Modifier
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(Color.Black.copy(alpha = previewBgAlpha))
-                                                .padding(horizontal = 10.dp, vertical = 4.dp)
-                                        ) {
-                                            Text(
-                                                text = "Ore wa Kaizoku Ou ni naru Otoko da!",
-                                                color = previewTextColor,
-                                                fontSize = (subFontSize.coerceIn(12f, 24f)).sp,
-                                                fontWeight = FontWeight.Bold,
-                                                style = if (subEdgeStyle == "Outline") TextStyle(
-                                                    shadow = androidx.compose.ui.graphics.Shadow(
-                                                        color = Color.Black,
-                                                        offset = androidx.compose.ui.geometry.Offset(2f, 2f),
-                                                        blurRadius = 3f
+                                                .fillMaxSize()
+                                                .background(
+                                                    Brush.verticalGradient(
+                                                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f)),
+                                                        startY = 80f
                                                     )
-                                                ) else TextStyle()
+                                                )
+                                        )
+
+                                        // Subtitle Text centered near bottom
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomCenter)
+                                                .padding(bottom = 12.dp)
+                                                .padding(horizontal = 12.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Box(
+                                                modifier = if (!isHardsubPrev && subBgOpacity > 0) {
+                                                    Modifier
+                                                        .clip(RoundedCornerShape(3.dp))
+                                                        .background(Color.Black.copy(alpha = (subBgOpacity / 255f).coerceIn(0f, 1f)))
+                                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                } else Modifier,
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (isHardsubPrev || subEdgeType == androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE) {
+                                                    // Crisp native Compose stroke outline matching live video player perfectly without black box artifacts
+                                                    Text(
+                                                        text = "“I will protect my friends, no matter what!”",
+                                                        fontSize = previewFontSize,
+                                                        fontFamily = previewFontFamily,
+                                                        fontWeight = if (isHardsubPrev) FontWeight.Black else FontWeight.Bold,
+                                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                                        style = androidx.compose.ui.text.TextStyle(
+                                                            color = Color.Black,
+                                                            drawStyle = androidx.compose.ui.graphics.drawscope.Stroke(
+                                                                width = if (isHardsubPrev) 4.5f else 3.5f,
+                                                                join = androidx.compose.ui.graphics.StrokeJoin.Round
+                                                            )
+                                                        )
+                                                    )
+                                                }
+                                                Text(
+                                                    text = "“I will protect my friends, no matter what!”",
+                                                    color = if (isHardsubPrev) Color.White else previewTextColor,
+                                                    fontSize = previewFontSize,
+                                                    fontFamily = previewFontFamily,
+                                                    fontWeight = if (isHardsubPrev) FontWeight.Black else FontWeight.Bold,
+                                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                                    style = if (!isHardsubPrev && subEdgeType == androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW) {
+                                                        androidx.compose.ui.text.TextStyle(
+                                                            shadow = androidx.compose.ui.graphics.Shadow(
+                                                                color = Color.Black,
+                                                                offset = androidx.compose.ui.geometry.Offset(2f, 2f),
+                                                                blurRadius = 3f
+                                                            )
+                                                        )
+                                                    } else androidx.compose.ui.text.TextStyle()
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // ─── STYLE PRESETS ─────────────────────────────────
+                                    Column {
+                                        Text("${loc("style_presets")}:", color = Color.Gray, fontSize = 12.5.sp)
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        val presets = listOf("Default", "Hardsub", "Yellow", "Cinema", "Box", "Lavender")
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .horizontalScroll(rememberScrollState()),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            presets.forEach { p ->
+                                                val isSelected = subPreset.equals(p, ignoreCase = true)
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(2.dp))
+                                                        .background(if (isSelected) Color.White else Color(0xFF222226))
+                                                        .clickable {
+                                                            subPreset = p
+                                                            when (p) {
+                                                                "Default" -> {
+                                                                    subFontSize = 24f
+                                                                    subTextColor = android.graphics.Color.WHITE
+                                                                    subBgOpacity = 128
+                                                                    subEdgeType = androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE
+                                                                    subOutlineWidth = 12f
+                                                                }
+                                                                "Hardsub" -> {
+                                                                    subFontSize = 24f
+                                                                    subTextColor = android.graphics.Color.WHITE
+                                                                    subBgOpacity = 0
+                                                                    subEdgeType = androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE
+                                                                    subOutlineWidth = 14f
+                                                                }
+                                                                "Yellow" -> {
+                                                                    subFontSize = 24f
+                                                                    subTextColor = android.graphics.Color.YELLOW
+                                                                    subBgOpacity = 0
+                                                                    subEdgeType = androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE
+                                                                    subOutlineWidth = 12f
+                                                                }
+                                                                "Cinema" -> {
+                                                                    subFontSize = 24f
+                                                                    subTextColor = android.graphics.Color.WHITE
+                                                                    subBgOpacity = 76
+                                                                    subEdgeType = androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW
+                                                                    subOutlineWidth = 0f
+                                                                }
+                                                                "Box" -> {
+                                                                    subFontSize = 24f
+                                                                    subTextColor = android.graphics.Color.WHITE
+                                                                    subBgOpacity = 178
+                                                                    subEdgeType = androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE
+                                                                    subOutlineWidth = 0f
+                                                                }
+                                                                "Lavender" -> {
+                                                                    subFontSize = 24f
+                                                                    subTextColor = android.graphics.Color.rgb(208, 188, 255)
+                                                                    subBgOpacity = 0
+                                                                    subEdgeType = androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE
+                                                                    subOutlineWidth = 12f
+                                                                }
+                                                            }
+                                                        }
+                                                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = p,
+                                                        color = if (isSelected) Color.Black else Color.White,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // ─── FONT SIZE ─────────────────────────────────────
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column {
+                                            Text("${loc("font_size")}:", color = Color.Gray, fontSize = 12.5.sp)
+                                            Text(text = "${subFontSize.toInt()}sp scale", color = Color(0xFFA1A1AA), fontSize = 11.sp)
+                                        }
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(34.dp)
+                                                    .clip(RoundedCornerShape(2.dp))
+                                                    .background(Color(0xFF222226))
+                                                    .clickable { subFontSize = (subFontSize - 2f).coerceAtLeast(12f) },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(text = "–", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                            Text(
+                                                text = "${subFontSize.toInt()}sp",
+                                                color = Color.White,
+                                                fontSize = 13.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.widthIn(min = 44.dp),
+                                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                             )
-                                        }
-                                    }
-
-                                    // Font Size
-                                    Text("Font Size:", color = Color.Gray, fontSize = 12.5.sp)
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        listOf(14f to "Small", 18f to "Medium", 22f to "Large", 26f to "Huge").forEach { (sz, label) ->
-                                            val isSel = (subFontSize == sz)
                                             Box(
                                                 modifier = Modifier
-                                                    .weight(1f)
-                                                    .clip(RoundedCornerShape(6.dp))
-                                                    .background(if (isSel) primaryColor else Color(0xFF26262B))
-                                                    .clickable { subFontSize = sz }
-                                                    .padding(vertical = 8.dp),
+                                                    .size(34.dp)
+                                                    .clip(RoundedCornerShape(2.dp))
+                                                    .background(Color(0xFF222226))
+                                                    .clickable { subFontSize = (subFontSize + 2f).coerceAtMost(32f) },
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                Text(label, color = if (isSel) selChipTextColor else Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                Text(text = "+", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                                             }
                                         }
                                     }
 
-                                    // Font Color (Properly sized chips so Green fits without wrapping)
-                                    Text("Text Color:", color = Color.Gray, fontSize = 12.5.sp)
+                                    // ─── OUTLINE STROKE ───────────────────────────────
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        listOf("White", "Yellow", "Cyan", "Green").forEach { col ->
-                                            val isSel = (subColor == col || (col == "Green" && subColor == "Light Green"))
+                                        Column {
+                                            Text(text = "Outline Stroke:", color = Color.Gray, fontSize = 12.5.sp)
+                                            Text(text = "${subOutlineWidth.toInt()}px stroke width", color = Color(0xFFA1A1AA), fontSize = 11.sp)
+                                        }
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
                                             Box(
                                                 modifier = Modifier
-                                                    .weight(1f)
-                                                    .clip(RoundedCornerShape(6.dp))
-                                                    .background(if (isSel) primaryColor else Color(0xFF26262B))
-                                                    .clickable { subColor = col }
-                                                    .padding(vertical = 8.dp),
+                                                    .size(34.dp)
+                                                    .clip(RoundedCornerShape(2.dp))
+                                                    .background(Color(0xFF222226))
+                                                    .clickable { subOutlineWidth = (subOutlineWidth - 2f).coerceAtLeast(0f) },
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                Text(col, color = if (isSel) selChipTextColor else Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                                Text(text = "↓", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                            Text(
+                                                text = "${subOutlineWidth.toInt()}px",
+                                                color = Color.White,
+                                                fontSize = 13.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.widthIn(min = 44.dp),
+                                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(34.dp)
+                                                    .clip(RoundedCornerShape(2.dp))
+                                                    .background(Color(0xFF222226))
+                                                    .clickable { subOutlineWidth = (subOutlineWidth + 2f).coerceAtMost(24f) },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(text = "↑", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                                             }
                                         }
                                     }
 
-                                    // Background Opacity
-                                    Text("Background Opacity:", color = Color.Gray, fontSize = 12.5.sp)
+                                    // ─── SUBTITLE FONT SELECTOR ────────────────────────
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(2.dp))
+                                            .background(Color(0xFF222226))
+                                            .clickable { showFontSelectorDialogInMain = true }
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        listOf(0 to "0%", 25 to "25%", 50 to "50%", 75 to "75%", 100 to "100%").forEach { (op, label) ->
-                                            val isSel = (subBgOpacity == op)
-                                            Box(
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .clip(RoundedCornerShape(6.dp))
-                                                    .background(if (isSel) primaryColor else Color(0xFF26262B))
-                                                    .clickable { subBgOpacity = op }
-                                                    .padding(vertical = 8.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(label, color = if (isSel) selChipTextColor else Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(text = "Subtitle Font", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                                            Text(text = subFontFamily, color = Color(0xFF90B8F8), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                                        }
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                            contentDescription = "Select Font",
+                                            tint = Color(0xFF8E8E98),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+
+                                    // ─── TEXT COLOR ────────────────────────────────────
+                                    Column {
+                                        Text("${loc("text_color")}:", color = Color.Gray, fontSize = 12.5.sp)
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        val colors = listOf(
+                                            "White" to android.graphics.Color.WHITE,
+                                            "Yellow" to android.graphics.Color.YELLOW,
+                                            "Cyan" to android.graphics.Color.CYAN,
+                                            "Green" to android.graphics.Color.GREEN,
+                                            "Lavender" to android.graphics.Color.rgb(208, 188, 255)
+                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            colors.forEach { (lbl, col) ->
+                                                val isSel = subTextColor == col
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clip(RoundedCornerShape(2.dp))
+                                                        .background(if (isSel) Color.White else Color(0xFF222226))
+                                                        .clickable { subTextColor = col }
+                                                        .padding(vertical = 8.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = lbl,
+                                                        color = if (isSel) Color.Black else Color.White,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        maxLines = 1
+                                                    )
+                                                }
                                             }
                                         }
                                     }
 
-                                    // Text Edge Style
-                                    Text("Text Edge Style:", color = Color.Gray, fontSize = 12.5.sp)
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        listOf("None", "Drop Shadow", "Outline").forEach { edge ->
-                                            val isSel = (subEdgeStyle == edge)
-                                            Box(
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .clip(RoundedCornerShape(6.dp))
-                                                    .background(if (isSel) primaryColor else Color(0xFF26262B))
-                                                    .clickable { subEdgeStyle = edge }
-                                                    .padding(vertical = 8.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(edge, color = if (isSel) selChipTextColor else Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                    // ─── BACKGROUND BOX OPACITY ────────────────────────
+                                    Column {
+                                        Text("${loc("background_opacity")}:", color = Color.Gray, fontSize = 12.5.sp)
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        val opacities = listOf(
+                                            "Off" to 0,
+                                            "25%" to 64,
+                                            "50%" to 128,
+                                            "75%" to 192,
+                                            "100%" to 255
+                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            opacities.forEach { (lbl, op) ->
+                                                val isSel = subBgOpacity == op
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clip(RoundedCornerShape(2.dp))
+                                                        .background(if (isSel) Color.White else Color(0xFF222226))
+                                                        .clickable { subBgOpacity = op }
+                                                        .padding(vertical = 8.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = lbl,
+                                                        color = if (isSel) Color.Black else Color.White,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
                                             }
                                         }
                                     }
+
+                                    // ─── TEXT EDGE STYLE ───────────────────────────────
+                                    Column {
+                                        Text("${loc("outline_thickness")}:", color = Color.Gray, fontSize = 12.5.sp)
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        val edgeStyles = listOf(
+                                            "None" to androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE,
+                                            "Outline" to androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+                                            "Drop Shadow" to androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW
+                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            edgeStyles.forEach { (edgeName, edgeVal) ->
+                                                val isSel = subEdgeType == edgeVal
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clip(RoundedCornerShape(2.dp))
+                                                        .background(if (isSel) Color.White else Color(0xFF222226))
+                                                        .clickable { subEdgeType = edgeVal }
+                                                        .padding(vertical = 8.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = edgeName,
+                                                        color = if (isSel) Color.Black else Color.White,
+                                                        fontSize = 11.5.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
                                 }
                             },
                             confirmButton = {
                                 Button(
                                     onClick = {
+                                        playerPrefs.edit()
+                                            .putString("subPreset", subPreset)
+                                            .putFloat("subFontSize", subFontSize)
+                                            .putInt("subTextColor", subTextColor)
+                                            .putInt("subBgOpacity", subBgOpacity)
+                                            .putInt("subEdgeType", subEdgeType)
+                                            .putFloat("subOutlineWidth", subOutlineWidth)
+                                            .putString("subFontFamily", subFontFamily)
+                                            .apply()
+
+                                        com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setSubOutlineWidth(context, subOutlineWidth)
+                                        com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setSubFontFamily(context, subFontFamily)
+
+                                        val legacyColorStr = when (subTextColor) {
+                                            android.graphics.Color.YELLOW -> "Yellow"
+                                            android.graphics.Color.CYAN -> "Cyan"
+                                            android.graphics.Color.GREEN -> "Green"
+                                            else -> "White"
+                                        }
+                                        val legacyEdgeStr = when (subEdgeType) {
+                                            androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE -> "None"
+                                            androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW -> "Drop Shadow"
+                                            else -> "Outline"
+                                        }
                                         context.getSharedPreferences("AnimeBoxPrefs", Context.MODE_PRIVATE)
                                             .edit()
                                             .putFloat("sub_font_size", subFontSize)
-                                            .putString("sub_color", subColor)
-                                            .putInt("sub_bg_opacity", subBgOpacity)
-                                            .putString("sub_edge_style", subEdgeStyle)
+                                            .putString("sub_color", legacyColorStr)
+                                            .putInt("sub_bg_opacity", (subBgOpacity * 100) / 255)
+                                            .putString("sub_edge_style", legacyEdgeStr)
                                             .apply()
+
                                         showSubtitleAppearanceDialog = false
                                         Toast.makeText(context, "Subtitle appearance saved", Toast.LENGTH_SHORT).show()
                                     },
-                                    colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                    shape = RoundedCornerShape(2.dp)
                                 ) {
-                                    Text("Save & Apply", color = selChipTextColor, fontWeight = FontWeight.Bold)
+                                    Text(loc("save_changes"), color = Color.Black, fontWeight = FontWeight.Bold)
                                 }
                             },
                             dismissButton = {
                                 TextButton(onClick = { showSubtitleAppearanceDialog = false }) {
-                                    Text("Cancel", color = Color.Gray)
+                                    Text(loc("cancel"), color = Color(0xFF8E8E98))
                                 }
                             },
-                            containerColor = Color(0xFF1E1E24)
+                            containerColor = Color(0xFF141416),
+                            shape = RoundedCornerShape(2.dp)
                         )
                     }
+
+                    com.lagradost.cloudstream3.ui.animebox.subtitles.SubtitleFontManager.SubtitleFontSelectorDialog(
+                        show = showFontSelectorDialogInMain,
+                        currentFont = subFontFamily,
+                        onSelectFont = { chosen ->
+                            subFontFamily = chosen
+                            playerPrefs.edit().putString("subFontFamily", chosen).apply()
+                            com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setSubFontFamily(context, chosen)
+                            showFontSelectorDialogInMain = false
+                        },
+                        onImportFontClick = {
+                            showFontSelectorDialogInMain = false
+                            fontPickerLauncherInMain.launch(arrayOf("*/*"))
+                        },
+                        onDismiss = { showFontSelectorDialogInMain = false }
+                    )
 
                     // 2. Downloads & Storage Manager Modal
                     if (showDownloadsStorageDialog) {
                         AlertDialog(
                             onDismissRequest = { showDownloadsStorageDialog = false },
-                            title = { Text("Downloads & Storage", color = Color.White, fontWeight = FontWeight.Bold) },
+                            title = { Text(loc("downloads_storage"), color = Color.White, fontWeight = FontWeight.Bold) },
                             text = {
                                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                                     Row(
@@ -8768,9 +13187,9 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                             },
                                             colors = SwitchDefaults.colors(
                                                 checkedThumbColor = Color.Black,
-                                                checkedTrackColor = primaryColor,
+                                                checkedTrackColor = Color.White,
                                                 uncheckedThumbColor = Color.LightGray,
-                                                uncheckedTrackColor = Color(0xFF33333C)
+                                                uncheckedTrackColor = Color(0xFF28282E)
                                             )
                                         )
                                     }
@@ -8793,9 +13212,9 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                             },
                                             colors = SwitchDefaults.colors(
                                                 checkedThumbColor = Color.Black,
-                                                checkedTrackColor = primaryColor,
+                                                checkedTrackColor = Color.White,
                                                 uncheckedThumbColor = Color.LightGray,
-                                                uncheckedTrackColor = Color(0xFF33333C)
+                                                uncheckedTrackColor = Color(0xFF28282E)
                                             )
                                         )
                                     }
@@ -8813,15 +13232,16 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                             }
                                         },
                                         modifier = Modifier.fillMaxWidth(),
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2A2A32)),
-                                        shape = RoundedCornerShape(6.dp)
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF222226)),
+                                        shape = RoundedCornerShape(2.dp)
                                     ) {
                                         Text("Clear Cache & Temporary Files", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
                                     }
                                 }
                             },
-                            confirmButton = { TextButton(onClick = { showDownloadsStorageDialog = false }) { Text("Close", color = primaryColor) } },
-                            containerColor = Color(0xFF1E1E24)
+                            confirmButton = { TextButton(onClick = { showDownloadsStorageDialog = false }) { Text(loc("close"), color = Color.White) } },
+                            containerColor = Color(0xFF141416),
+                            shape = RoundedCornerShape(2.dp)
                         )
                     }
 
@@ -8829,7 +13249,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     if (showBackupRestoreDialog) {
                         AlertDialog(
                             onDismissRequest = { showBackupRestoreDialog = false },
-                            title = { Text("Backup & Data Management", color = Color.White, fontWeight = FontWeight.Bold) },
+                            title = { Text(loc("backup_restore"), color = Color.White, fontWeight = FontWeight.Bold) },
                             text = {
                                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                                     Text("Export your profile details, library watchlist, and playback history to a backup file, or restore from a previous backup.", color = Color.LightGray, fontSize = 13.5.sp)
@@ -8840,8 +13260,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                             exportLauncher.launch("firefly_backup_$timeStamp.json")
                                         },
                                         modifier = Modifier.fillMaxWidth(),
-                                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
-                                        shape = RoundedCornerShape(6.dp)
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                        shape = RoundedCornerShape(2.dp)
                                     ) {
                                         Text("Export Data to JSON", color = Color.Black, fontWeight = FontWeight.Bold)
                                     }
@@ -8852,86 +13272,749 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                             importLauncher.launch("application/json")
                                         },
                                         modifier = Modifier.fillMaxWidth(),
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2A2A32)),
-                                        shape = RoundedCornerShape(6.dp)
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF222226)),
+                                        shape = RoundedCornerShape(2.dp)
                                     ) {
                                         Text("Import & Restore Data", color = Color.White, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             },
-                            confirmButton = { TextButton(onClick = { showBackupRestoreDialog = false }) { Text("Close", color = primaryColor) } },
-                            containerColor = Color(0xFF1E1E24)
+                            confirmButton = { TextButton(onClick = { showBackupRestoreDialog = false }) { Text(loc("close"), color = Color(0xFF8E8E93)) } },
+                            containerColor = Color(0xFF141416),
+                            shape = RoundedCornerShape(2.dp)
                         )
+                    }
+
+                    // 3c. Groq Cloud AI API Key Setup Modal
+                    if (showGroqApiKeyDialog) {
+                        var tempKeyInput by remember(currentGroqApiKey) { mutableStateOf(currentGroqApiKey) }
+                        androidx.compose.ui.window.Dialog(
+                            onDismissRequest = { showGroqApiKeyDialog = false },
+                            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+                        ) {
+                            FullscreenDialogSystemBars()
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.88f))
+                                    .statusBarsPadding()
+                                    .navigationBarsPadding()
+                                    .padding(horizontal = 24.dp, vertical = 20.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.92f)
+                                        .wrapContentHeight(),
+                                    color = Color(0xFF141418),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(24.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Image(
+                                                painter = painterResource(id = R.drawable.ic_groq_logo),
+                                                contentDescription = "Groq Logo",
+                                                modifier = Modifier.height(24.dp).width(64.dp),
+                                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                                            )
+                                            Text(
+                                                text = "Cloud AI Transcribe",
+                                                color = Color.White,
+                                                fontSize = 17.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(14.dp))
+
+                                        Text(
+                                            text = "Enter your Groq API key to transcribe anime dialogue directly in the cloud using Whisper Large v3 with zero local model downloads.",
+                                            color = Color(0xFFB0B0B8),
+                                            fontSize = 13.sp,
+                                            lineHeight = 18.sp
+                                        )
+
+                                        Spacer(modifier = Modifier.height(16.dp))
+
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(50.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFF222228))
+                                                .padding(horizontal = 14.dp),
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            BasicTextField(
+                                                value = tempKeyInput,
+                                                onValueChange = { tempKeyInput = it },
+                                                singleLine = true,
+                                                textStyle = TextStyle(
+                                                    color = Color.White,
+                                                    fontSize = 13.sp,
+                                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                                ),
+                                                cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
+                                                modifier = Modifier.fillMaxWidth(),
+                                                decorationBox = { innerTextField ->
+                                                    if (tempKeyInput.isEmpty()) {
+                                                        Text(
+                                                            text = "gsk_...",
+                                                            color = Color(0xFF6E6E7E),
+                                                            fontSize = 13.sp,
+                                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                                        )
+                                                    }
+                                                    innerTextField()
+                                                }
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+
+                                        Text(
+                                            text = "Get your free API key at console.groq.com",
+                                            color = Color(0xFF7E7E90),
+                                            fontSize = 11.sp
+                                        )
+
+                                        Spacer(modifier = Modifier.height(20.dp))
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.End,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            if (currentGroqApiKey.isNotBlank()) {
+                                                TextButton(
+                                                    onClick = {
+                                                        com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setGroqApiKey(context, "")
+                                                        currentGroqApiKey = ""
+                                                        showGroqApiKeyDialog = false
+                                                        Toast.makeText(context, "Groq API key removed.", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                ) {
+                                                    Text("Remove", color = Color(0xFFFF5252), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                                }
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                            }
+
+                                            TextButton(onClick = { showGroqApiKeyDialog = false }) {
+                                                Text(loc("close"), color = Color(0xFF8E8E98), fontSize = 13.sp)
+                                            }
+
+                                            Spacer(modifier = Modifier.width(8.dp))
+
+                                            Button(
+                                                onClick = {
+                                                    val clean = tempKeyInput.trim()
+                                                    com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setGroqApiKey(context, clean)
+                                                    currentGroqApiKey = clean
+                                                    showGroqApiKeyDialog = false
+                                                    Toast.makeText(context, "Groq API key saved!", Toast.LENGTH_SHORT).show()
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Text("Save Key", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 3d. OpenRouter AI Watch Order Assistant API Key Setup Modal
+                    if (showOpenRouterApiKeyDialog) {
+                        var tempOpenRouterKey by remember(currentOpenRouterApiKey) { mutableStateOf(currentOpenRouterApiKey) }
+                        androidx.compose.ui.window.Dialog(
+                            onDismissRequest = { showOpenRouterApiKeyDialog = false },
+                            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+                        ) {
+                            FullscreenDialogSystemBars()
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.88f))
+                                    .statusBarsPadding()
+                                    .navigationBarsPadding()
+                                    .padding(horizontal = 24.dp, vertical = 20.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.92f)
+                                        .wrapContentHeight(),
+                                    color = Color(0xFF141418),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(24.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Image(
+                                                painter = painterResource(id = R.drawable.ic_openrouter_logo),
+                                                contentDescription = "OpenRouter Logo",
+                                                modifier = Modifier.size(24.dp),
+                                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                                            )
+                                            Text(
+                                                text = "Atlas Watch Order Guide",
+                                                color = Color.White,
+                                                fontSize = 17.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(14.dp))
+
+                                        Text(
+                                            text = "Enter your OpenRouter API key to power Atlas, your watch order guide. Ask complex timeline questions, get custom skip guides, and generate interactive visual roadmaps.",
+                                            color = Color(0xFFB0B0B8),
+                                            fontSize = 13.sp,
+                                            lineHeight = 18.sp
+                                        )
+
+                                        Spacer(modifier = Modifier.height(16.dp))
+
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(50.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFF222228))
+                                                .padding(horizontal = 14.dp),
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            BasicTextField(
+                                                value = tempOpenRouterKey,
+                                                onValueChange = { tempOpenRouterKey = it },
+                                                singleLine = true,
+                                                textStyle = TextStyle(
+                                                    color = Color.White,
+                                                    fontSize = 13.sp,
+                                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                                ),
+                                                cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
+                                                modifier = Modifier.fillMaxWidth(),
+                                                decorationBox = { innerTextField ->
+                                                    if (tempOpenRouterKey.isEmpty()) {
+                                                        Text(
+                                                            text = "sk-or-v1-...",
+                                                            color = Color(0xFF6E6E7E),
+                                                            fontSize = 13.sp,
+                                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                                        )
+                                                    }
+                                                    innerTextField()
+                                                }
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+
+                                        Text(
+                                            text = "Get your API key at openrouter.ai/keys",
+                                            color = Color(0xFF7E7E90),
+                                            fontSize = 11.sp
+                                        )
+
+                                        Spacer(modifier = Modifier.height(20.dp))
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.End,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            if (currentOpenRouterApiKey.isNotBlank()) {
+                                                TextButton(
+                                                    onClick = {
+                                                        com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setOpenRouterApiKey(context, "")
+                                                        currentOpenRouterApiKey = ""
+                                                        showOpenRouterApiKeyDialog = false
+                                                        Toast.makeText(context, "OpenRouter API key removed.", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                ) {
+                                                    Text("Remove", color = Color(0xFFFF5252), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                                }
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                            }
+
+                                            TextButton(onClick = { showOpenRouterApiKeyDialog = false }) {
+                                                Text(loc("close"), color = Color(0xFF8E8E98), fontSize = 13.sp)
+                                            }
+
+                                            Spacer(modifier = Modifier.width(8.dp))
+
+                                            Button(
+                                                onClick = {
+                                                    val clean = tempOpenRouterKey.trim()
+                                                    com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setOpenRouterApiKey(context, clean)
+                                                    currentOpenRouterApiKey = clean
+                                                    showOpenRouterApiKeyDialog = false
+                                                    Toast.makeText(context, "OpenRouter API key saved!", Toast.LENGTH_SHORT).show()
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Text("Save Key", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 3e. Redeem Feature Modal
+                    if (showRedeemFeatureDialog) {
+                        var redeemCodeInput by remember { mutableStateOf("") }
+                        val validFeatureCodes = remember {
+                            setOf(
+                                "HNTAI1", "HNTAIX", "HNTA69", "ANIMEX", "18PLUS",
+                                "ECCHI8", "BUNNY1", "ADULT1", "181818", "696969",
+                                "800813", "777888", "180018"
+                            )
+                        }
+                        val isCodeComplete = redeemCodeInput.length == 6
+                        val isValidCode = validFeatureCodes.contains(redeemCodeInput.trim().uppercase())
+
+                        androidx.compose.ui.window.Dialog(
+                            onDismissRequest = { showRedeemFeatureDialog = false },
+                            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+                        ) {
+                            FullscreenDialogSystemBars()
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.88f))
+                                    .statusBarsPadding()
+                                    .navigationBarsPadding()
+                                    .padding(horizontal = 24.dp, vertical = 20.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.92f)
+                                        .wrapContentHeight(),
+                                    color = Color(0xFF141418),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(24.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Image(
+                                                painter = painterResource(id = R.drawable.ic_redeem_feature),
+                                                contentDescription = "Redeem Feature Logo",
+                                                modifier = Modifier.size(26.dp),
+                                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                                            )
+                                            Text(
+                                                text = "Redeem Feature",
+                                                color = Color.White,
+                                                fontSize = 17.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(14.dp))
+
+                                        Text(
+                                            text = "Enter a 6-digit feature code to unlock exclusive features. Use Support & Feedback ticket to get a feature code, or use codes already shared on the internet by users.",
+                                            color = Color(0xFFB0B0B8),
+                                            fontSize = 13.sp,
+                                            lineHeight = 18.sp
+                                        )
+
+                                        Spacer(modifier = Modifier.height(16.dp))
+
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(50.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFF222228))
+                                                .padding(horizontal = 14.dp),
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            androidx.compose.foundation.text.BasicTextField(
+                                                value = redeemCodeInput,
+                                                onValueChange = { newVal ->
+                                                    val filtered = newVal.filter { it.isLetterOrDigit() }.take(6)
+                                                    redeemCodeInput = filtered.uppercase()
+                                                },
+                                                singleLine = true,
+                                                textStyle = androidx.compose.ui.text.TextStyle(
+                                                    color = Color.White,
+                                                    fontSize = 15.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                                    letterSpacing = 2.sp
+                                                ),
+                                                cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
+                                                modifier = Modifier.fillMaxWidth(),
+                                                decorationBox = { innerTextField ->
+                                                    if (redeemCodeInput.isEmpty()) {
+                                                        Text(
+                                                            text = "Enter 6-character code",
+                                                            color = Color(0xFF6E6E7E),
+                                                            fontSize = 13.sp,
+                                                            letterSpacing = 0.sp
+                                                        )
+                                                    }
+                                                    innerTextField()
+                                                }
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(10.dp))
+
+                                        if (isCodeComplete) {
+                                            if (isValidCode) {
+                                                Surface(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    color = Color(0xFF1E2127),
+                                                    shape = RoundedCornerShape(4.dp)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(12.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(44.dp)
+                                                                .clip(RoundedCornerShape(8.dp))
+                                                                .background(Color(0xFF282B33)),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Image(
+                                                                painter = painterResource(id = R.drawable.ic_hentai_bunny),
+                                                                contentDescription = "Hentai Animes Icon",
+                                                                modifier = Modifier.size(32.dp),
+                                                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                                                            )
+                                                        }
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Text(
+                                                                text = "Hentai Animes",
+                                                                color = Color.White,
+                                                                fontSize = 14.sp,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                            Text(
+                                                                text = "Exclusive 18+ adult content ready to claim",
+                                                                color = Color(0xFFB0B0B8),
+                                                                fontSize = 11.5.sp,
+                                                                lineHeight = 15.sp
+                                                            )
+                                                        }
+                                                        Button(
+                                                            onClick = {
+                                                                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setHentaiFeatureUnlocked(context, true)
+                                                                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setAdultContentEnabled(context, false)
+                                                                isHentaiUnlocked = true
+                                                                showRedeemFeatureDialog = false
+                                                                Toast.makeText(context, "Hentai Animes unlocked! Enable the toggle in My Space when ready.", Toast.LENGTH_LONG).show()
+                                                            },
+                                                            colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                                            shape = RoundedCornerShape(4.dp),
+                                                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                                                        ) {
+                                                            Text("Claim", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                Text(
+                                                    text = "Invalid feature code. Please check your code or request one via Support & Feedback.",
+                                                    color = Color(0xFFFF5252),
+                                                    fontSize = 11.5.sp,
+                                                    lineHeight = 15.sp
+                                                )
+                                            }
+                                        } else if (isHentaiUnlocked) {
+                                            Text(
+                                                text = "Hentai Animes feature is already claimed and available in My Space.",
+                                                color = Color(0xFF7E7E90),
+                                                fontSize = 11.sp
+                                            )
+                                        } else {
+                                            Text(
+                                                text = "Need a code? Submit a ticket in Support & Feedback.",
+                                                color = Color(0xFF7E7E90),
+                                                fontSize = 11.sp
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(18.dp))
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.End,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            TextButton(onClick = { showRedeemFeatureDialog = false }) {
+                                                Text(loc("close"), color = Color(0xFF8E8E98), fontSize = 13.sp)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     // 4. Theme Modal
                     if (showThemeDialog) {
                         AlertDialog(
                             onDismissRequest = { showThemeDialog = false },
-                            title = { Text("Choose Theme Color", color = Color.White, fontWeight = FontWeight.Bold) },
+                            title = { Text(loc("choose_theme"), color = Color.White, fontWeight = FontWeight.Bold) },
                             text = {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     listOf(
-                                        "lavender" to "Lavender Purple (Default)",
-                                        "light_red" to "Crimson Red",
-                                        "cyan" to "Ocean Cyan",
-                                        "emerald" to "Emerald Green",
-                                        "amber" to "Golden Amber"
-                                    ).forEach { (thm, label) ->
+                                        Triple("lavender", "Lavender Purple (Default)", Color(0xFFD0BCFF)),
+                                        Triple("light_red", "Crimson Red", Color(0xFFEF4444)),
+                                        Triple("cyan", "Ocean Cyan", Color(0xFF06B6D4)),
+                                        Triple("emerald", "Emerald Green", Color(0xFF10B981)),
+                                        Triple("amber", "Golden Amber", Color(0xFFF59E0B)),
+                                        Triple("light_green", "Vivid Light Green", Color(0xFF84CC16))
+                                    ).forEach { (thm, label, swatchColor) ->
                                         val isSel = currentTheme == thm
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .clip(RoundedCornerShape(8.dp))
-                                                .background(if (isSel) Color(0xFF2E2E36) else Color.Transparent)
+                                                .background(if (isSel) Color(0xFF222226) else Color(0xFF18191E))
                                                 .clickable {
                                                     currentTheme = thm
                                                     com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setAppTheme(context, thm)
                                                     showThemeDialog = false
                                                 }
-                                                .padding(12.dp),
+                                                .padding(horizontal = 12.dp, vertical = 10.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text(label, color = if (isSel) primaryColor else Color.White, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal)
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(22.dp)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(swatchColor)
+                                            )
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Text(
+                                                text = label,
+                                                color = if (isSel) Color.White else Color(0xFFB0B0B8),
+                                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                                fontSize = 13.5.sp
+                                            )
                                         }
+                                    }
+
+                                    // Button at bottom to open Navbar Settings (equal 8.dp gap, no icon, no thin border)
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color(0xFF1E2028))
+                                            .clickable {
+                                                showThemeDialog = false
+                                                showNavbarThemeDialog = true
+                                            }
+                                            .padding(horizontal = 14.dp, vertical = 11.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column {
+                                            Text(
+                                                text = "Navbar Settings",
+                                                color = Color.White,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 13.5.sp
+                                            )
+                                            Text(
+                                                text = "Customize navbar color & outline",
+                                                color = Color(0xFF8E8E93),
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                            contentDescription = null,
+                                            tint = Color(0xFF8E8E93),
+                                            modifier = Modifier.size(20.dp)
+                                        )
                                     }
                                 }
                             },
-                            confirmButton = { TextButton(onClick = { showThemeDialog = false }) { Text("Close", color = primaryColor) } },
-                            containerColor = Color(0xFF1E1E24)
+                            confirmButton = { TextButton(onClick = { showThemeDialog = false }) { Text(loc("close"), color = Color(0xFF8E8E93)) } },
+                            containerColor = Color(0xFF141416),
+                            shape = RoundedCornerShape(12.dp)
                         )
                     }
 
-                    // 5. Language Modal
-                    if (showLanguageDialog) {
+                    // 4d. Navbar Settings Modal (Color Theme & Outline Theme)
+                    if (showNavbarThemeDialog) {
+                        var currentNavBg by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getNavbarBgTheme(context)) }
+                        var currentNavOutline by remember { mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getNavbarOutlineTheme(context)) }
+
                         AlertDialog(
-                            onDismissRequest = { showLanguageDialog = false },
-                            title = { Text("Display Language", color = Color.White, fontWeight = FontWeight.Bold) },
+                            onDismissRequest = { showNavbarThemeDialog = false },
+                            title = {
+                                Text(
+                                    text = "Navbar Settings",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp
+                                )
+                            },
                             text = {
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    listOf("English", "Japanese", "Hindi", "Spanish", "French", "German", "Portuguese", "Indonesian", "Arabic", "Russian").forEach { lang ->
-                                        val isSel = displayLanguage == lang
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                                ) {
+                                    Text(
+                                        text = "Navbar Background Color:",
+                                        color = Color.Gray,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    listOf(
+                                        "greyish" to ("Greyish Slate (Default - as before)" to Color(0xFF1E2026)),
+                                        "dark_black" to ("Dark Black" to Color(0xFF131417))
+                                    ).forEach { (mode, pair) ->
+                                        val (label, bgSample) = pair
+                                        val isSel = currentNavBg == mode
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .clip(RoundedCornerShape(8.dp))
-                                                .background(if (isSel) Color(0xFF2E2E36) else Color.Transparent)
+                                                .background(if (isSel) Color(0xFF222226) else Color(0xFF18191E))
                                                 .clickable {
-                                                    displayLanguage = lang
-                                                    com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setDisplayLanguage(context, lang)
-                                                    showLanguageDialog = false
-                                                    Toast.makeText(context, "Display Language: $lang", Toast.LENGTH_SHORT).show()
+                                                    currentNavBg = mode
+                                                    com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setNavbarBgTheme(context, mode)
                                                 }
-                                                .padding(12.dp),
+                                                .padding(horizontal = 12.dp, vertical = 10.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text(lang, color = if (isSel) primaryColor else Color.White, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal)
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(22.dp)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(bgSample)
+                                            )
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Text(
+                                                text = label,
+                                                color = if (isSel) Color.White else Color(0xFFB0B0B8),
+                                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                                fontSize = 13.5.sp
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(2.dp))
+
+                                    Text(
+                                        text = "Selection & Profile Outline Theme:",
+                                        color = Color.Gray,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    listOf(
+                                        "white" to ("White Outline (Default)" to Color.White),
+                                        "yellow" to ("Yellow Outline" to Color(0xFFF0B836))
+                                    ).forEach { (mode, pair) ->
+                                        val (label, outlineSample) = pair
+                                        val isSel = currentNavOutline == mode
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (isSel) Color(0xFF222226) else Color(0xFF18191E))
+                                                .clickable {
+                                                    currentNavOutline = mode
+                                                    com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setNavbarOutlineTheme(context, mode)
+                                                }
+                                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(22.dp)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(outlineSample)
+                                            )
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Text(
+                                                text = label,
+                                                color = if (isSel) Color.White else Color(0xFFB0B0B8),
+                                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                                fontSize = 13.5.sp
+                                            )
                                         }
                                     }
                                 }
                             },
-                            confirmButton = { TextButton(onClick = { showLanguageDialog = false }) { Text("Close", color = primaryColor) } },
-                            containerColor = Color(0xFF1E1E24)
+                            confirmButton = {
+                                TextButton(onClick = { showNavbarThemeDialog = false }) {
+                                    Text(loc("done"), color = Color.White, fontWeight = FontWeight.Bold)
+                                }
+                            },
+                            containerColor = Color(0xFF141416),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
+
+                    // Default episode view selection
+                    if (showEpisodeViewDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showEpisodeViewDialog = false },
+                            title = { Text("Default Episode View", color = Color.White, fontWeight = FontWeight.Bold) },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    listOf("Image View" to "image", "Number View" to "number").forEach { (label, mode) ->
+                                        val isSel = defaultEpViewMode == mode
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(2.dp))
+                                                .background(if (isSel) Color(0xFF222226) else Color.Transparent)
+                                                .clickable {
+                                                    defaultEpViewMode = mode
+                                                    com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setDefaultEpisodeViewMode(context, mode)
+                                                    showEpisodeViewDialog = false
+                                                }
+                                                .padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(label, color = if (isSel) Color.White else Color(0xFFB0B0B8), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal)
+                                        }
+                                    }
+                                }
+                            },
+                            confirmButton = { TextButton(onClick = { showEpisodeViewDialog = false }) { Text(loc("close"), color = Color(0xFF8E8E93)) } },
+                            containerColor = Color(0xFF141416),
+                            shape = RoundedCornerShape(2.dp)
                         )
                     }
 
@@ -8939,75 +14022,109 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     if (showAudioSubDialog) {
                         AlertDialog(
                             onDismissRequest = { showAudioSubDialog = false },
-                            title = { Text("Default Audio & Subtitles", color = Color.White, fontWeight = FontWeight.Bold) },
+                            title = { Text(loc("default_audio_sub"), color = Color.White, fontWeight = FontWeight.Bold) },
                             text = {
                                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Text("Preferred Audio Track:", color = Color.Gray, fontSize = 13.sp)
-                                    listOf("Japanese (Original)", "English", "Hindi").forEach { aud ->
+                                    Text("${loc("preferred_audio")}:", color = Color.Gray, fontSize = 13.sp)
+                                    listOf(
+                                        "Japanese (Original)",
+                                        "English",
+                                        "Hindi",
+                                        "French (VF)",
+                                        "Italian (ITA)",
+                                        "Spanish (Latino)",
+                                        "Spanish (Castellano)",
+                                        "German (Deutsch)"
+                                    ).forEach { aud ->
                                         val isSel = currentAudio.contains(aud)
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(if (isSel) Color(0xFF2E2E36) else Color.Transparent)
+                                                .clip(RoundedCornerShape(2.dp))
+                                                .background(if (isSel) Color(0xFF222226) else Color.Transparent)
                                                 .clickable {
                                                     currentAudio = aud
                                                     com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setLastUsedAudio(context, aud)
-                                                    if ((aud == "English" || aud == "Hindi") && currentSubMode == "Hard Sub") {
-                                                        currentSubMode = "Off"
-                                                        com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setLastUsedSubMode(context, "Off")
+                                                    if (aud != "Japanese (Original)" && currentSubMode == "Hard Sub") {
+                                                        currentSubMode = "English (VTT)"
+                                                        com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setLastUsedSubMode(context, "English (VTT)")
                                                     }
                                                 }
                                                 .padding(10.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text(aud, color = if (isSel) primaryColor else Color.White, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal)
+                                            Text(aud, color = if (isSel) Color.White else Color(0xFFB0B0B8), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal)
                                         }
                                     }
                                     Spacer(modifier = Modifier.height(6.dp))
-                                    Text("Preferred Subtitles:", color = Color.Gray, fontSize = 13.sp)
-                                    val availableSubList = if (currentAudio == "English" || currentAudio == "Hindi") {
+                                    Text("${loc("preferred_sub")}:", color = Color.Gray, fontSize = 13.sp)
+                                    val isNonJpSubOff = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isNonJapaneseSubOff(context)
+                                    val availableSubList = if (currentAudio != "Japanese (Original)") {
                                         listOf("English (VTT)", "Off")
                                     } else {
-                                        listOf("English (VTT)", "Hard Sub", "Off")
+                                        listOf("English (VTT)", "Hard Sub")
+                                    }
+                                    if (currentAudio != "Japanese (Original)" && isNonJpSubOff) {
+                                        currentSubMode = "Off"
+                                    } else if (currentSubMode == "Off" && currentAudio == "Japanese (Original)") {
+                                        currentSubMode = "English (VTT)"
+                                        com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setLastUsedSubMode(context, "English (VTT)")
                                     }
                                     availableSubList.forEach { sub ->
                                         val isSel = currentSubMode == sub
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(if (isSel) Color(0xFF2E2E36) else Color.Transparent)
+                                                .clip(RoundedCornerShape(2.dp))
+                                                .background(if (isSel) Color(0xFF222226) else Color.Transparent)
                                                 .clickable {
                                                     currentSubMode = sub
-                                                    com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setLastUsedSubMode(context, sub)
-                                                    if (sub == "Hard Sub") {
-                                                        currentAudio = "Japanese (Original)"
-                                                        com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setLastUsedAudio(context, "Japanese (Original)")
+                                                    if (sub == "Off") {
+                                                        com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setNonJapaneseSubOff(context, true)
+                                                        com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setLastUsedSubMode(context, "Off")
+                                                    } else {
+                                                        if (currentAudio != "Japanese (Original)") {
+                                                            com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setNonJapaneseSubOff(context, false)
+                                                        }
+                                                        com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setLastUsedSubMode(context, sub)
+                                                        if (sub == "Hard Sub") {
+                                                            currentAudio = "Japanese (Original)"
+                                                            com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setLastUsedAudio(context, "Japanese (Original)")
+                                                        }
                                                     }
                                                 }
                                                 .padding(10.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text(sub, color = if (isSel) primaryColor else Color.White, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal)
+                                            Text(sub, color = if (isSel) Color.White else Color(0xFFB0B0B8), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal)
                                         }
                                     }
                                 }
                             },
-                            confirmButton = { TextButton(onClick = { showAudioSubDialog = false }) { Text("Done", color = primaryColor) } },
-                            containerColor = Color(0xFF1E1E24)
+                            confirmButton = { TextButton(onClick = { showAudioSubDialog = false }) { Text(loc("done"), color = Color.White, fontWeight = FontWeight.Bold) } },
+                            containerColor = Color(0xFF141416),
+                            shape = RoundedCornerShape(2.dp)
                         )
                     }
 
                     // 7b. Server Priority Modal
                     if (showServerPriorityDialog) {
                         var selectedCategory by remember { mutableStateOf("sub") }
-                        val categories = listOf(
-                            "sub" to "Sub",
-                            "dub" to "Dub",
-                            "hardsub" to "Hard Sub",
-                            "hindi" to "Hindi Dub"
-                        )
+                        val isHentaiModeOn = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAdultContentEnabled(context)
+                        val categories = buildList {
+                            add("sub" to "Sub")
+                            add("dub" to "Dub")
+                            add("hardsub" to "Hard Sub")
+                            add("hindi" to "Hindi Dub")
+                            add("french" to "French (VF)")
+                            add("italian" to "Italian (ITA)")
+                            add("spanish_latino" to "Spanish (Latino)")
+                            add("spanish_castellano" to "Spanish (Castellano)")
+                            add("german" to "German (Deutsch)")
+                            if (isHentaiModeOn) {
+                                add("hentai-jp" to "Hentai (JP)")
+                            }
+                        }
                         var currentPriorityKey by remember(selectedCategory) {
                             mutableStateOf(ServerPriorityManager.getPreferredServer(context, selectedCategory))
                         }
@@ -9032,12 +14149,13 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         .fillMaxWidth()
                                         .heightIn(max = 420.dp)
                                 ) {
-                                    // Category Tabs
+                                    // Category Tabs with horizontal scroll
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(Color(0xFF26262E))
+                                            .horizontalScroll(rememberScrollState())
+                                            .clip(RoundedCornerShape(2.dp))
+                                            .background(Color(0xFF1C1C20))
                                             .padding(3.dp),
                                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
@@ -9045,14 +14163,13 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                             val isTabSel = selectedCategory == catKey
                                             Box(
                                                 modifier = Modifier
-                                                    .weight(1f)
-                                                    .clip(RoundedCornerShape(6.dp))
-                                                    .background(if (isTabSel) primaryColor else Color.Transparent)
+                                                    .clip(RoundedCornerShape(2.dp))
+                                                    .background(if (isTabSel) Color.White else Color.Transparent)
                                                     .clickable {
                                                         selectedCategory = catKey
                                                         currentPriorityKey = ServerPriorityManager.getPreferredServer(context, catKey)
                                                     }
-                                                    .padding(vertical = 8.dp),
+                                                    .padding(horizontal = 10.dp, vertical = 8.dp),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Text(
@@ -9083,13 +14200,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                             Row(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(if (isSelected) Color(0xFF2E2E38) else Color(0xFF24242A))
-                                                    .border(
-                                                        width = if (isSelected) 1.dp else 0.dp,
-                                                        color = if (isSelected) primaryColor else Color.Transparent,
-                                                        shape = RoundedCornerShape(8.dp)
-                                                    )
+                                                    .clip(RoundedCornerShape(2.dp))
+                                                    .background(if (isSelected) Color(0xFF222226) else Color(0xFF1A1A1E))
                                                     .clickable {
                                                         currentPriorityKey = opt.key
                                                         ServerPriorityManager.setPreferredServer(context, selectedCategory, opt.key)
@@ -9106,7 +14218,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                         Toast.makeText(context, "${opt.displayName} set as primary", Toast.LENGTH_SHORT).show()
                                                     },
                                                     colors = RadioButtonDefaults.colors(
-                                                        selectedColor = primaryColor,
+                                                        selectedColor = Color.White,
                                                         unselectedColor = Color.Gray
                                                     ),
                                                     modifier = Modifier.size(20.dp)
@@ -9116,7 +14228,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
 
                                                 Text(
                                                     text = opt.displayName,
-                                                    color = if (isSelected) primaryColor else Color.White,
+                                                    color = if (isSelected) Color.White else Color(0xFFB0B0B8),
                                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                                     fontSize = 13.5.sp,
                                                     modifier = Modifier.weight(1f)
@@ -9128,10 +14240,11 @@ class AnimeBoxMainActivity : ComponentActivity() {
                             },
                             confirmButton = {
                                 TextButton(onClick = { showServerPriorityDialog = false }) {
-                                    Text("Done", color = primaryColor, fontWeight = FontWeight.Bold)
+                                    Text(loc("done"), color = Color.White, fontWeight = FontWeight.Bold)
                                 }
                             },
-                            containerColor = Color(0xFF1E1E24)
+                            containerColor = Color(0xFF141416),
+                            shape = RoundedCornerShape(2.dp)
                         )
                     }
 
@@ -9139,7 +14252,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     if (showPlayerControlsDialog) {
                         AlertDialog(
                             onDismissRequest = { showPlayerControlsDialog = false },
-                            title = { Text("Player & Gesture Controls", color = Color.White, fontWeight = FontWeight.Bold) },
+                            title = { Text(loc("player_controls"), color = Color.White, fontWeight = FontWeight.Bold) },
                             text = {
                                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                                     Text("Double-tap & Button Seek Interval:", color = Color.Gray, fontSize = 13.sp)
@@ -9152,8 +14265,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                             Box(
                                                 modifier = Modifier
                                                     .weight(1f)
-                                                    .clip(RoundedCornerShape(6.dp))
-                                                    .background(if (isSel) primaryColor else Color(0xFF26262E))
+                                                    .clip(RoundedCornerShape(2.dp))
+                                                    .background(if (isSel) Color.White else Color(0xFF222226))
                                                     .clickable {
                                                         seekDuration = sec
                                                         com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setSeekDuration(context, sec)
@@ -9178,8 +14291,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(Color(0xFF26262E))
+                                            .clip(RoundedCornerShape(2.dp))
+                                            .background(Color(0xFF1E1E22))
                                             .clickable {
                                                 val newMode = if (brightnessMode == "gesture") "hidden" else "gesture"
                                                 brightnessMode = newMode
@@ -9202,9 +14315,9 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                             },
                                             colors = SwitchDefaults.colors(
                                                 checkedThumbColor = Color.Black,
-                                                checkedTrackColor = primaryColor,
+                                                checkedTrackColor = Color.White,
                                                 uncheckedThumbColor = Color.LightGray,
-                                                uncheckedTrackColor = Color(0xFF33333C)
+                                                uncheckedTrackColor = Color(0xFF28282E)
                                             )
                                         )
                                     }
@@ -9213,8 +14326,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(Color(0xFF26262E))
+                                            .clip(RoundedCornerShape(2.dp))
+                                            .background(Color(0xFF1E1E22))
                                             .clickable {
                                                 val newMode = if (volumeMode == "gesture") "hidden" else "gesture"
                                                 volumeMode = newMode
@@ -9237,28 +14350,277 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                             },
                                             colors = SwitchDefaults.colors(
                                                 checkedThumbColor = Color.Black,
-                                                checkedTrackColor = primaryColor,
+                                                checkedTrackColor = Color.White,
                                                 uncheckedThumbColor = Color.LightGray,
-                                                uncheckedTrackColor = Color(0xFF33333C)
+                                                uncheckedTrackColor = Color(0xFF28282E)
                                             )
                                         )
                                     }
                                 }
                             },
-                            confirmButton = { TextButton(onClick = { showPlayerControlsDialog = false }) { Text("Done", color = primaryColor) } },
-                            containerColor = Color(0xFF1E1E24)
+                            confirmButton = { TextButton(onClick = { showPlayerControlsDialog = false }) { Text(loc("done"), color = Color.White, fontWeight = FontWeight.Bold) } },
+                            containerColor = Color(0xFF141416),
+                            shape = RoundedCornerShape(2.dp)
+                        )
+                    }
+
+                    // 8a. Download Quality Selection Modal
+                    if (showDownloadQualityDialog) {
+                        val qualityOptions = listOf(
+                            Triple("1080p", "1080p Full HD", "Crisp clarity and maximum details (Recommended for Wi-Fi)"),
+                            Triple("720p", "720p HD", "Balanced file size and sharp high-definition viewing"),
+                            Triple("480p", "480p Standard Definition", "Saves storage space and downloads rapidly on mobile data"),
+                            Triple("360p", "360p Data Saver", "Smallest file size, ideal for limited storage or slower networks"),
+                            Triple("ask", "Always Ask", "Prompt available quality options each time you download an episode")
+                        )
+
+                        AlertDialog(
+                            onDismissRequest = { showDownloadQualityDialog = false },
+                            title = {
+                                Column {
+                                    Text(
+                                        text = "Preferred Download Quality",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 17.5.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Set your default video quality for downloads.",
+                                        color = Color.Gray,
+                                        fontSize = 12.sp,
+                                        lineHeight = 16.sp
+                                    )
+                                }
+                            },
+                            text = {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .verticalScroll(rememberScrollState()),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    qualityOptions.forEach { (code, title, desc) ->
+                                        val isSelected = currentDownloadQuality == code
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color(0xFF1E1E24))
+                                            .clickable {
+                                                currentDownloadQuality = code
+                                                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setDownloadQuality(context, code)
+                                                showDownloadQualityDialog = false
+                                                Toast.makeText(context, "Download quality set to $title", Toast.LENGTH_SHORT).show()
+                                            }
+                                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = title,
+                                                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                                    fontSize = 13.5.sp
+                                                )
+                                                if (code == "1080p") {
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(4.dp))
+                                                            .background(Color(0xFF2A2A30))
+                                                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                                                    ) {
+                                                        Text("FHD", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = desc,
+                                                color = Color(0xFF8E8E98),
+                                                fontSize = 11.5.sp,
+                                                lineHeight = 15.sp
+                                            )
+                                        }
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { showDownloadQualityDialog = false }) {
+                                Text(loc("done"), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                            }
+                        },
+                        containerColor = Color(0xFF141418),
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                }
+
+                    if (showAutomaticMlKitDialog) {
+                        val choices = listOf("off" to "Off") + installedMlKitLanguages.map { it.langCode to it.langName }
+                        AlertDialog(
+                            onDismissRequest = { showAutomaticMlKitDialog = false },
+                            title = {
+                                Column {
+                                    Text("Automatic ML Kit Translation", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        "Automatically translate the episode's English subtitles into a downloaded language model. This runs again for each episode.",
+                                        color = Color(0xFF9698A0),
+                                        fontSize = 11.5.sp,
+                                        lineHeight = 15.sp
+                                    )
+                                }
+                            },
+                            text = {
+                                Column(
+                                    Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    if (installedMlKitLanguages.isEmpty()) {
+                                        Text(
+                                            "No ML Kit translation models are downloaded yet. Download a Normal translation model from AI Models to enable automatic translation.",
+                                            color = Color(0xFFB0B0B8),
+                                            fontSize = 12.sp,
+                                            lineHeight = 16.sp,
+                                            modifier = Modifier.padding(vertical = 8.dp)
+                                        )
+                                    }
+                                    choices.forEach { (code, label) ->
+                                        val selected = automaticMlKitLanguage.equals(code, ignoreCase = true)
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(if (selected) Color(0xFF24262C) else Color.Transparent)
+                                                .clickable {
+                                                    automaticMlKitLanguage = code
+                                                    com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setAutomaticMlKitTranslationLanguage(context, code)
+                                                    showAutomaticMlKitDialog = false
+                                                }
+                                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            RadioButton(
+                                                selected = selected,
+                                                onClick = {
+                                                    automaticMlKitLanguage = code
+                                                    com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setAutomaticMlKitTranslationLanguage(context, code)
+                                                    showAutomaticMlKitDialog = false
+                                                },
+                                                colors = RadioButtonDefaults.colors(selectedColor = Color.White, unselectedColor = Color.Gray),
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                            Spacer(Modifier.width(12.dp))
+                                            Text(label, color = if (selected) Color.White else Color(0xFFB0B0B8), fontSize = 13.sp)
+                                        }
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { showAutomaticMlKitDialog = false }) {
+                                    Text(loc("done"), color = Color.White, fontWeight = FontWeight.Bold)
+                                }
+                            },
+                            containerColor = Color(0xFF141416),
+                            shape = RoundedCornerShape(2.dp)
                         )
                     }
 
                     // 8b. Video Player Timeline Color Picker Modal
-                    if (showTimelineColorDialog) {
+                    if (showPlayerStyleDialog) {
                         AlertDialog(
-                            onDismissRequest = { showTimelineColorDialog = false },
-                            title = { Text("Player Timeline Accent Color", color = Color.White, fontWeight = FontWeight.Bold) },
+                            onDismissRequest = { showPlayerStyleDialog = false },
+                            title = {
+                                Text(
+                                    "Video Player Style",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
                             text = {
                                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     listOf(
-                                        "lavender" to ("Lavender Purple (Default)" to Color(0xFFD0BCFF)),
+                                        com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.PLAYER_STYLE_DEFAULT to ("Default Player" to "Classic full-featured anime player"),
+                                        com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.PLAYER_STYLE_YOUTUBE to ("YouTube Style" to "Modern minimalist player with glassy controls & gestures")
+                                    ).forEach { (styleKey, pair) ->
+                                        val (label, desc) = pair
+                                        val isSel = playerStyle == styleKey
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (isSel) Color(0xFF222226) else Color.Transparent)
+                                                .clickable {
+                                                    playerStyle = styleKey
+                                                    com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setPlayerStyle(context, styleKey)
+                                                    showPlayerStyleDialog = false
+                                                    Toast.makeText(context, "Player Style: $label", Toast.LENGTH_SHORT).show()
+                                                }
+                                                .padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = label,
+                                                    color = if (isSel) Color.White else Color(0xFFB0B0B8),
+                                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                                    fontSize = 15.sp
+                                                )
+                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Text(
+                                                    text = desc,
+                                                    color = Color(0xFF8E8E93),
+                                                    fontSize = 12.sp
+                                                )
+                                            }
+                                            if (isSel) {
+                                                Icon(
+                                                    imageVector = androidx.compose.material.icons.Icons.Default.Check,
+                                                    contentDescription = "Selected",
+                                                    tint = primaryColor,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { showPlayerStyleDialog = false }) {
+                                    Text(loc("cancel"), color = Color(0xFF8E8E93))
+                                }
+                            },
+                            containerColor = Color(0xFF141416),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
+
+                    if (showTimelineColorDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showTimelineColorDialog = false },
+                            title = {
+                                Text(
+                                    loc("player_timeline_color"),
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    listOf(
+                                        "lavender" to ("Lavender Purple" to Color(0xFFD0BCFF)),
+                                        "light_green" to ("Vivid Light Green" to Color(0xFF00D26A)),
                                         "red" to ("Netflix Crimson Red" to Color(0xFFE50914)),
                                         "cyan" to ("Ocean Cyan" to Color(0xFF06B6D4)),
                                         "emerald" to ("Emerald Green" to Color(0xFF10B981)),
@@ -9266,15 +14628,17 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         "white" to ("Pure White" to Color(0xFFFFFFFF))
                                     ).forEach { (themeKey, pair) ->
                                         val (label, swatchColor) = pair
-                                        val isSel = timelineTheme == themeKey
+                                        val isSel = if (currentPlayerStyle == "player2") player2TimelineTheme == themeKey else timelineTheme == themeKey
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .clip(RoundedCornerShape(8.dp))
-                                                .background(if (isSel) Color(0xFF2E2E38) else Color.Transparent)
+                                                .background(if (isSel) Color(0xFF222226) else Color.Transparent)
                                                 .clickable {
                                                     timelineTheme = themeKey
+                                                    player2TimelineTheme = themeKey
                                                     com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setPlayerTimelineTheme(context, themeKey)
+                                                    com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setPlayer2TimelineTheme(context, themeKey)
                                                     showTimelineColorDialog = false
                                                     Toast.makeText(context, "Timeline Color: $label", Toast.LENGTH_SHORT).show()
                                                 }
@@ -9283,15 +14647,14 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         ) {
                                             Box(
                                                 modifier = Modifier
-                                                    .size(22.dp)
-                                                    .clip(CircleShape)
+                                                    .size(20.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
                                                     .background(swatchColor)
-                                                    .border(1.dp, Color.White.copy(alpha = 0.5f), CircleShape)
                                             )
                                             Spacer(modifier = Modifier.width(14.dp))
                                             Text(
                                                 text = label,
-                                                color = if (isSel) Color.White else Color(0xFFCCCCCC),
+                                                color = if (isSel) Color.White else Color(0xFFB0B0B8),
                                                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
                                                 fontSize = 14.sp
                                             )
@@ -9299,47 +14662,305 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                     }
                                 }
                             },
-                            confirmButton = { TextButton(onClick = { showTimelineColorDialog = false }) { Text("Cancel", color = primaryColor) } },
-                            containerColor = Color(0xFF1E1E24)
+                            confirmButton = { TextButton(onClick = { showTimelineColorDialog = false }) { Text(loc("cancel"), color = Color(0xFF8E8E93)) } },
+                            containerColor = Color(0xFF141416),
+                            shape = RoundedCornerShape(12.dp)
                         )
                     }
 
                     // 9. DNS Modal
                     if (showDnsDialog) {
+                        var customUrlInput by remember {
+                            mutableStateOf(com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getCustomDnsUrl(context))
+                        }
+                        var selectedModeInDialog by remember { mutableStateOf(dnsMode) }
+                        var isCustomSelected by remember { mutableStateOf(dnsMode == "custom") }
+
                         AlertDialog(
                             onDismissRequest = { showDnsDialog = false },
-                            title = { Text("DNS & Network Routing", color = Color.White, fontWeight = FontWeight.Bold) },
+                            title = {
+                                Text(
+                                    loc("network_dns"),
+                                    color = Color.White,
+                                    fontSize = 17.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
                             text = {
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .verticalScroll(rememberScrollState()),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
                                     listOf(
                                         "system" to "System Default (Auto)",
                                         "cloudflare" to "Cloudflare DoH (1.1.1.1)",
                                         "google" to "Google Public DNS (8.8.8.8)",
                                         "adguard" to "AdGuard DNS (Ad-block)",
-                                        "quad9" to "Quad9 DNS (9.9.9.9)"
+                                        "quad9" to "Quad9 DNS (9.9.9.9)",
+                                        "controld" to "ControlD (High Speed & Secure)",
+                                        "dnssb" to "DNS.SB (Privacy-first)",
+                                        "custom" to "Custom DNS-over-HTTPS (DoH)"
                                     ).forEach { (mode, label) ->
-                                        val isSel = dnsMode == mode
+                                        val isSel = selectedModeInDialog == mode
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(if (isSel) Color(0xFF2E2E36) else Color.Transparent)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(if (isSel) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color(0xFF1E1E24))
                                                 .clickable {
-                                                    dnsMode = mode
-                                                    com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setDnsMode(context, mode)
-                                                    showDnsDialog = false
-                                                    Toast.makeText(context, "DNS Routing: $label", Toast.LENGTH_SHORT).show()
+                                                    selectedModeInDialog = mode
+                                                    isCustomSelected = (mode == "custom")
+                                                    if (mode != "custom") {
+                                                        dnsMode = mode
+                                                        com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setDnsMode(context, mode)
+                                                        com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxDnsHelper.refreshAllNetworkClients(context)
+                                                        showDnsDialog = false
+                                                        Toast.makeText(context, "DNS Routing: $label", Toast.LENGTH_SHORT).show()
+                                                    }
                                                 }
-                                                .padding(12.dp),
-                                            verticalAlignment = Alignment.CenterVertically
+                                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
                                         ) {
-                                            Text(label, color = if (isSel) primaryColor else Color.White, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal)
+                                            Text(
+                                                label,
+                                                color = if (isSel) MaterialTheme.colorScheme.primary else Color.White,
+                                                fontSize = 13.5.sp,
+                                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                            if (isSel) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // Monochrome Borderless Custom DoH Input
+                                    if (isCustomSelected) {
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFF1E1E24))
+                                                .padding(12.dp)
+                                        ) {
+                                            Text(
+                                                "Custom DoH Resolver URL",
+                                                color = Color(0xFF8E8E98),
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            androidx.compose.foundation.text.BasicTextField(
+                                                value = customUrlInput,
+                                                onValueChange = { customUrlInput = it },
+                                                singleLine = true,
+                                                textStyle = androidx.compose.ui.text.TextStyle(
+                                                    color = Color.White,
+                                                    fontSize = 13.5.sp
+                                                ),
+                                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri
+                                                ),
+                                                decorationBox = { inner ->
+                                                    Box {
+                                                        if (customUrlInput.isBlank()) {
+                                                            Text(
+                                                                "https://resolver.example/dns-query",
+                                                                color = Color(0xFF63636D),
+                                                                fontSize = 13.5.sp
+                                                            )
+                                                        }
+                                                        inner()
+                                                    }
+                                                },
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
                                         }
                                     }
                                 }
                             },
-                            confirmButton = { TextButton(onClick = { showDnsDialog = false }) { Text("Close", color = primaryColor) } },
-                            containerColor = Color(0xFF1E1E24)
+                            confirmButton = {
+                                if (isCustomSelected) {
+                                    TextButton(
+                                        onClick = {
+                                            val trimmed = customUrlInput.trim()
+                                            if (!trimmed.startsWith("https://", ignoreCase = true) || !trimmed.contains(".")) {
+                                                Toast.makeText(context, "Enter a valid https:// DNS-over-HTTPS URL", Toast.LENGTH_SHORT).show()
+                                                return@TextButton
+                                            }
+                                            com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setCustomDnsUrl(context, trimmed)
+                                            com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setDnsMode(context, "custom")
+                                            com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxDnsHelper.refreshAllNetworkClients(context)
+                                            dnsMode = "custom"
+                                            showDnsDialog = false
+                                            Toast.makeText(context, "Custom DNS Applied", Toast.LENGTH_SHORT).show()
+                                        }
+                                    ) {
+                                        Text("Apply", color = Color.White, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showDnsDialog = false }) {
+                                    Text(loc("close"), color = Color(0xFF8E8E93))
+                                }
+                            },
+                            containerColor = Color(0xFF141418),
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                    }
+
+                    // 9b. Graphic Enhancer Preset Modal
+                    if (showAudioEnhancerPresetDialog) {
+                    val audioPresets = listOf(
+                        "off" to "Off (Default)",
+                        "studio_balanced" to "Studio Balanced (Reference Curve)",
+                        "bass_boost" to "Thunder Bass (Punchy Low-End)",
+                        "vocal_clarity" to "Dialogue & Dub Clarity (Crystal Voices)",
+                        "cinematic_surround" to "Cinematic Theater (3D Soundstage)",
+                        "anime_action" to "Shonen Action Crisp (Dynamic Boost)",
+                        "night_mode" to "Night Mode (Dynamic Compression)",
+                        "custom" to "Custom Tuning (Manual EQ)"
+                    )
+                    AlertDialog(
+                        onDismissRequest = { showAudioEnhancerPresetDialog = false },
+                        title = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = SolarSmartSpeakerBoldIcon,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Default Audio Enhancer Preset", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                        },
+                        text = {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                audioPresets.forEach { (pid, title) ->
+                                    val isSelected = defaultAudioEnhancerPreset == pid
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color(0xFF1E1E24))
+                                            .clickable {
+                                                defaultAudioEnhancerPreset = pid
+                                                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setDefaultAudioEnhancerPreset(this@AnimeBoxMainActivity, pid)
+                                                showAudioEnhancerPresetDialog = false
+                                                Toast.makeText(this@AnimeBoxMainActivity, "Audio Enhancer: $title", Toast.LENGTH_SHORT).show()
+                                            }
+                                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = title,
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                            fontSize = 13.5.sp,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { showAudioEnhancerPresetDialog = false }) {
+                                Text("Close", color = Color.Gray)
+                            }
+                        },
+                        containerColor = Color(0xFF141418),
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                }
+
+                if (showGraphicsEnhancerPresetDialog) {
+                        var selectedPresetInDialog by remember { mutableStateOf(defaultEnhancerPreset) }
+
+                        AlertDialog(
+                            onDismissRequest = { showGraphicsEnhancerPresetDialog = false },
+                            title = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(SolarFourKLinearIcon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Default Graphic Enhancer Preset", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                                }
+                            },
+                            text = {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .verticalScroll(rememberScrollState()),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    listOf(
+                                        "off" to "Off (Disabled by default)",
+                                        "ultra_clarity" to "Ultra Anime HD (Mode A + Clarity)",
+                                        "anime4k_a" to "Anime 4K · Mode A (Line Recovery)",
+                                        "anime4k_b" to "Anime 4K · Mode B (Soft Deblur)",
+                                        "anime4k_c" to "Anime 4K · Mode C (Upscale Denoise)",
+                                        "ink_master_hdr" to "Dynamic Ink HDR (Deep Contrast)",
+                                        "cas_razor_sharp" to "Razor Sharp CAS (Adaptive Sharpness)",
+                                        "oled_vivid" to "OLED Vivid Pop (Radiant Saturated)",
+                                        "custom" to "Custom Tuning (Manual Controls)"
+                                    ).forEach { (presetKey, label) ->
+                                        val isSel = selectedPresetInDialog == presetKey
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (isSel) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color(0xFF1E1E24))
+                                                .clickable {
+                                                    selectedPresetInDialog = presetKey
+                                                    defaultEnhancerPreset = presetKey
+                                                    com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.setDefaultGraphicsEnhancerPreset(context, presetKey)
+                                                    showGraphicsEnhancerPresetDialog = false
+                                                    Toast.makeText(context, "Enhancer Preset: $label", Toast.LENGTH_SHORT).show()
+                                                }
+                                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                label,
+                                                color = if (isSel) MaterialTheme.colorScheme.primary else Color(0xFFB0B0B8),
+                                                fontSize = 13.5.sp,
+                                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                            if (isSel) {
+                                                Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { showGraphicsEnhancerPresetDialog = false }) {
+                                    Text("Close", color = Color.Gray)
+                                }
+                            },
+                            containerColor = Color(0xFF141418),
+                            shape = RoundedCornerShape(16.dp)
                         )
                     }
 
@@ -9347,7 +14968,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     if (showDeleteConfirmDialog) {
                         AlertDialog(
                             onDismissRequest = { showDeleteConfirmDialog = false },
-                            title = { Text("Delete Profile", color = Color.White, fontWeight = FontWeight.Bold) },
+                            title = { Text(loc("delete_confirm_title"), color = Color.White, fontWeight = FontWeight.Bold) },
                             text = { Text("Are you sure you want to delete profile \"${p.name}\"? This action cannot be undone.", color = Color.LightGray) },
                             confirmButton = {
                                 TextButton(
@@ -9359,15 +14980,16 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         if (initialProfileForEditing != null) onDismiss()
                                     }
                                 ) {
-                                    Text("Delete", color = Color(0xFFE53935), fontWeight = FontWeight.Bold)
+                                    Text(loc("delete"), color = Color(0xFFE53935), fontWeight = FontWeight.Bold)
                                 }
                             },
                             dismissButton = {
                                 TextButton(onClick = { showDeleteConfirmDialog = false }) {
-                                    Text("Cancel", color = Color.Gray)
+                                    Text(loc("cancel"), color = Color(0xFF8E8E93))
                                 }
                             },
-                            containerColor = Color(0xFF1E1E24)
+                            containerColor = Color(0xFF141416),
+                            shape = RoundedCornerShape(2.dp)
                         )
                     }
 
@@ -9416,44 +15038,74 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         targetSyncProvider = com.lagradost.cloudstream3.ui.animebox.sync.SyncProvider.ANILIST
                                         showSyncModal = true
                                     },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF02A9FF), contentColor = Color.White)
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
+                                    shape = RoundedCornerShape(2.dp)
                                 ) {
-                                    Text("Connect AniList", fontWeight = FontWeight.Bold)
+                                    Text("Connect AniList", color = Color.Black, fontWeight = FontWeight.Bold)
                                 }
                             },
                             dismissButton = {
                                 TextButton(onClick = { showAniListPromptForTickets = false }) {
-                                    Text("Cancel", color = Color(0xFF8E918F))
+                                    Text("Cancel", color = Color(0xFF8E8E93))
                                 }
                             },
-                            containerColor = Color(0xFF1E1F22),
-                            shape = RoundedCornerShape(14.dp)
+                            containerColor = Color(0xFF141416),
+                            shape = RoundedCornerShape(2.dp)
                         )
                     }
                 } else {
                     // MAIN PROFILES SELECTION VIEW ("Who's watching?") - Centered layout
+                    val whosWatchingKeyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+                    val whosWatchingFocusManager = androidx.compose.ui.platform.LocalFocusManager.current
+                    LaunchedEffect(Unit) {
+                        whosWatchingFocusManager.clearFocus()
+                        whosWatchingKeyboardController?.hide()
+                    }
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .statusBarsPadding()
-                            .navigationBarsPadding(),
-                        contentAlignment = Alignment.Center
+                            .background(Color.Black)
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
+                        // Ambient top background glow effect starting seamlessly from y = 0 at the very top edge
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .verticalScroll(rememberScrollState())
-                                .padding(horizontal = 24.dp, vertical = 20.dp)
+                                .height(360.dp)
+                                .background(
+                                    Brush.verticalGradient(
+                                        colors = listOf(
+                                            primaryColor.copy(alpha = 0.35f),
+                                            primaryColor.copy(alpha = 0.18f),
+                                            primaryColor.copy(alpha = 0.05f),
+                                            Color.Transparent
+                                        )
+                                    )
+                                )
+                        )
+
+                        // Content container retaining the exact insets and centering so position of text/avatar NEVER changes
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .statusBarsPadding()
+                                .then(if (!isTabMode) Modifier.navigationBarsPadding() else Modifier),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = "Who's watching?",
-                                color = Color.White,
-                                fontSize = 26.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(bottom = 28.dp)
-                            )
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(horizontal = 24.dp, vertical = 20.dp)
+                            ) {
+                                Text(
+                                    text = loc("whos_watching"),
+                                    color = Color.White,
+                                    fontSize = 26.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(bottom = 28.dp)
+                                )
 
                             if (profileLimitWarning) {
                                 Box(
@@ -9489,6 +15141,11 @@ class AnimeBoxMainActivity : ComponentActivity() {
                             ) {
                                 items(profilesList.size) { index ->
                                     val profile = profilesList[index]
+                                    val hasAnimatedAvatar = (profile.decorationUrl.isNotBlank() && !profile.decorationUrl.equals("none", ignoreCase = true)) ||
+                                        profile.avatarUrl.endsWith(".gif", ignoreCase = true) ||
+                                        profile.avatarUrl.endsWith(".webp", ignoreCase = true) ||
+                                        profile.avatarUrl.contains("animated", ignoreCase = true)
+                                    val profileAvatarShape = if (hasAnimatedAvatar) CircleShape else RoundedCornerShape(8.dp)
                                     val dialogProfilePainter = remember(profile.avatarUrl) {
                                         if (profile.avatarUrl.startsWith("android.resource://")) {
                                             val resName = profile.avatarUrl.substringAfterLast("/")
@@ -9506,39 +15163,20 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         Box(
                                             modifier = Modifier
                                                 .size(75.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(Color(0xFF1F1F1F)),
+                                                .then(if (hasAnimatedAvatar) Modifier else Modifier.clip(profileAvatarShape))
+                                                .background(Color(0xFF1F1F1F), profileAvatarShape),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             // Clicking the main profile avatar selects and navigates
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .clickable { onProfileSelected(profile.id) }
-                                            ) {
-                                                if (profile.avatarUrl.isNotEmpty()) {
-                                                    Image(
-                                                        painter = rememberAsyncImagePainter(model = dialogProfilePainter),
-                                                        contentDescription = profile.name,
-                                                        contentScale = ContentScale.Crop,
-                                                        modifier = Modifier.fillMaxSize()
-                                                    )
-                                                } else {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .fillMaxSize()
-                                                            .background(primaryColor),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Text(
-                                                            text = profile.name.take(1).uppercase(),
-                                                            color = Color.White,
-                                                            fontWeight = FontWeight.Bold,
-                                                            fontSize = 32.sp
-                                                        )
-                                                    }
-                                                }
-                                            }
+                                        com.lagradost.cloudstream3.ui.animebox.profiles.DecoratedProfilePicture(
+                                            avatarUrl = profile.avatarUrl,
+                                            decorationUrl = profile.decorationUrl,
+                                            size = 75.dp,
+                                            fallbackInitial = profile.name,
+                                            primaryColor = primaryColor,
+                                            forceCircle = hasAnimatedAvatar,
+                                            onClick = { onProfileSelected(profile.id) }
+                                        )
 
                                             // Pencil/Edit button overlay on the top right
                                             Box(
@@ -9549,14 +15187,18 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                                     .clip(CircleShape)
                                                     .background(Color.Black.copy(alpha = 0.7f))
                                                     .clickable {
-                                                        editingProfile = profile
-                                                        editProfileName = profile.name
-                                                        editProfileAvatarUrl = profile.avatarUrl
+                                                        if (onOpenMySpace != null) {
+                                                            onOpenMySpace(profile.id)
+                                                        } else {
+                                                            editingProfile = profile
+                                                            editProfileName = profile.name
+                                                            editProfileAvatarUrl = profile.avatarUrl
+                                                        }
                                                     },
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Icon(
-                                                    imageVector = Icons.Default.Edit,
+                                                    imageVector = SolarEditVector,
                                                     contentDescription = "Edit Profile",
                                                     tint = primaryColor,
                                                     modifier = Modifier.size(13.dp)
@@ -9582,7 +15224,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                 OutlinedTextField(
                                     value = newProfileName,
                                     onValueChange = { newProfileName = it },
-                                    label = { Text("Profile Name", color = Color.Gray) },
+                                    label = { Text(loc("profile_name"), color = Color.Gray) },
                                     modifier = Modifier
                                         .fillMaxWidth(0.8f)
                                         .padding(bottom = 12.dp),
@@ -9599,7 +15241,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     TextButton(onClick = { showAddProfile = false }) {
-                                        Text("Cancel", color = Color.Gray, fontWeight = FontWeight.Bold)
+                                        Text(loc("cancel"), color = Color.Gray, fontWeight = FontWeight.Bold)
                                     }
                                     Button(
                                         onClick = {
@@ -9613,7 +15255,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                                         colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
                                         shape = RoundedCornerShape(4.dp)
                                     ) {
-                                        Text("Add Profile", fontWeight = FontWeight.Bold)
+                                        Text("Add Profile", fontWeight = FontWeight.Bold, color = Color.Black)
                                     }
                                 }
                             } else {
@@ -9663,6 +15305,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     }
                 }
             }
+            }
         }
 
         if (isTabMode) {
@@ -9680,59 +15323,21 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 }
             }
 
-            Dialog(
-                onDismissRequest = {
-                    if (editingProfile != null && initialProfileForEditing == null) {
-                        editingProfile = null
-                    } else {
-                        onDismiss()
-                    }
-                },
-                properties = DialogProperties(
-                    usePlatformDefaultWidth = false,
-                    decorFitsSystemWindows = false
-                )
-            ) {
-                val view = androidx.compose.ui.platform.LocalView.current
-                DisposableEffect(view) {
-                    var parent = view.parent
-                    while (parent != null) {
-                        if (parent is android.app.Dialog) {
-                            parent.window?.let { win ->
-                                win.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.BLACK))
-                                win.statusBarColor = android.graphics.Color.BLACK
-                                win.navigationBarColor = android.graphics.Color.BLACK
-                                win.setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
-                                androidx.core.view.WindowCompat.getInsetsController(win, win.decorView).isAppearanceLightStatusBars = false
-                            }
-                            break
-                        }
-                        parent = parent.parent
-                    }
-                    try {
-                        val providerClass = Class.forName("androidx.compose.ui.window.DialogWindowProvider")
-                        if (providerClass.isInstance(view.parent)) {
-                            val getWindowMethod = providerClass.getMethod("getWindow")
-                            val win = getWindowMethod.invoke(view.parent) as? android.view.Window
-                            win?.let { w ->
-                                w.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.BLACK))
-                                w.statusBarColor = android.graphics.Color.BLACK
-                                w.navigationBarColor = android.graphics.Color.BLACK
-                                w.setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
-                                androidx.core.view.WindowCompat.getInsetsController(w, w.decorView).isAppearanceLightStatusBars = false
-                            }
-                        }
-                    } catch (_: Exception) {}
-
-                    val act = context as? android.app.Activity
-                    act?.window?.let { win ->
-                        win.statusBarColor = android.graphics.Color.BLACK
-                        win.navigationBarColor = android.graphics.Color.BLACK
-                        androidx.core.view.WindowCompat.getInsetsController(win, win.decorView).isAppearanceLightStatusBars = false
-                    }
-                    onDispose {}
+            val act = context as? android.app.Activity
+            DisposableEffect(Unit) {
+                act?.window?.let { win ->
+                    win.statusBarColor = android.graphics.Color.TRANSPARENT
+                    win.navigationBarColor = android.graphics.Color.BLACK
+                    androidx.core.view.WindowCompat.getInsetsController(win, win.decorView).isAppearanceLightStatusBars = false
                 }
+                onDispose {}
+            }
 
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+            ) {
                 SelectorBody()
             }
         }
@@ -9749,6 +15354,10 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 putExtra("initialGenres", ArrayList(brief.genres))
                 putExtra("initialScore", brief.averageScore)
                 putExtra("initialEpisodesCount", brief.episodes)
+                val isAdult = brief.genres.any { it.equals("Hentai", ignoreCase = true) }
+                if (isAdult) {
+                    putExtra("isAdult", true)
+                }
             }
         }
         startActivity(intent)
@@ -9762,12 +15371,19 @@ class AnimeBoxMainActivity : ComponentActivity() {
         showCoverUrl: String,
         totalEpisodes: Int
     ) {
-        if (AnimeBoxPlayerActivity.isCurrentlyInPip) {
+        if (AnimeBoxPlayerActivity.isCurrentlyInPip || AnimeBoxYouTubePlayerActivity.isCurrentlyInPip) {
             Toast.makeText(this, "Please close Picture-in-Picture mode first to play another episode", Toast.LENGTH_SHORT).show()
             return
         }
 
-        var effectiveShowPoster = if (showCoverUrl.isNotBlank() && !showCoverUrl.contains("backdrop", ignoreCase = true) && !showCoverUrl.contains("banner", ignoreCase = true)) showCoverUrl else ""
+        com.lagradost.cloudstream3.ui.animebox.api.AnimeViewCountManager.incrementView(anilistId)
+
+        val isShinChan = com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.isShinChan(anilistId)
+        var effectiveShowPoster = if (isShinChan) {
+            com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.SHINCHAN_POSTER_URL
+        } else if (showCoverUrl.isNotBlank() && !showCoverUrl.contains("backdrop", ignoreCase = true) && !showCoverUrl.contains("banner", ignoreCase = true) && !showCoverUrl.contains("episode", ignoreCase = true) && !showCoverUrl.contains("okcdn.ru", ignoreCase = true) && !showCoverUrl.contains("videoPreview", ignoreCase = true)) {
+            showCoverUrl
+        } else ""
         if (effectiveShowPoster.isBlank() && anilistId > 0) {
             val details = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 AniListClient.getAnimeDetails(anilistId)
@@ -9787,7 +15403,9 @@ class AnimeBoxMainActivity : ComponentActivity() {
         // Direct offline playback if episode is already downloaded
         val downloadedEp = com.lagradost.cloudstream3.ui.animebox.download.AnimeDownloadManager.getInstance(this@AnimeBoxMainActivity).getDownloadedEpisode(anilistId, episodeNum)
         if (downloadedEp != null && downloadedEp.localFilePath.isNotEmpty() && java.io.File(downloadedEp.localFilePath).exists()) {
-            val playIntent = Intent(this@AnimeBoxMainActivity, AnimeBoxPlayerActivity::class.java).apply {
+            if (com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isExternalPlayerEnabled(this@AnimeBoxMainActivity) &&
+                openEpisodeInExternalPlayer(downloadedEp.localFilePath, "$animeTitle Episode $episodeNum", subtitle = downloadedEp.localSubtitlePath)) return
+            val playIntent = Intent(this@AnimeBoxMainActivity, com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getPlayerActivityClass(this@AnimeBoxMainActivity)).apply {
                 putExtra("localFilePath", downloadedEp.localFilePath)
                 putExtra("isOffline", true)
                 putExtra("animeTitle", animeTitle)
@@ -9808,13 +15426,140 @@ class AnimeBoxMainActivity : ComponentActivity() {
             return
         }
 
+        val isAdult = AniListClient.isAdultAnime(anilistId, animeTitle)
+        if (isAdult) {
+            val prefServer = com.lagradost.cloudstream3.ui.animebox.settings.ServerPriorityManager.getPreferredServer(this@AnimeBoxMainActivity, "hentai-jp")
+            var streamUrl = ""
+            var referer = "https://hentaimama.io/"
+            var subUrl = ""
+            var subsJson = "[]"
+            var providerName = "Hentai Mama"
+
+            if (prefServer == "reanime") {
+                val reAnime = runCatching {
+                    com.lagradost.cloudstream3.ui.animebox.extractors.ReAnimeExtractor.extract(anilistId, episodeNum, "sub")
+                }.getOrNull()
+                if (reAnime != null && reAnime.hlsUrl.isNotBlank()) {
+                    streamUrl = reAnime.hlsUrl
+                    referer = reAnime.referer
+                    subUrl = reAnime.subtitleUrl
+                    subsJson = org.json.JSONArray().apply {
+                        reAnime.subtitles.forEach { put(org.json.JSONObject(it)) }
+                    }.toString()
+                    providerName = reAnime.provider
+                }
+            } else if (prefServer == "hentaihaven") {
+                val hhResult = com.lagradost.cloudstream3.ui.animebox.extractors.HentaiHavenExtractor.getStreamForAnime(
+                    animeTitle, episodeNum, listOf(animeTitle)
+                )
+                if (hhResult != null && hhResult.streamUrl.isNotEmpty()) {
+                    streamUrl = hhResult.streamUrl
+                    referer = hhResult.referer
+                    subUrl = hhResult.subtitleUrl
+                    subsJson = hhResult.subtitlesJson
+                    providerName = hhResult.provider
+                } else {
+                    val hmResult = com.lagradost.cloudstream3.ui.animebox.extractors.HentaiMamaExtractor.getStreamForAnime(
+                        animeTitle, episodeNum, listOf(animeTitle)
+                    )
+                    if (hmResult != null && hmResult.streamUrl.isNotEmpty()) {
+                        streamUrl = hmResult.streamUrl
+                        referer = hmResult.referer
+                        providerName = hmResult.provider
+                    }
+                }
+            } else {
+                val hmResult = com.lagradost.cloudstream3.ui.animebox.extractors.HentaiMamaExtractor.getStreamForAnime(
+                    animeTitle, episodeNum, listOf(animeTitle)
+                )
+                if (hmResult != null && hmResult.streamUrl.isNotEmpty()) {
+                    streamUrl = hmResult.streamUrl
+                    referer = hmResult.referer
+                    providerName = hmResult.provider
+                } else {
+                    val hhResult = com.lagradost.cloudstream3.ui.animebox.extractors.HentaiHavenExtractor.getStreamForAnime(
+                        animeTitle, episodeNum, listOf(animeTitle)
+                    )
+                    if (hhResult != null && hhResult.streamUrl.isNotEmpty()) {
+                        streamUrl = hhResult.streamUrl
+                        referer = hhResult.referer
+                        subUrl = hhResult.subtitleUrl
+                        subsJson = hhResult.subtitlesJson
+                        providerName = hhResult.provider
+                    }
+                }
+            }
+
+            if (streamUrl.isBlank()) {
+                val reAnime = runCatching {
+                    com.lagradost.cloudstream3.ui.animebox.extractors.ReAnimeExtractor.extract(anilistId, episodeNum, "sub")
+                }.getOrNull()
+                if (reAnime != null && reAnime.hlsUrl.isNotBlank()) {
+                    streamUrl = reAnime.hlsUrl
+                    referer = reAnime.referer
+                    subUrl = reAnime.subtitleUrl
+                    subsJson = org.json.JSONArray().apply {
+                        reAnime.subtitles.forEach { put(org.json.JSONObject(it)) }
+                    }.toString()
+                    providerName = reAnime.provider
+                }
+            }
+
+            if (streamUrl.isNotEmpty()) {
+                val isReAnimeStream = providerName.contains("reanime", ignoreCase = true) ||
+                    prefServer.contains("reanime", ignoreCase = true) ||
+                    streamUrl.contains("4animo", ignoreCase = true) ||
+                    referer.contains("reanime", ignoreCase = true)
+                val autoSub = if (isReAnimeStream && (subUrl.isNotEmpty() || subsJson.contains("eng", ignoreCase = true))) {
+                    if (subUrl.contains(".vtt", ignoreCase = true) || subsJson.contains("vtt", ignoreCase = true)) "English (VTT)" else "English (Soft Sub)"
+                } else null
+
+                val playIntent = Intent(this@AnimeBoxMainActivity, com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getPlayerActivityClass(this@AnimeBoxMainActivity)).apply {
+                    putExtra("hlsUrl", streamUrl)
+                    putExtra("referer", referer)
+                    putExtra("subtitleUrl", subUrl)
+                    putExtra("subtitlesJson", subsJson)
+                    putExtra("provider", providerName)
+                    putExtra("introStart", 0L)
+                    putExtra("introEnd", 0L)
+                    putExtra("outroStart", 0L)
+                    putExtra("outroEnd", 0L)
+                    putExtra("anilistId", anilistId)
+                    putExtra("episode", episodeNum)
+                    putExtra("animeTitle", animeTitle)
+                    putExtra("coverUrl", coverUrl)
+                    putExtra("showCoverUrl", effectiveShowPoster)
+                    putExtra("totalEpisodes", totalEpisodes)
+                    putExtra("streamType", "sub")
+                    putExtra("fromContinueWatching", true)
+                    putExtra("isAdult", true)
+                    if (autoSub != null) {
+                        putExtra("activeSub", autoSub)
+                    }
+                }
+                if (com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isExternalPlayerEnabled(this@AnimeBoxMainActivity) &&
+                    openEpisodeInExternalPlayer(streamUrl, "$animeTitle Episode $episodeNum", referer, subUrl)) return
+                startActivity(playIntent)
+                return
+            } else {
+                Toast.makeText(this@AnimeBoxMainActivity, "No stream found for this adult anime", Toast.LENGTH_SHORT).show()
+                return
+            }
+        }
+
         val type = if (com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isRememberPlaybackPrefsEnabled(this@AnimeBoxMainActivity)) {
             val lastAud = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getLastUsedAudio(this@AnimeBoxMainActivity)
             val lastSub = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getLastUsedSubMode(this@AnimeBoxMainActivity)
-            if (lastSub == "Hard Sub") "hardsub"
-            else if (lastAud == "English") "dub"
-            else if (lastAud == "Hindi") "hindi"
-            else "sub"
+            when (lastAud) {
+                "English" -> "dub"
+                "Hindi" -> "hindi"
+                "French (VF)" -> "french"
+                "Italian (ITA)" -> "italian"
+                "Spanish (Latino)" -> "spanish_latino"
+                "Spanish (Castellano)" -> "spanish_castellano"
+                "German (Deutsch)" -> "german"
+                else -> if (lastSub == "Hard Sub") "hardsub" else "sub"
+            }
         } else {
             "sub"
         }
@@ -9843,15 +15588,18 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 } catch (e: Exception) { 0 }
             }
 
-            if (AnimeBoxPlayerActivity.isCurrentlyInPip) {
+            if (AnimeBoxPlayerActivity.isCurrentlyInPip || AnimeBoxYouTubePlayerActivity.isCurrentlyInPip) {
                 Toast.makeText(this, "Please close Picture-in-Picture mode first to play another episode", Toast.LENGTH_SHORT).show()
                 return
             }
 
-            val intent = Intent(this, AnimeBoxPlayerActivity::class.java).apply {
+            com.lagradost.cloudstream3.ui.animebox.api.AnimeViewCountManager.incrementView(anilistId)
+
+            val intent = Intent(this, com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getPlayerActivityClass(this)).apply {
                 putExtra("hlsUrl", (streamInfo["hls"] as? String) ?: "")
                 putExtra("referer", (streamInfo["referer"] as? String) ?: "https://megaplay.buzz/")
                 putExtra("subtitleUrl", (streamInfo["subtitle"] as? String) ?: "")
+                putExtra("subtitlesJson", (streamInfo["subtitlesJson"] as? String) ?: "[]")
                 putExtra("introStart", (streamInfo["introStart"] as? Number)?.toLong() ?: 0L)
                 putExtra("introEnd", (streamInfo["introEnd"] as? Number)?.toLong() ?: 0L)
                 putExtra("outroStart", (streamInfo["outroStart"] as? Number)?.toLong() ?: 0L)
@@ -9859,7 +15607,18 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 putExtra("backupHls", (streamInfo["backupHls"] as? String) ?: "")
                 putExtra("backupProvider", (streamInfo["backupProvider"] as? String) ?: "")
                 putExtra("hindiStreamsJson", (streamInfo["hindiStreamsJson"] as? String) ?: "")
-                putExtra("streamType", if (isDubFallback) "sub" else type)
+                val effectiveType = if (isDubFallback) "sub" else type
+                putExtra("streamType", effectiveType)
+                putExtra("activeAudio", when (effectiveType.lowercase()) {
+                    "hindi" -> "Hindi"
+                    "dub", "english" -> "English"
+                    "french", "vf" -> "French (VF)"
+                    "italian", "ita" -> "Italian (ITA)"
+                    "spanish_latino", "latino", "spanish", "es" -> "Spanish (Latino)"
+                    "spanish_castellano", "castellano" -> "Spanish (Castellano)"
+                    "german", "deutsch", "de" -> "German (Deutsch)"
+                    else -> "Japanese (Original)"
+                })
                 if (isDubFallback) {
                     putExtra("showAudioFallbackWarning", true)
                     putExtra("requestedAudioType", type)
@@ -9872,6 +15631,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 putExtra("showCoverUrl", showCoverUrl)
                 putExtra("totalEpisodes", epCount)
             }
+            if (com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isExternalPlayerEnabled(this@AnimeBoxMainActivity) &&
+                openEpisodeInExternalPlayer((streamInfo["hls"] as? String).orEmpty(), "$animeTitle Episode $episodeNum", (streamInfo["referer"] as? String).orEmpty(), (streamInfo["subtitle"] as? String).orEmpty())) return
             startActivity(intent)
         } else {
             Toast.makeText(this, "Failed to load stream. Please try again.", Toast.LENGTH_SHORT).show()
@@ -9891,7 +15652,7 @@ class AnimeBoxMainActivity : ComponentActivity() {
             val seenIds = mutableSetOf<Int>()
             for (i in 0 until mediaArray.length()) {
                 val media = mediaArray.getJSONObject(i)
-                if (com.lagradost.cloudstream3.ui.animebox.api.AniListClient.isBlockedMedia(media)) continue
+                if (com.lagradost.cloudstream3.ui.animebox.api.AniListClient.isBlockedMedia(media, this@AnimeBoxMainActivity)) continue
                 val id = media.getInt("id")
                 if (!seenIds.add(id)) continue
                 val titleObj = media.getJSONObject("title")
@@ -9932,7 +15693,8 @@ class AnimeBoxMainActivity : ComponentActivity() {
                 val isAdult = if (media.has("isAdult") && !media.isNull("isAdult")) {
                     media.getBoolean("isAdult")
                 } else false
-                if (isAdult) continue
+                val adultEnabled = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAdultContentEnabled(this@AnimeBoxMainActivity)
+                if (isAdult && !adultEnabled) continue
 
                 var rYear = 0
                 var rMonth = 0
@@ -9970,7 +15732,17 @@ class AnimeBoxMainActivity : ComponentActivity() {
                     continue
                 }
 
-                list.add(AnimeBrief(id, title, coverUrl, bannerUrl, cleanDesc, genresList, averageScore, episodes = episodes, status = mediaStatus, releaseYear = rYear, releaseMonth = rMonth, releaseDay = rDay))
+                val nextAiring = media.optJSONObject("nextAiringEpisode")
+                val nextEpNum = if (nextAiring != null && nextAiring.has("episode")) nextAiring.optInt("episode") else 0
+                val mediaFormat = if (media.has("format") && !media.isNull("format")) media.getString("format") else ""
+
+                val isAdultGenre = genresList.any { it.equals("Hentai", ignoreCase = true) || it.equals("Ecchi 18+", ignoreCase = true) }
+                val isItemAdult = isAdult || isAdultGenre
+                if (isItemAdult) {
+                    com.lagradost.cloudstream3.ui.animebox.api.AniListClient.registerAdultAnimeId(id)
+                }
+
+                list.add(AnimeBrief(id, title, coverUrl, bannerUrl, cleanDesc, genresList, averageScore, episodes = episodes, status = mediaStatus, releaseYear = rYear, releaseMonth = rMonth, releaseDay = rDay, nextEpisode = nextEpNum, format = mediaFormat, isAdult = isItemAdult))
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -9993,7 +15765,136 @@ class AnimeBoxMainActivity : ComponentActivity() {
     }
 }
 
-// Custom Home Icon - Rounded pentagon badge with centered black U icon
+// Exact AniDash / Iconsax / Solar play-bold Vector
+val SolarEditVector: androidx.compose.ui.graphics.vector.ImageVector
+    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarPen2Bold",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M20 21.2495C20.4142 21.2495 20.75 21.5853 20.75 21.9995C20.75 22.4138 20.4142 22.7495 20 22.7495H4C3.58579 22.7495 3.25 22.4138 3.25 21.9995C3.25 21.5853 3.58579 21.2495 4 21.2495H20Z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White)
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M12.9883 4.56302C13.3234 5.36823 13.8735 6.32221 14.7754 7.22416C15.6774 8.12616 16.6313 8.67708 17.4365 9.01224L11.5205 14.9283C11.0589 15.3899 10.8278 15.6213 10.5732 15.8199C10.273 16.0541 9.94729 16.2547 9.60352 16.4185C9.31229 16.5572 9.00264 16.6605 8.38379 16.8667L5.11621 17.9556C4.81144 18.0571 4.47519 17.9786 4.24805 17.7515C4.0209 17.5244 3.94248 17.1881 4.04395 16.8833L5.13281 13.6158C5.3391 12.9969 5.4423 12.6873 5.58105 12.396C5.74489 12.0523 5.94548 11.7266 6.17969 11.4263C6.37821 11.1718 6.60965 10.9407 7.07129 10.479L12.9883 4.56302Z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White)
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M14.6299 2.92142C15.8584 1.69286 17.8496 1.69286 19.0781 2.92142C20.3067 4.14999 20.3067 6.1411 19.0781 7.36966L18.3691 8.07963C18.34 8.06997 18.3102 8.05974 18.2803 8.04935C17.5306 7.78925 16.5472 7.29874 15.624 6.37552C14.7011 5.45251 14.2103 4.46988 13.9502 3.72025C13.9397 3.69011 13.9296 3.65975 13.9199 3.63041L14.6299 2.92142Z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White)
+    ).build()
+
+val SolarFolderWithFilesVector: androidx.compose.ui.graphics.vector.ImageVector
+    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarFolderWithFilesLinear",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M18 10L13 10M19.9998 6.23751C19.9989 5.94017 19.9946 5.76263 19.9743 5.60842C19.7971 4.26222 18.7378 3.2029 17.3916 3.02567C17.1966 3 16.9644 3 16.5 3H10M2 6.94975C2 6.06722 2 5.62595 2.06935 5.25839C2.37464 3.64031 3.64031 2.37464 5.25839 2.06935C5.62595 2 6.06722 2 6.94975 2C7.33642 2 7.52976 2 7.71557 2.01738C8.51665 2.09229 9.27652 2.40704 9.89594 2.92051C10.0396 3.03961 10.1763 3.17633 10.4497 3.44975L11 4C11.8158 4.81578 12.2237 5.22367 12.7121 5.49543C12.9804 5.64471 13.2651 5.7626 13.5604 5.84678C14.0979 6 14.6747 6 15.8284 6H16.2021C17.9811 6 19.159 6 19.9998 6.23751C20.4031 6.35144 20.7288 6.52002 21.0062 6.76946C21.0849 6.84024 21.1598 6.91514 21.2305 6.99383C22 7.84935 22 9.16554 22 11.7979V14C22 17.7712 22 19.6569 20.8284 20.8284C19.6569 22 17.7712 22 14 22H10C6.22876 22 4.34315 22 3.17157 20.8284C2 19.6569 2 17.7712 2 14V6.94975Z"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.6f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
+        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round
+    ).build()
+
+val SolarVideoLibraryBoldDuotoneVector: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarVideoLibraryBoldDuotone",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M15.328 7.542H8.672c-3.374 0-5.062 0-6.01.987s-.725 2.511-.278 5.56l.422 2.892c.35 2.391.525 3.587 1.422 4.303c.898.716 2.22.716 4.867.716h5.81c2.646 0 3.97 0 4.867-.716s1.072-1.912 1.422-4.303l.422-2.892c.447-3.049.67-4.573-.278-5.56s-2.636-.987-6.01-.987m-.747 8.252c.559-.346.559-1.242 0-1.588l-3.371-2.09c-.543-.337-1.21.101-1.21.794v4.18c0 .693.667 1.13 1.21.794z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White),
+        pathFillType = androidx.compose.ui.graphics.PathFillType.EvenOdd
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M8.51 2h6.98c.232 0 .41 0 .566.015c1.108.109 2.015.775 2.4 1.672H5.543c.384-.897 1.291-1.563 2.399-1.672C8.099 2 8.277 2 8.51 2"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White.copy(alpha = 0.45f))
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M6.31 4.723c-1.39 0-2.53.84-2.911 1.953l-.023.07c.398-.12.812-.199 1.232-.253c1.08-.138 2.446-.138 4.032-.138h6.892c1.586 0 2.951 0 4.032.138a8 8 0 0 1 1.232.253l-.023-.07c-.38-1.114-1.521-1.953-2.912-1.953z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White.copy(alpha = 0.7f))
+    ).build()
+}
+
+val SolarPlayCircleVector: androidx.compose.ui.graphics.vector.ImageVector
+    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarPlayCircleBold",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22ZM10.6935 15.8458L15.4137 13.059C16.1954 12.5974 16.1954 11.4026 15.4137 10.941L10.6935 8.15419C9.93371 7.70561 9 8.28947 9 9.21316V14.7868C9 15.7105 9.93371 16.2944 10.6935 15.8458Z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White),
+        pathFillType = androidx.compose.ui.graphics.PathFillType.EvenOdd
+    ).build()
+
+val SolarSubtitlesVector: androidx.compose.ui.graphics.vector.ImageVector
+    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarSubtitlesLinear",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M2 12C2 8.22876 2 6.34315 3.17157 5.17157C4.34315 4 6.22876 4 10 4H14C17.7712 4 19.6569 4 20.8284 5.17157C22 6.34315 22 8.22876 22 12C22 15.7712 22 17.6569 20.8284 18.8284C19.6569 20 17.7712 20 14 20H10C6.22876 20 4.34315 20 3.17157 18.8284C2 17.6569 2 15.7712 2 12Z"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.6f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
+        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M10 16H6M14 13H18M14 16H12.5M9.5 13H11.5M18 16H16.5M6 13H7"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.6f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
+        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round
+    ).build()
+
+val SolarPlayVector: androidx.compose.ui.graphics.vector.ImageVector
+    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarPlay",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).path(
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White),
+        pathFillType = androidx.compose.ui.graphics.PathFillType.NonZero
+    ) {
+        moveTo(21.4086f, 9.35258f)
+        curveTo(23.5305f, 10.5065f, 23.5305f, 13.4935f, 21.4086f, 14.6474f)
+        lineTo(8.59662f, 21.6145f)
+        curveTo(6.53435f, 22.736f, 4f, 21.2763f, 4f, 18.9671f)
+        lineTo(4f, 5.0329f)
+        curveTo(4f, 2.72368f, 6.53435f, 1.26402f, 8.59661f, 2.38548f)
+        lineTo(21.4086f, 9.35258f)
+        close()
+    }.build()
+
+// Solar home with smile effect
 fun getCustomHomeFilledIcon(
     badgeColor: Color = Color.White,
     uColor: Color = Color.Black
@@ -10008,7 +15909,7 @@ fun getCustomHomeFilledIcon(
         fill = androidx.compose.ui.graphics.SolidColor(badgeColor),
         pathFillType = androidx.compose.ui.graphics.PathFillType.NonZero
     ) {
-        // Outer rounded house silhouette (Scaled to prominent size)
+        // Outer house outline filled
         moveTo(13.817f, 3.582f)
         lineTo(19.938f, 8.24f)
         curveTo(20.733f, 8.845f, 21.2f, 9.787f, 21.2f, 10.786f)
@@ -10025,7 +15926,7 @@ fun getCustomHomeFilledIcon(
         fill = androidx.compose.ui.graphics.SolidColor(uColor),
         pathFillType = androidx.compose.ui.graphics.PathFillType.NonZero
     ) {
-        // Inner 'U' icon in solid black
+        // Inner 'U' icon (smile effect)
         moveTo(8.3f, 9.85f)
         curveTo(8.3f, 9.712f, 8.412f, 9.6f, 8.55f, 9.6f)
         lineTo(10.1f, 9.6f)
@@ -10047,6 +15948,7 @@ fun getCustomHomeFilledIcon(
 val CustomHomeFilledIcon: androidx.compose.ui.graphics.vector.ImageVector
     get() = getCustomHomeFilledIcon(Color.White, Color.Black)
 
+// Solar home outline with inner smile arc
 val CustomHomeOutlineIcon: androidx.compose.ui.graphics.vector.ImageVector
     get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
         name = "CustomHomeOutline",
@@ -10075,7 +15977,7 @@ val CustomHomeOutlineIcon: androidx.compose.ui.graphics.vector.ImageVector
         curveTo(11.257f, 2.765f, 12.743f, 2.765f, 13.817f, 3.582f)
         close()
 
-        // Inner 'U' stroke
+        // Inner 'U' smile stroke
         moveTo(9.325f, 9.6f)
         lineTo(9.325f, 14.1f)
         curveTo(9.325f, 15.577f, 10.523f, 16.775f, 12.0f, 16.775f)
@@ -10086,195 +15988,217 @@ val CustomHomeOutlineIcon: androidx.compose.ui.graphics.vector.ImageVector
 val CustomHomeIcon: androidx.compose.ui.graphics.vector.ImageVector
     get() = CustomHomeFilledIcon
 
-// Custom My List (Shopping Bag) Icon as shown in screenshot #2
+// Solar bookmark-linear (My Lists linear)
 val CustomMyListIcon: androidx.compose.ui.graphics.vector.ImageVector
     get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
-        name = "CustomMyList",
+        name = "SolarBookmarkLinear",
         defaultWidth = 24.dp,
         defaultHeight = 24.dp,
         viewportWidth = 24f,
         viewportHeight = 24f
-    ).path(
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M21 16.0909V11.0975C21 6.80891 21 4.6646 19.682 3.3323C18.364 2 16.2426 2 12 2C7.75736 2 5.63604 2 4.31802 3.3323C3 4.6646 3 6.80891 3 11.0975V16.0909C3 19.1875 3 20.7358 3.73411 21.4123C4.08421 21.735 4.52615 21.9377 4.99692 21.9915C5.98402 22.1045 7.13673 21.0849 9.44216 19.0458C10.4612 18.1445 10.9708 17.6938 11.5603 17.5751C11.8506 17.5166 12.1494 17.5166 12.4397 17.5751C13.0292 17.6938 13.5388 18.1445 14.5578 19.0458C16.8633 21.0849 18.016 22.1045 19.0031 21.9915C19.4739 21.9377 19.9158 21.735 20.2659 21.4123C21 20.7358 21 19.1875 21 16.0909ZM15 6H9"
+        ).toNodes(),
         stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
-        strokeLineWidth = 2.0f,
+        strokeLineWidth = 1.8f,
         strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
-        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round,
-        pathFillType = androidx.compose.ui.graphics.PathFillType.NonZero
-    ) {
-        // Outer bag body with rounded corners
-        moveTo(6f, 9f)
-        curveTo(4.9f, 9f, 4f, 9.9f, 4f, 11f)
-        verticalLineTo(18.5f)
-        curveTo(4f, 20.43f, 5.57f, 22f, 7.5f, 22f)
-        horizontalLineTo(16.5f)
-        curveTo(18.43f, 22f, 20f, 20.43f, 20f, 18.5f)
-        verticalLineTo(11f)
-        curveTo(20f, 9.9f, 19.1f, 9f, 18f, 9f)
-        close()
-        // Arch handle
-        moveTo(8.5f, 12f)
-        verticalLineTo(6.5f)
-        curveTo(8.5f, 4.57f, 10.07f, 3f, 12f, 3f)
-        curveTo(13.93f, 3f, 15.5f, 4.57f, 15.5f, 6.5f)
-        verticalLineTo(12f)
-    }.build()
+        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round
+    ).build()
 
+// Solar bookmark-bold (My Lists bold)
+val CustomMyListBoldIcon: androidx.compose.ui.graphics.vector.ImageVector
+    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarBookmarkBold",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M21 11.0975V16.0909C21 19.1875 21 20.7358 20.2659 21.4123C19.9158 21.735 19.4739 21.9377 19.0031 21.9915C18.016 22.1045 16.8633 21.0849 14.5578 19.0458C13.5388 18.1445 13.0292 17.6938 12.4397 17.5751C12.1494 17.5166 11.8506 17.5166 11.5603 17.5751C10.9708 17.6938 10.4612 18.1445 9.44216 19.0458C7.13673 21.0849 5.98402 22.1045 4.99692 21.9915C4.52615 21.9377 4.08421 21.735 3.73411 21.4123C3 20.7358 3 19.1875 3 16.0909V11.0975C3 6.80891 3 4.6646 4.31802 3.3323C5.63604 2 7.75736 2 12 2C16.2426 2 18.364 2 19.682 3.3323C21 4.6646 21 6.80891 21 11.0975ZM9 5.25C8.58579 5.25 8.25 5.58579 8.25 6C8.25 6.41421 8.58579 6.75 9 6.75H15C15.4142 6.75 15.75 6.41421 15.75 6C15.75 5.58579 15.4142 5.25 15 5.25H9Z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White),
+        pathFillType = androidx.compose.ui.graphics.PathFillType.EvenOdd
+    ).build()
+
+// Solar download-minimalistic-linear
 val CustomDownloadsNavbarIcon: androidx.compose.ui.graphics.vector.ImageVector
     get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
-        name = "CustomDownloadsNavbar",
+        name = "SolarDownloadSquareLinear",
         defaultWidth = 24.dp,
         defaultHeight = 24.dp,
         viewportWidth = 24f,
         viewportHeight = 24f
-    ).path(
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M12 7L12 14M9 11L12 14L15 11M16 17H12H8M2 12C2 7.28595 2 4.92893 3.46447 3.46447C4.92893 2 7.28595 2 12 2C16.714 2 19.0711 2 20.5355 3.46447C22 4.92893 22 7.28595 22 12C22 16.714 22 19.0711 20.5355 20.5355C19.0711 22 16.714 22 12 22C7.28595 22 4.92893 22 3.46447 20.5355C2 19.0711 2 16.714 2 12Z"
+        ).toNodes(),
         stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
-        strokeLineWidth = 2.0f,
+        strokeLineWidth = 1.6f,
         strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
-        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round,
-        pathFillType = androidx.compose.ui.graphics.PathFillType.NonZero
-    ) {
-        moveTo(12f, 3f)
-        lineTo(12f, 15f)
-        moveTo(12f, 15f)
-        lineTo(8f, 11f)
-        moveTo(12f, 15f)
-        lineTo(16f, 11f)
-        moveTo(4f, 17f)
-        verticalLineTo(19f)
-        curveTo(4f, 20.1f, 4.9f, 21f, 6f, 21f)
-        horizontalLineTo(18f)
-        curveTo(19.1f, 21f, 20f, 20.1f, 20f, 19f)
-        verticalLineTo(17f)
-    }.build()
+        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round
+    ).build()
+
+// Solar download-square-bold (AniDash square receive style)
+val CustomDownloadsNavbarBoldIcon: androidx.compose.ui.graphics.vector.ImageVector
+    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarDownloadSquareBold",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M2 12C2 7.28595 2 4.92893 3.46447 3.46447C4.92893 2 7.28595 2 12 2C16.714 2 19.0711 2 20.5355 3.46447C22 4.92893 22 7.28595 22 12C22 16.714 22 19.0711 20.5355 20.5355C19.0711 22 16.714 22 12 22C7.28595 22 4.92893 22 3.46447 20.5355C2 19.0711 2 16.714 2 12ZM12 6.25C12.4142 6.25 12.75 6.58579 12.75 7V12.1893L14.4697 10.4697C14.7626 10.1768 15.2374 10.1768 15.5303 10.4697C15.8232 10.7626 15.8232 11.2374 15.5303 11.5303L12.5303 14.5303C12.3897 14.671 12.1989 14.75 12 14.75C11.8011 14.75 11.6103 14.671 11.4697 14.5303L8.46967 11.5303C8.17678 11.2374 8.17678 10.7626 8.46967 10.4697C8.76256 10.1768 9.23744 10.1768 9.53033 10.4697L11.25 12.1893V7C11.25 6.58579 11.5858 6.25 12 6.25ZM8 16.25C7.58579 16.25 7.25 16.5858 7.25 17C7.25 17.4142 7.58579 17.75 8 17.75H16C16.4142 17.75 16.75 17.4142 16.75 17C16.75 16.5858 16.4142 16.25 16 16.25H8Z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White),
+        pathFillType = androidx.compose.ui.graphics.PathFillType.EvenOdd
+    ).build()
 
 val BottomNavShoppingBagIcon: androidx.compose.ui.graphics.vector.ImageVector
     get() = CustomMyListIcon
 
-// Custom Mic icon built programmatically with crisp vector paths
+// Solar microphone-3-bold (Studio mic for posters and audio settings)
 val CustomMicVector: androidx.compose.ui.graphics.vector.ImageVector
     get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
-        name = "CustomMic",
+        name = "SolarHeadphonesBold",
         defaultWidth = 24.dp,
         defaultHeight = 24.dp,
         viewportWidth = 24f,
         viewportHeight = 24f
-    ).path(
-        fill = androidx.compose.ui.graphics.SolidColor(Color.White),
-        pathFillType = androidx.compose.ui.graphics.PathFillType.NonZero
-    ) {
-        // Inner capsule: width 6 (9 to 15), height 11 (3 to 14)
-        moveTo(12f, 14f)
-        curveTo(13.66f, 14f, 15f, 12.66f, 15f, 11f)
-        verticalLineTo(5f)
-        curveTo(15f, 3.34f, 13.66f, 2f, 12f, 2f)
-        curveTo(10.34f, 2f, 9f, 3.34f, 9f, 5f)
-        verticalLineTo(11f)
-        curveTo(9f, 12.66f, 10.34f, 14f, 12f, 14f)
-        close()
-        // Cradle arc & stand
-        moveTo(17.5f, 11f)
-        curveTo(17.5f, 13.85f, 15.1f, 16.15f, 12.8f, 16.45f)
-        verticalLineTo(19.5f)
-        horizontalLineTo(15f)
-        verticalLineTo(21f)
-        horizontalLineTo(9f)
-        verticalLineTo(19.5f)
-        horizontalLineTo(11.2f)
-        verticalLineTo(16.45f)
-        curveTo(8.9f, 16.15f, 6.5f, 13.85f, 6.5f, 11f)
-        horizontalLineTo(8f)
-        curveTo(8f, 13.2f, 9.8f, 15f, 12f, 15f)
-        curveTo(14.2f, 15f, 16f, 13.2f, 16f, 11f)
-        horizontalLineTo(17.5f)
-        close()
-    }.build()
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M2 12.124C2 6.53269 6.47713 2 11.9999 2C17.5228 2 21.9999 6.53269 21.9999 12.124L21.9999 17.3675C22.0002 18.1844 22.0004 18.7446 21.8568 19.2364C21.576 20.1982 20.9046 20.9937 20.01 21.4245C19.5525 21.6449 19.0059 21.732 18.2088 21.8591L18.0789 21.8799C17.7954 21.9252 17.5532 21.9639 17.3522 21.9839C17.1431 22.0047 16.9299 22.0111 16.7118 21.9676C15.9942 21.8245 15.4024 21.3126 15.1508 20.6172C15.0744 20.4059 15.0474 20.1916 15.035 19.9793C15.0232 19.7753 15.0232 19.527 15.0232 19.2365L15.0231 15.0641C15.0226 14.6386 15.0222 14.2725 15.1195 13.959C15.3422 13.2416 15.9238 12.6975 16.6477 12.5292C16.9641 12.4556 17.3246 12.4849 17.7435 12.5189L17.8367 12.5264L17.9465 12.5352C18.7302 12.5975 19.2664 12.6402 19.7216 12.8106C20.0415 12.9304 20.3381 13.0953 20.6046 13.2976V12.124C20.6046 7.31288 16.7521 3.41266 11.9999 3.41266C7.24776 3.41266 3.39534 7.31288 3.39534 12.124V13.2976C3.66176 13.0953 3.95843 12.9304 4.27829 12.8106C4.73345 12.6402 5.26965 12.5975 6.05335 12.5352L6.16318 12.5264L6.25641 12.5189C6.67534 12.4849 7.03581 12.4556 7.35224 12.5292C8.07612 12.6975 8.65766 13.2416 8.88039 13.959C8.97774 14.2725 8.9773 14.6386 8.97678 15.0641L8.97671 19.2365C8.97671 19.527 8.97672 19.7753 8.96487 19.9793C8.95254 20.1916 8.9255 20.4059 8.84906 20.6172C8.59754 21.3126 8.00574 21.8245 7.28812 21.9676C7.07001 22.0111 6.85675 22.0047 6.64768 21.9839C6.44671 21.9639 6.20449 21.9252 5.92102 21.8799L5.79106 21.8591C4.99399 21.732 4.44737 21.6449 3.98991 21.4245C3.09534 20.9937 2.42388 20.1982 2.14308 19.2364C2.02467 18.8309 2.00404 18.3788 2.0006 17.7747L2 17.5803V12.124Z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White)
+    ).build()
 
-// Custom Search Icon with prominent large lens circle and very short handle stem
+// Solar subtitles-bold (Subtitle appearance & empty state)
+val CustomSubVector: androidx.compose.ui.graphics.vector.ImageVector
+    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarSubtitlesBold",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M2 12C2 8.22876 2 6.34315 3.17157 5.17157C4.34315 4 6.22876 4 10 4H14C17.7712 4 19.6569 4 20.8284 5.17157C22 6.34315 22 8.22876 22 12C22 15.7712 22 17.6569 20.8284 18.8284C19.6569 20 17.7712 20 14 20H10C6.22876 20 4.34315 20 3.17157 18.8284C2 17.6569 2 15.7712 2 12ZM6 15.25C5.58579 15.25 5.25 15.5858 5.25 16C5.25 16.4142 5.58579 16.75 6 16.75H10C10.4142 16.75 10.75 16.4142 10.75 16C10.75 15.5858 10.4142 15.25 10 15.25H6ZM7.75 13C7.75 12.5858 7.41421 12.25 7 12.25H6C5.58579 12.25 5.25 12.5858 5.25 13C5.25 13.4142 5.58579 13.75 6 13.75H7C7.41421 13.75 7.75 13.4142 7.75 13ZM11.5 12.25C11.9142 12.25 12.25 12.5858 12.25 13C12.25 13.4142 11.9142 13.75 11.5 13.75H9.5C9.08579 13.75 8.75 13.4142 8.75 13C8.75 12.5858 9.08579 12.25 9.5 12.25H11.5ZM18.75 13C18.75 12.5858 18.4142 12.25 18 12.25H14C13.5858 12.25 13.25 12.5858 13.25 13C13.25 13.4142 13.5858 13.75 14 13.75H18C18.4142 13.75 18.75 13.4142 18.75 13ZM12.5 15.25C12.0858 15.25 11.75 15.5858 11.75 16C11.75 16.4142 12.0858 16.75 12.5 16.75H14C14.4142 16.75 14.75 16.4142 14.75 16C14.75 15.5858 14.4142 15.25 14 15.25H12.5ZM15.75 16C15.75 15.5858 16.0858 15.25 16.5 15.25H18C18.4142 15.25 18.75 15.5858 18.75 16C18.75 16.4142 18.4142 16.75 18 16.75H16.5C16.0858 16.75 15.75 16.4142 15.75 16Z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White),
+        pathFillType = androidx.compose.ui.graphics.PathFillType.EvenOdd
+    ).build()
+
+// Solar layers-minimalistic-bold (Clustered history)
+val ClusteredHistoryVector: androidx.compose.ui.graphics.vector.ImageVector
+    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarLayersBold",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M1.44171 15.4992C1.7183 15.1908 2.19253 15.1652 2.50085 15.4417L2.5011 15.442L2.50293 15.4436C2.50385 15.4444 2.50531 15.4457 2.50742 15.4474L2.5207 15.4589L2.53429 15.4705C2.55325 15.4862 2.58197 15.509 2.61986 15.5379C2.69578 15.5956 2.80806 15.6766 2.9554 15.7725C3.25055 15.9645 3.69618 16.2259 4.29971 16.4654L7.10817 17.5888C9.17557 18.4158 10.4988 18.9442 12 18.9442C13.5012 18.9442 14.8244 18.4158 16.8918 17.5888L19.7003 16.4654C20.3038 16.2259 20.7495 15.9645 21.0446 15.7725C21.1919 15.6766 21.3042 15.5956 21.3801 15.5379C21.418 15.509 21.4468 15.4862 21.4657 15.4705L21.4793 15.4589L21.4926 15.4474C21.4947 15.4457 21.4962 15.4444 21.4971 15.4436L21.4989 15.442L21.4991 15.4417C21.8075 15.1652 22.2817 15.1908 22.5583 15.4992C22.8349 15.8075 22.8092 16.2817 22.5008 16.5583L19.2997 18.3814L16.4912 19.5048C14.4988 20.302 13.3792 20.75 12 20.75C10.6208 20.75 9.50121 20.302 7.62443 19.5511L4.70029 18.3814C3.65759 17.9644 2.86971 17.5196 2.33662 17.1739L1.4995 16.5586C1.19116 16.282 1.16512 15.8075 1.44171 15.4992ZM22.4999 11.2339C22.4995 11.2333 22.4996 11.2337 22.5 11.2343L22.4999 11.2339ZM22.5583 10.1734C22.8349 10.4817 22.8092 10.9559 22.5008 11.2325L19.2997 13.0556L16.4912 14.179C14.4988 14.9762 13.3792 15.4242 12 15.4242C10.6208 15.4242 9.50121 14.9762 7.62443 14.2253L4.70029 13.0556L1.4995 11.2328C1.19116 10.9562 1.16512 10.4817 1.44171 10.1734C1.7183 9.86504 2.19253 9.83944 2.50085 10.1159L7.10817 12.263C9.17557 13.09 10.4988 13.6184 12 13.6184C13.5012 13.6184 14.8244 13.09 16.8918 12.263L21.4991 10.1159C21.8075 9.83944 22.2817 9.86504 22.5583 10.1734ZM19.2997 7.72979C20.3424 7.31284 21.1303 6.868 21.6634 6.52229L22.5008 5.90673C22.8092 5.63013 22.8349 5.15594 22.5583 4.8476C22.2817 4.53926 21.8075 4.51366 21.4991 4.79013L16.8918 6.93722C14.8244 7.76422 13.5012 8.29263 12 8.29263C10.4988 8.29263 9.17557 7.76422 7.10817 6.93722L2.50085 4.79013C2.19253 4.51366 1.7183 4.53926 1.44171 4.8476C1.16512 5.15594 1.19116 5.63013 1.4995 5.90673L2.33662 6.52229C2.86971 6.868 3.65759 7.31284 4.70029 7.72979L7.50875 8.8532C9.50121 9.65039 10.6208 10.0984 12 10.0984C13.3792 10.0984 14.4988 9.65039 16.3756 8.8995L16.4912 8.8532L19.2997 7.72979Z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White)
+    ).build()
+
+// Solar camera-bold (Screenshots & empty state)
+val CustomCameraVector: androidx.compose.ui.graphics.vector.ImageVector
+    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarCameraBold",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M9.77778 21H14.2222C17.3433 21 18.9038 21 20.0248 20.2646C20.51 19.9462 20.9267 19.5371 21.251 19.0607C22 17.9601 22 16.4279 22 13.3636C22 10.2994 22 8.76721 21.251 7.6666C20.9267 7.19014 20.51 6.78104 20.0248 6.46268C19.3044 5.99013 18.4027 5.82123 17.022 5.76086C16.3631 5.76086 15.7959 5.27068 15.6667 4.63636C15.4728 3.68489 14.6219 3 13.6337 3H10.3663C9.37805 3 8.52715 3.68489 8.33333 4.63636C8.20412 5.27068 7.63685 5.76086 6.978 5.76086C5.59733 5.82123 4.69555 5.99013 3.97524 6.46268C3.48995 6.78104 3.07328 7.19014 2.74902 7.6666C2 8.76721 2 10.2994 2 13.3636C2 16.4279 2 17.9601 2.74902 19.0607C3.07328 19.5371 3.48995 19.9462 3.97524 20.2646C5.09624 21 6.65675 21 9.77778 21ZM12 9.27273C9.69881 9.27273 7.83333 11.1043 7.83333 13.3636C7.83333 15.623 9.69881 17.4545 12 17.4545C14.3012 17.4545 16.1667 15.623 16.1667 13.3636C16.1667 11.1043 14.3012 9.27273 12 9.27273ZM12 10.9091C10.6193 10.9091 9.5 12.008 9.5 13.3636C9.5 14.7192 10.6193 15.8182 12 15.8182C13.3807 15.8182 14.5 14.7192 14.5 13.3636C14.5 12.008 13.3807 10.9091 12 10.9091ZM16.7222 10.0909C16.7222 9.63904 17.0953 9.27273 17.5556 9.27273H18.6667C19.1269 9.27273 19.5 9.63904 19.5 10.0909C19.5 10.5428 19.1269 10.9091 18.6667 10.9091H17.5556C17.0953 10.9091 16.7222 10.5428 16.7222 10.0909Z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White),
+        pathFillType = androidx.compose.ui.graphics.PathFillType.EvenOdd
+    ).build()
+
+// Solar magnifier-linear (Search linear)
 val CustomSearchIcon: androidx.compose.ui.graphics.vector.ImageVector
     get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
-        name = "CustomSearch",
+        name = "SolarSearchLinear",
         defaultWidth = 24.dp,
         defaultHeight = 24.dp,
         viewportWidth = 24f,
         viewportHeight = 24f
     ).path(
         stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
-        strokeLineWidth = 2.4f,
+        strokeLineWidth = 1.8f,
         strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
-        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round,
-        pathFillType = androidx.compose.ui.graphics.PathFillType.NonZero
+        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round
     ) {
-        // Large prominent lens circle centered at (10.5, 10.5) with radius 7.5
-        moveTo(18f, 10.5f)
-        curveTo(18f, 14.64f, 14.64f, 18f, 10.5f, 18f)
-        curveTo(6.36f, 18f, 3f, 14.64f, 3f, 10.5f)
-        curveTo(3f, 6.36f, 6.36f, 3f, 10.5f, 3f)
-        curveTo(14.64f, 3f, 18f, 6.36f, 18f, 10.5f)
+        moveTo(11.5f, 2f)
+        curveTo(16.7467f, 2f, 21f, 6.2533f, 21f, 11.5f)
+        curveTo(21f, 16.7467f, 16.7467f, 21f, 11.5f, 21f)
+        curveTo(6.2533f, 21f, 2f, 16.7467f, 2f, 11.5f)
+        curveTo(2f, 6.2533f, 6.2533f, 2f, 11.5f, 2f)
         close()
-        // Very short diagonal handle stem
-        moveTo(16.2f, 16.2f)
-        lineTo(19.8f, 19.8f)
+        moveTo(18.2173f, 18.2178f)
+        lineTo(21.9999f, 22.0004f)
     }.build()
 
-// Custom Modern Notification Bell Icon with sleek curves, widened flared rim, and clapper
-val CustomNotificationIcon: androidx.compose.ui.graphics.vector.ImageVector
+// Solar magnifier-bold (Search bold)
+val CustomSearchBoldIcon: androidx.compose.ui.graphics.vector.ImageVector
     get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
-        name = "CustomNotification",
+        name = "SolarSearchBold",
         defaultWidth = 24.dp,
         defaultHeight = 24.dp,
         viewportWidth = 24f,
         viewportHeight = 24f
-    ).path(
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M11.5 2C16.7467 2 21 6.25329 21 11.5C21 13.8541 20.1417 16.0064 18.7236 17.666C18.7315 17.6732 18.7404 17.6799 18.748 17.6875L22.5303 21.4697C22.8228 21.7626 22.8228 22.2384 22.5303 22.5312C22.2375 22.8236 21.7625 22.8237 21.4697 22.5312L17.6875 18.748C17.6797 18.7403 17.6724 18.7317 17.665 18.7236C16.0055 20.1414 13.8538 21 11.5 21C6.25329 21 2 16.7467 2 11.5C2 6.25329 6.25329 2 11.5 2Z"
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White)
+    ).build()
+
+// Solar bell-linear (Notification bell)
+val CustomNotificationIcon: androidx.compose.ui.graphics.vector.ImageVector
+    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarBellLinear",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M18.7491 9.70957V9.00496C18.7491 5.13623 15.7274 2 12 2C8.27256 2 5.25087 5.13623 5.25087 9.00496V9.70957C5.25087 10.5552 5.00972 11.3818 4.5578 12.0854L3.45036 13.8095C2.43882 15.3843 3.21105 17.5249 4.97036 18.0229C9.57274 19.3257 14.4273 19.3257 19.0296 18.0229C20.789 17.5249 21.5612 15.3843 20.5496 13.8095L19.4422 12.0854C18.9903 11.3818 18.7491 10.5552 18.7491 9.70957ZM7.5 19C8.15503 20.7478 9.92246 22 12 22C14.0775 22 15.845 20.7478 16.5 19"
+        ).toNodes(),
         stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
-        strokeLineWidth = 2.0f,
+        strokeLineWidth = 1.8f,
         strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
-        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round,
-        pathFillType = androidx.compose.ui.graphics.PathFillType.NonZero
-    ) {
-        // Bell Dome & Flared Rim (clean smooth arch)
-        moveTo(19f, 16.5f)
-        curveTo(18.2f, 15.2f, 17.5f, 13.8f, 17.5f, 10.2f)
-        curveTo(17.5f, 7.0f, 15.1f, 4.4f, 12f, 4.4f)
-        curveTo(8.9f, 4.4f, 6.5f, 7.0f, 6.5f, 10.2f)
-        curveTo(6.5f, 13.8f, 5.8f, 15.2f, 5f, 16.5f)
-        lineTo(3.8f, 17.5f)
-        lineTo(20.2f, 17.5f)
-        close()
-        // Bottom Clapper Ball
-        moveTo(9.5f, 18.5f)
-        curveTo(9.9f, 20.0f, 10.9f, 21.0f, 12f, 21.0f)
-        curveTo(13.1f, 21.0f, 14.1f, 20.0f, 14.5f, 18.5f)
-    }.build()
+        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round
+    ).build()
+
+// Solar calendar-linear (Release Schedule)
+val SolarCalendarVector: androidx.compose.ui.graphics.vector.ImageVector
+    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarCalendarLinear",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M2 12C2 8.22876 2 6.34315 3.17157 5.17157C4.34315 4 6.22876 4 10 4H14C17.7712 4 19.6569 4 20.8284 5.17157C22 6.34315 22 8.22876 22 12V14C22 17.7712 22 19.6569 20.8284 20.8284C19.6569 22 17.7712 22 14 22H10C6.22876 22 4.34315 22 3.17157 20.8284C2 19.6569 2 17.7712 2 14V12ZM7 4V2.5M17 4V2.5M2.5 9H21.5M17 13H17.0001M12 13H12.0001M7 13H7.0001M17 17.0234H17.0001M12 17.0234H12.0001M7 17.0234H7.0001"
+        ).toNodes(),
+        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
+        strokeLineWidth = 1.8f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
+        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round
+    ).build()
 
 // Custom Segmented Play Icon (matching user reference image for trailer play)
 val CustomSegmentedPlayIcon: androidx.compose.ui.graphics.vector.ImageVector
-    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
-        name = "CustomSegmentedPlay",
-        defaultWidth = 24.dp,
-        defaultHeight = 24.dp,
-        viewportWidth = 24f,
-        viewportHeight = 24f
-    ).path(
-        stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
-        strokeLineWidth = 2.3f,
-        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
-        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round,
-        pathFillType = androidx.compose.ui.graphics.PathFillType.NonZero
-    ) {
-        // Upper Segment: left mid -> top corner -> right apex -> bottom mid
-        moveTo(6.5f, 9.8f)
-        lineTo(6.5f, 6.8f)
-        curveTo(6.5f, 5.2f, 8.2f, 4.2f, 9.6f, 5.0f)
-        lineTo(19.2f, 10.8f)
-        curveTo(20.5f, 11.6f, 20.5f, 13.4f, 19.2f, 14.2f)
-        lineTo(13.5f, 17.6f)
-
-        // Lower Segment: bottom right-mid -> bottom-left corner -> left lower-mid
-        moveTo(11.2f, 19.0f)
-        lineTo(9.6f, 20.0f)
-        curveTo(8.2f, 20.8f, 6.5f, 19.8f, 6.5f, 18.2f)
-        lineTo(6.5f, 14.2f)
-    }.build()
+    get() = SolarPlayVector
 
 @Composable
 fun AnimeBoxHomeSkeletonLoading(modifier: Modifier = Modifier) {
@@ -10328,15 +16252,15 @@ fun AnimeBoxHomeSkeletonLoading(modifier: Modifier = Modifier) {
                     modifier = Modifier
                         .width(180.dp)
                         .height(22.dp)
-                        .clip(RoundedCornerShape(4.dp))
+                        .clip(RoundedCornerShape(8.dp))
                         .background(shimmerColor)
                 )
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Box(modifier = Modifier.width(60.dp).height(20.dp).clip(RoundedCornerShape(4.dp)).background(shimmerColor))
-                    Box(modifier = Modifier.width(70.dp).height(20.dp).clip(RoundedCornerShape(4.dp)).background(shimmerColor))
-                    Box(modifier = Modifier.width(65.dp).height(20.dp).clip(RoundedCornerShape(4.dp)).background(shimmerColor))
+                    Box(modifier = Modifier.width(60.dp).height(20.dp).clip(RoundedCornerShape(8.dp)).background(shimmerColor))
+                    Box(modifier = Modifier.width(70.dp).height(20.dp).clip(RoundedCornerShape(8.dp)).background(shimmerColor))
+                    Box(modifier = Modifier.width(65.dp).height(20.dp).clip(RoundedCornerShape(8.dp)).background(shimmerColor))
                 }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -10355,7 +16279,7 @@ fun AnimeBoxHomeSkeletonLoading(modifier: Modifier = Modifier) {
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Box(modifier = Modifier.width(140.dp).height(18.dp).clip(RoundedCornerShape(4.dp)).background(shimmerColor))
+            Box(modifier = Modifier.width(140.dp).height(18.dp).clip(RoundedCornerShape(8.dp)).background(shimmerColor))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -10378,7 +16302,7 @@ fun AnimeBoxHomeSkeletonLoading(modifier: Modifier = Modifier) {
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Box(modifier = Modifier.width(120.dp).height(18.dp).clip(RoundedCornerShape(4.dp)).background(shimmerColor))
+            Box(modifier = Modifier.width(120.dp).height(18.dp).clip(RoundedCornerShape(8.dp)).background(shimmerColor))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -10412,14 +16336,32 @@ val CustomWifiOffIcon: androidx.compose.ui.graphics.vector.ImageVector
         strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round,
         pathFillType = androidx.compose.ui.graphics.PathFillType.NonZero
     ) {
-        moveTo(1f, 1f)
-        lineTo(23f, 23f)
-        moveTo(16.72f, 11.06f)
-        curveTo(18.47f, 11.77f, 20.06f, 12.87f, 21.4f, 14.24f)
+        // Diagonal cutting slash line
+        moveTo(2f, 2f)
+        lineTo(22f, 22f)
+
+        // Outer wifi wave (cut by slash)
+        moveTo(1.42f, 9f)
+        curveTo(2.7f, 7.65f, 4.3f, 6.6f, 6.1f, 5.95f)
+
+        moveTo(10.7f, 4.85f)
+        curveTo(15f, 4.6f, 19.3f, 6.1f, 22.58f, 9f)
+
+        // Middle wifi wave (cut by slash)
         moveTo(5f, 12.55f)
-        curveTo(3.73f, 13.56f, 2.67f, 14.8f, 1.89f, 16.2f)
+        curveTo(6.45f, 11.4f, 8.25f, 10.65f, 10.2f, 10.4f)
+
+        moveTo(14.5f, 10.7f)
+        curveTo(16.15f, 11.1f, 17.7f, 11.9f, 19f, 13f)
+
+        // Inner wifi wave (cut by slash)
+        moveTo(8.53f, 16.11f)
+        curveTo(9.5f, 15.4f, 10.7f, 15f, 12f, 15f)
+        curveTo(13.25f, 15f, 14.4f, 15.4f, 15.35f, 16.11f)
+
+        // Signal center dot
         moveTo(12f, 20f)
-        horizontalLineTo(12.01f)
+        lineTo(12.01f, 20f)
     }.build()
 
 val CustomCloudOffIcon: androidx.compose.ui.graphics.vector.ImageVector
@@ -10447,33 +16389,30 @@ val CustomCloudOffIcon: androidx.compose.ui.graphics.vector.ImageVector
         horizontalLineTo(18.17f)
     }.build()
 
+// Solar info-circle-linear
 val CustomOutlinedInfoIcon: androidx.compose.ui.graphics.vector.ImageVector
     get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
-        name = "CustomOutlinedInfo",
+        name = "SolarInfoLinear",
         defaultWidth = 24.dp,
         defaultHeight = 24.dp,
         viewportWidth = 24f,
         viewportHeight = 24f
     ).path(
         stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
-        strokeLineWidth = 2.0f,
+        strokeLineWidth = 1.8f,
         strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
-        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round,
-        pathFillType = androidx.compose.ui.graphics.PathFillType.NonZero
+        strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round
     ) {
-        // Circle outline
         moveTo(12f, 2f)
-        curveTo(6.48f, 2f, 2f, 6.48f, 2f, 12f)
-        curveTo(2f, 17.52f, 6.48f, 22f, 12f, 22f)
-        curveTo(17.52f, 22f, 22f, 17.52f, 22f, 12f)
-        curveTo(22f, 6.48f, 17.52f, 2f, 12f, 2f)
+        curveTo(17.5228f, 2f, 22f, 6.4772f, 22f, 12f)
+        curveTo(22f, 17.5228f, 17.5228f, 22f, 12f, 22f)
+        curveTo(6.4772f, 22f, 2f, 17.5228f, 2f, 12f)
+        curveTo(2f, 6.4772f, 6.4772f, 2f, 12f, 2f)
         close()
-        // Top dot
-        moveTo(12f, 8f)
-        horizontalLineTo(12.01f)
-        // Bottom line
-        moveTo(12f, 12f)
-        lineTo(12f, 16f)
+        moveTo(12f, 17f)
+        lineTo(12f, 11f)
+        moveTo(12f, 7.9f)
+        lineTo(12f, 8.1f)
     }.build()
 
 val continueWatchingPosterCache = java.util.concurrent.ConcurrentHashMap<Int, String>()
@@ -10738,6 +16677,599 @@ val NetflixDustbinIcon: ImageVector
         moveTo(14f, 9.8f)
         lineTo(14f, 16.5f)
     }.build()
+
+@Composable
+private fun ScreenshotsDownloadSection(
+    screenshotGroups: List<AnimeScreenshotGroup>,
+    dQuery: String,
+    downloadManager: AnimeDownloadManager,
+    onSelectScreenshot: (List<ScreenshotItem>, Int) -> Unit,
+    onScreenshotDeleted: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var selectedScreenshotAnimeTitle by remember { mutableStateOf<String?>(null) }
+
+    if (screenshotGroups.isEmpty()) {
+        Box(
+            modifier = modifier,
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(24.dp)
+            ) {
+                Icon(
+                        imageVector = CustomCameraVector,
+                        contentDescription = "Episode Screenshots",
+                        tint = Color(0xFF8E8E93),
+                        modifier = Modifier.size(58.dp)
+                    )
+                    Spacer(modifier = Modifier.height(18.dp))
+                    Text(
+                        text = if (dQuery.isNotEmpty()) "No Screenshots Found" else "No Screenshots Yet",
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.Normal,
+                    color = Color.White
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = if (dQuery.isNotEmpty()) "Try searching with another anime title." else "Capture video moments using the camera button in Video Player. They will appear here grouped by anime.",
+                    fontSize = 13.sp,
+                    color = Color(0xFF9E9EA4),
+                    textAlign = TextAlign.Center,
+                    lineHeight = 18.sp,
+                    modifier = Modifier.fillMaxWidth(0.85f)
+                )
+            }
+        }
+    } else if (selectedScreenshotAnimeTitle == null) {
+        // Step 1: Anime List View (Matching Subtitles & Series Design)
+        LazyColumn(
+            modifier = modifier,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(bottom = 24.dp)
+        ) {
+            item {
+                Text(
+                    text = "Episode Screenshots (${screenshotGroups.size} ${if (screenshotGroups.size == 1) "Anime" else "Anime"})",
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+                )
+            }
+            items(screenshotGroups, key = { it.folder.absolutePath }) { group ->
+                val isCoverLike = group.backdropUrl.contains("/cover/", ignoreCase = true) ||
+                                  (group.backdropUrl.contains("large", ignoreCase = true) && !group.backdropUrl.contains("banner", ignoreCase = true))
+                val cleanGroupBackdrop = if (isCoverLike) "" else group.backdropUrl
+
+                var backdropUrl by remember(group.anilistId) { mutableStateOf(if (isCoverLike) "" else group.backdropUrl) }
+                var logoUrl by remember(group.anilistId) { mutableStateOf(group.logoUrl) }
+
+                LaunchedEffect(group.anilistId) {
+                    if (group.anilistId > 0 && (backdropUrl.isEmpty() || isCoverLike || !backdropUrl.startsWith("/") || logoUrl.isEmpty() || !logoUrl.startsWith("/"))) {
+                        val (localBg, localLogo) = downloadManager.ensureAnimeBackdropAndLogo(group.anilistId, cleanGroupBackdrop, group.logoUrl)
+                        if (localBg.isNotEmpty()) backdropUrl = localBg
+                        if (localLogo.isNotEmpty()) logoUrl = localLogo
+                    }
+                }
+
+                val previewImage = group.screenshots.firstOrNull()?.file
+                val displayImage = backdropUrl.ifEmpty { cleanGroupBackdrop.ifEmpty { previewImage?.absolutePath ?: "" } }
+                val displayLogo = logoUrl.ifEmpty { group.logoUrl }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { selectedScreenshotAnimeTitle = group.animeTitle }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 16:9 Backdrop Thumbnail
+                    Box(
+                        modifier = Modifier
+                            .width(132.dp)
+                            .height(74.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(Color(0xFF1E1E1E)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            painter = rememberAsyncImagePainter(model = resolveImageModel(displayImage)),
+                            contentDescription = group.animeTitle,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+
+                        // Dark gradient overlay
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color.Black.copy(alpha = 0.15f),
+                                            Color.Black.copy(alpha = 0.65f)
+                                        )
+                                    )
+                                )
+                        )
+
+                        // FireFly App Logo in top left
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(start = 5.dp, top = 4.dp)
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.firefly_logo),
+                                contentDescription = "FireFly",
+                                modifier = Modifier
+                                    .height(17.dp)
+                                    .wrapContentWidth(),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
+
+                        // Show Logo Overlay
+                        if (displayLogo.isNotEmpty()) {
+                            Image(
+                                painter = rememberAsyncImagePainter(model = resolveImageModel(displayLogo)),
+                                contentDescription = "Logo",
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(start = 5.dp, bottom = 4.dp, end = 5.dp)
+                                    .height(28.dp)
+                                    .fillMaxWidth(0.85f)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(14.dp))
+
+                    // Middle: Clean Title & Screenshot count
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = group.animeTitle,
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            lineHeight = 18.sp
+                        )
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = "${group.screenshots.size} screenshot${if (group.screenshots.size > 1) "s" else ""}",
+                            color = Color(0xFFA0A0AB),
+                            fontSize = 12.5.sp
+                        )
+                    }
+
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "View Gallery",
+                        tint = Color(0xFF8E8E93),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+        }
+    } else {
+        // Step 2: Gallery Grid View for Selected Anime
+        val currentGroup = screenshotGroups.find { it.animeTitle == selectedScreenshotAnimeTitle }
+        if (currentGroup == null) {
+            selectedScreenshotAnimeTitle = null
+        } else {
+            Column(
+                modifier = modifier
+            ) {
+                // Header Row: Back button (<) + Anime Title
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = { selectedScreenshotAnimeTitle = null },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = currentGroup.animeTitle,
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "${currentGroup.screenshots.size} screenshots in gallery",
+                            color = Color(0xFF9E9EA4),
+                            fontSize = 11.5.sp
+                        )
+                    }
+                }
+
+                // Gallery Grid (2 columns)
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
+                    items(currentGroup.screenshots.size) { index ->
+                        val item = currentGroup.screenshots[index]
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF1B1B20))
+                                .clickable { onSelectScreenshot(currentGroup.screenshots, index) }
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(16f / 9f)
+                                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                                    .background(Color(0xFF101014))
+                            ) {
+                                Image(
+                                    painter = rememberAsyncImagePainter(model = item.file),
+                                    contentDescription = "Screenshot Ep ${item.episodeNum}",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+
+                                // Episode Tag
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopStart)
+                                        .clip(RoundedCornerShape(bottomEnd = 8.dp))
+                                        .background(Color.Black.copy(alpha = 0.8f))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Ep ${item.episodeNum}",
+                                        color = Color.White,
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                // Delete trash icon (TopEnd corner badge, matching previous shape)
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .size(28.dp)
+                                        .clip(RoundedCornerShape(bottomStart = 8.dp))
+                                        .background(Color.Black.copy(alpha = 0.8f))
+                                        .clickable {
+                                            try {
+                                                item.file.delete()
+                                                onScreenshotDeleted()
+                                            } catch (_: Exception) {}
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = NetflixDustbinIcon,
+                                        contentDescription = "Delete",
+                                        tint = Color(0xFFFF5252),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+
+                            // Timestamp caption
+                            val dateStr = remember(item.timestamp) {
+                                val sdf = java.text.SimpleDateFormat("MMM dd, HH:mm", java.util.Locale.getDefault())
+                                sdf.format(java.util.Date(item.timestamp))
+                            }
+                            Text(
+                                text = dateStr,
+                                color = Color(0xFFA0A0AB),
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun ScreenshotLightboxDialog(
+    screenshots: List<ScreenshotItem>,
+    initialIndex: Int,
+    onDismiss: () -> Unit,
+    onDelete: (ScreenshotItem) -> Unit
+) {
+    val context = LocalContext.current
+    var currentScreenshots by remember(screenshots) { mutableStateOf(screenshots) }
+    val pagerState = androidx.compose.foundation.pager.rememberPagerState(
+        initialPage = initialIndex.coerceIn(0, (screenshots.size - 1).coerceAtLeast(0)),
+        pageCount = { currentScreenshots.size }
+    )
+
+    if (currentScreenshots.isEmpty()) {
+        LaunchedEffect(Unit) { onDismiss() }
+        return
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.96f))
+        ) {
+            val safePage = pagerState.currentPage.coerceIn(0, (currentScreenshots.size - 1).coerceAtLeast(0))
+            val activeItem = currentScreenshots.getOrNull(safePage)
+
+            // HorizontalPager allowing sliding / swiping across screenshots
+            androidx.compose.foundation.pager.HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize()
+            ) { page ->
+                val item = currentScreenshots.getOrNull(page)
+                if (item != null && item.file.exists()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(vertical = 54.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            painter = rememberAsyncImagePainter(model = item.file),
+                            contentDescription = "Screenshot Ep ${item.episodeNum}",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit
+                        )
+                    }
+                }
+            }
+
+            // Top Bar: Back / Close (<) + Anime Title / Page Counter + Share + Delete
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black.copy(alpha = 0.55f))
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    if (activeItem != null) {
+                        Column {
+                            Text(
+                                text = activeItem.animeTitle,
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "Ep ${activeItem.episodeNum} • ${safePage + 1} of ${currentScreenshots.size}",
+                                color = Color(0xFFA0A0AB),
+                                fontSize = 11.5.sp
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Share Button
+                    if (activeItem != null) {
+                        IconButton(
+                            onClick = {
+                                try {
+                                    val uri = androidx.core.content.FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.provider",
+                                        activeItem.file
+                                    )
+                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "image/jpeg"
+                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(shareIntent, "Share Screenshot"))
+                                } catch (_: Exception) {
+                                    Toast.makeText(context, "Could not share screenshot", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.Black.copy(alpha = 0.55f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Share",
+                                tint = Color.White,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+
+                        // Delete Button
+                        IconButton(
+                            onClick = {
+                                val toDelete = activeItem
+                                onDelete(toDelete)
+                                val remaining = currentScreenshots.filterNot { it.file.absolutePath == toDelete.file.absolutePath }
+                                if (remaining.isEmpty()) {
+                                    onDismiss()
+                                } else {
+                                    currentScreenshots = remaining
+                                }
+                            },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.Black.copy(alpha = 0.55f))
+                        ) {
+                            Icon(
+                                imageVector = NetflixDustbinIcon,
+                                contentDescription = "Delete",
+                                tint = Color(0xFFFF5252),
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Bottom Bar: File Name and Date
+            if (activeItem != null) {
+                val dateStr = remember(activeItem.file.lastModified()) {
+                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd • HH:mm:ss", java.util.Locale.getDefault())
+                    sdf.format(java.util.Date(activeItem.file.lastModified()))
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "${activeItem.file.name} • $dateStr",
+                        color = Color(0xFFC0C0C8),
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
+val SolarMicrophoneLargeBoldVector: androidx.compose.ui.graphics.vector.ImageVector
+    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "SolarMicrophoneLargeBold",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).apply {
+        addPath(
+            pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+                "M12 2C9.23858 2 7 4.23858 7 7V11C7 13.7614 9.23858 16 12 16C14.7614 16 17 13.7614 17 11V7C17 4.23858 14.7614 2 12 2ZM13.25 6.25H15.4697C15.3519 5.71451 15.1342 5.21495 14.8359 4.77051H13.25C12.8358 4.77051 12.5 5.10629 12.5 5.52051C12.5 5.93472 12.8358 6.25 13.25 6.25ZM15.5 7.75H13.25C12.8358 7.75 12.5 8.08579 12.5 8.5C12.5 8.91421 12.8358 9.25 13.25 9.25H15.5V7.75Z"
+            ).toNodes(),
+            fill = androidx.compose.ui.graphics.SolidColor(Color.White)
+        )
+        addPath(
+            pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+                "M5.5 10.25C5.5 9.83579 5.16421 9.5 4.75 9.5C4.33579 9.5 4 9.83579 4 10.25V11C4 15.1641 7.18184 18.5831 11.25 18.9646V21.25C11.25 21.6642 11.5858 22 12 22C12.4142 22 12.75 21.6642 12.75 21.25V18.9646C16.8182 18.5831 20 15.1641 20 11V10.25C20 9.83579 19.6642 9.5 19.25 9.5C18.8358 9.5 18.5 9.83579 18.5 10.25V11C18.5 14.5899 15.5899 17.5 12 17.5C8.41015 17.5 5.5 14.5899 5.5 11V10.25Z"
+            ).toNodes(),
+            fill = androidx.compose.ui.graphics.SolidColor(Color.White)
+        )
+    }.build()
+
+val AdvanceSearchIcon: androidx.compose.ui.graphics.vector.ImageVector
+    get() = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "AdvanceSearch",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).path(
+        fill = androidx.compose.ui.graphics.SolidColor(Color.White)
+    ) {
+        moveTo(3f, 17f)
+        verticalLineToRelative(2f)
+        horizontalLineToRelative(6f)
+        verticalLineToRelative(-2f)
+        lineTo(3f, 17f)
+        close()
+        moveTo(3f, 5f)
+        verticalLineToRelative(2f)
+        horizontalLineToRelative(10f)
+        lineTo(13f, 5f)
+        lineTo(3f, 5f)
+        close()
+        moveTo(13f, 21f)
+        verticalLineToRelative(-2f)
+        horizontalLineToRelative(8f)
+        verticalLineToRelative(-2f)
+        horizontalLineToRelative(-8f)
+        verticalLineToRelative(-2f)
+        horizontalLineToRelative(-2f)
+        verticalLineToRelative(6f)
+        horizontalLineToRelative(2f)
+        close()
+        moveTo(7f, 9f)
+        verticalLineToRelative(2f)
+        lineTo(3f, 11f)
+        verticalLineToRelative(2f)
+        horizontalLineToRelative(4f)
+        verticalLineToRelative(2f)
+        horizontalLineToRelative(2f)
+        lineTo(9f, 9f)
+        lineTo(7f, 9f)
+        close()
+        moveTo(21f, 13f)
+        verticalLineToRelative(-2f)
+        lineTo(11f, 11f)
+        verticalLineToRelative(2f)
+        horizontalLineToRelative(10f)
+        close()
+        moveTo(17f, 9f)
+        horizontalLineToRelative(2f)
+        lineTo(19f, 7f)
+        horizontalLineToRelative(2f)
+        lineTo(21f, 5f)
+        horizontalLineToRelative(-2f)
+        lineTo(19f, 3f)
+        horizontalLineToRelative(-2f)
+        verticalLineToRelative(6f)
+        close()
+    }.build()
+
 
 
 

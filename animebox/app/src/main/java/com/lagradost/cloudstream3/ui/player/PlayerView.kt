@@ -215,6 +215,10 @@ class PlayerView @JvmOverloads constructor(
     /** True when the current video is taller than it is wide. Set by [mainCallback] on [ResizedEvent]. */
     var isVerticalOrientation: Boolean = false
 
+    /** Current video dimensions */
+    var currentVideoWidth: Int = 0
+    var currentVideoHeight: Int = 0
+
     /** When true, [dynamicOrientation] returns portrait for portrait videos. Read from settings in [initialize]. */
     var autoPlayerRotateEnabled: Boolean = false
 
@@ -695,26 +699,56 @@ class PlayerView @JvmOverloads constructor(
 
     /** Resize */
 
+    fun getAvailableResizeModes(): List<PlayerResize> {
+        val aspect = if (currentVideoHeight > 0) currentVideoWidth.toFloat() / currentVideoHeight.toFloat() else 1.78f
+        return if (aspect < 1.55f && currentVideoWidth > 0 && currentVideoHeight > 0) {
+            listOf(PlayerResize.Fit, PlayerResize.Fill, PlayerResize.Zoom, PlayerResize.SixteenEight)
+        } else {
+            listOf(PlayerResize.Fit, PlayerResize.Fill, PlayerResize.Zoom)
+        }
+    }
+
+    private fun applySixteenEightScale() {
+        exoPlayerView?.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+        val currentAspect = if (currentVideoHeight > 0) currentVideoWidth.toFloat() / currentVideoHeight.toFloat() else (4f / 3f)
+        val targetAspect = 16f / 9f
+        val scale = (targetAspect / currentAspect).coerceAtLeast(1f)
+        exoPlayerView?.videoSurfaceView?.apply {
+            scaleX = scale
+            scaleY = scale
+            translationX = 0f
+            translationY = 0f
+        }
+    }
+
     fun nextResize() {
-        resizeMode = (resizeMode + 1) % PlayerResize.entries.size
-        resize(resizeMode, true)
+        val available = getAvailableResizeModes()
+        val currentMode = PlayerResize.entries.getOrNull(resizeMode) ?: PlayerResize.Fit
+        val currentIndex = available.indexOf(currentMode)
+        val nextMode = available[if (currentIndex >= 0) (currentIndex + 1) % available.size else 0]
+        resize(nextMode, true)
     }
 
     fun resize(resize: Int, showToast: Boolean) {
-        // Clear all zoom state before applying the new resize mode
-        gestureHelper.clearZoomState()
-        resize(PlayerResize.entries[resize], showToast)
+        val target = PlayerResize.entries.getOrNull(resize) ?: PlayerResize.Fit
+        resize(target, showToast)
     }
 
     fun resize(resize: PlayerResize, showToast: Boolean) {
-        DataStoreHelper.resizeMode = resize.ordinal
-        val type = when (resize) {
-            PlayerResize.Fill -> AspectRatioFrameLayout.RESIZE_MODE_FILL
-            PlayerResize.Fit -> AspectRatioFrameLayout.RESIZE_MODE_FIT
-            PlayerResize.Zoom -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+        // Clear all zoom state before applying the new resize mode
+        gestureHelper.clearZoomState()
+        val available = getAvailableResizeModes()
+        val effective = if (resize in available) resize else PlayerResize.Fit
+        resizeMode = effective.ordinal
+        DataStoreHelper.resizeMode = effective.ordinal
+
+        when (effective) {
+            PlayerResize.Fill -> exoPlayerView?.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FILL
+            PlayerResize.Fit -> exoPlayerView?.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+            PlayerResize.Zoom -> exoPlayerView?.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            PlayerResize.SixteenEight -> applySixteenEightScale()
         }
-        exoPlayerView?.resizeMode = type
-        if (showToast) showToast(resize.nameRes, Toast.LENGTH_SHORT)
+        if (showToast) showToast(effective.nameRes, Toast.LENGTH_SHORT)
     }
 
     /** Orientation */
@@ -749,8 +783,20 @@ class PlayerView @JvmOverloads constructor(
                 // Skip 0x0 dimensions that the player emits when going to STATE_IDLE
                 // to avoid incorrectly resetting the auto-detected orientation.
                 if (event.width > 0 && event.height > 0) {
+                    currentVideoWidth = event.width
+                    currentVideoHeight = event.height
                     // TV never rotates; otherwise track whether the video is portrait.
                     isVerticalOrientation = !isLayout(TV or EMULATOR) && event.height > event.width
+
+                    // If currently in SixteenEight mode, re-apply or fallback
+                    if (resizeMode == PlayerResize.SixteenEight.ordinal) {
+                        val aspect = event.width.toFloat() / event.height.toFloat()
+                        if (aspect < 1.55f) {
+                            applySixteenEightScale()
+                        } else {
+                            resize(PlayerResize.Fit, false)
+                        }
+                    }
                 }
                 callbacks?.playerDimensionsLoaded(event.width, event.height)
             }
@@ -779,7 +825,7 @@ class PlayerView @JvmOverloads constructor(
                 // Only play next episode if autoplay is on (default).
                 val ctx = context
                 if (PreferenceManager.getDefaultSharedPreferences(ctx)
-                        ?.getBoolean(ctx.getString(R.string.autoplay_next_key), true) == true
+                        ?.getBoolean(ctx.getString(R.string.autoplay_next_key), false) == true
                 ) {
                     player.handleEvent(CSPlayerEvent.NextEpisode, source = PlayerEventSource.Player)
                 }

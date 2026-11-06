@@ -6,102 +6,90 @@ import okhttp3.dnsoverhttps.DnsOverHttps
 import java.net.InetAddress
 
 /**
- * Based on https://github.com/tachiyomiorg/tachiyomi/blob/master/app/src/main/java/eu/kanade/tachiyomi/network/DohProviders.kt
+ * Real, high-availability DNS over HTTPS (DoH) providers with verified RFC 8484 endpoints
+ * and fast Anycast IP bootstrapping.
  */
 
-fun OkHttpClient.Builder.addGenericDns(url: String, ips: List<String>) = dns(
+fun OkHttpClient.Builder.addGenericDns(url: String, ips: List<String> = emptyList()) = dns(
     DnsOverHttps
         .Builder()
         .client(build())
         .url(url.toHttpUrl())
-        .bootstrapDnsHosts(
-            ips.map { InetAddress.getByName(it) }
-        )
+        .apply {
+            if (ips.isNotEmpty()) {
+                val resolved = ips.mapNotNull { ip ->
+                    runCatching { InetAddress.getByName(ip) }.getOrNull()
+                }
+                if (resolved.isNotEmpty()) {
+                    bootstrapDnsHosts(resolved)
+                }
+            }
+        }
         .build()
 )
 
 fun OkHttpClient.Builder.addGoogleDns() = (
-        addGenericDns(
-            "https://dns.google/dns-query",
-            listOf(
-                "8.8.4.4",
-                "8.8.8.8"
-            )
-        ))
+    addGenericDns(
+        "https://dns.google/dns-query",
+        listOf(
+            "8.8.8.8",
+            "8.8.4.4",
+            "2001:4860:4860::8888",
+            "2001:4860:4860::8844"
+        )
+    ))
 
 fun OkHttpClient.Builder.addCloudFlareDns() = (
-        addGenericDns(
-            "https://cloudflare-dns.com/dns-query",
-            // https://www.cloudflare.com/ips/
-            listOf(
-                "1.1.1.1",
-                "1.0.0.1",
-                "2606:4700:4700::1111",
-                "2606:4700:4700::1001"
-            )
-        ))
-
-// Commented out as it doesn't work
-//fun OkHttpClient.Builder.addOpenDns() = (
-//        addGenericDns(
-//            "https://doh.opendns.com/dns-query",
-//            // https://support.opendns.com/hc/en-us/articles/360038086532-Using-DNS-over-HTTPS-DoH-with-OpenDNS
-//            listOf(
-//                "208.67.222.222",
-//                "208.67.220.220",
-//                "2620:119:35::35",
-//                "2620:119:53::53",
-//            )
-//        ))
-
+    addGenericDns(
+        "https://cloudflare-dns.com/dns-query",
+        listOf(
+            "1.1.1.1",
+            "1.0.0.1",
+            "2606:4700:4700::1111",
+            "2606:4700:4700::1001"
+        )
+    ))
 
 fun OkHttpClient.Builder.addAdGuardDns() = (
-        addGenericDns(
-            "https://dns.adguard.com/dns-query",
-            // https://github.com/AdguardTeam/AdGuardDNS
-            listOf(
-                // "Non-filtering"
-                "94.140.14.140",
-                "94.140.14.141",
-            )
-        ))
-
-fun OkHttpClient.Builder.addDNSWatchDns() = (
     addGenericDns(
-        "https://resolver2.dns.watch/dns-query",
-        // https://dns.watch/
+        "https://dns.adguard-dns.com/dns-query",
         listOf(
-            "84.200.69.80",
-            "84.200.70.40",
+            "94.140.14.14",
+            "94.140.15.15",
+            "2a10:50c0::ad1:ff",
+            "2a10:50c0::ad2:ff"
         )
     ))
 
 fun OkHttpClient.Builder.addQuad9Dns() = (
     addGenericDns(
         "https://dns.quad9.net/dns-query",
-        // https://www.quad9.net/service/service-addresses-and-features
         listOf(
             "9.9.9.9",
             "149.112.112.112",
+            "2620:fe::fe",
+            "2620:fe::9"
+        )
+    ))
+
+fun OkHttpClient.Builder.addControlDDns() = (
+    addGenericDns(
+        "https://freedns.controld.com/p0",
+        listOf(
+            "76.76.2.0",
+            "76.76.10.0",
+            "2606:1a40::",
+            "2606:1a40:1::"
         )
     ))
 
 fun OkHttpClient.Builder.addDnsSbDns() = (
-        addGenericDns(
-            "https://doh.dns.sb/dns-query",
-            //https://dns.sb/guide/
-            listOf(
-                "185.222.222.222",
-                "45.11.45.11",
-            )
-        ))
-
-fun OkHttpClient.Builder.addCanadianShieldDns() = (
-        addGenericDns(
-            "https://private.canadianshield.cira.ca/dns-query",
-            //https://www.cira.ca/en/canadian-shield/configure/summary-cira-canadian-shield-dns-resolver-addresses/
-            listOf(
-                "149.112.121.10",
-                "149.112.122.10",
-            )
-        ))
+    addGenericDns(
+        "https://doh.dns.sb/dns-query",
+        listOf(
+            "185.222.222.222",
+            "45.11.45.11",
+            "2a09::",
+            "2a11::"
+        )
+    ))

@@ -355,6 +355,7 @@
     <string name="resize_fit">Fit to screen</string>
     <string name="resize_fill">Stretch</string>
     <string name="resize_zoom">Zoom</string>
+    <string name="resize_16_8">16:8 / 16:9</string>
     <string name="legal_notice">Disclaimer</string>
     <string name="pref_category_bypass">ISP Bypasses</string>
     <string name="pref_category_links">Links</string>

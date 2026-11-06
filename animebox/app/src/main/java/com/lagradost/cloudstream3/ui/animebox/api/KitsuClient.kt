@@ -15,13 +15,24 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
+import com.lagradost.cloudstream3.CloudStreamApp
+import com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxDnsHelper
 
 object KitsuClient {
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(8, TimeUnit.SECONDS)
-        .writeTimeout(8, TimeUnit.SECONDS)
-        .build()
+    private fun buildHttpClient(): OkHttpClient {
+        val builder = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .writeTimeout(10, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+        return AnimeBoxDnsHelper.applyDns(builder, CloudStreamApp.context).build()
+    }
+
+    private var client = buildHttpClient()
+
+    fun refreshClient() {
+        client = buildHttpClient()
+    }
 
     private const val BASE_URL = "https://kitsu.io/api/edge"
 

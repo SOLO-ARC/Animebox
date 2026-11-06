@@ -1,5 +1,7 @@
 package com.lagradost.cloudstream3.ui.animebox.tickets
 
+import com.lagradost.cloudstream3.ui.animebox.api.AnimeBoxConfig
+
 import android.content.Context
 import android.net.Uri
 import android.util.Base64
@@ -99,9 +101,9 @@ data class TicketMessage(
 }
 
 object SupabaseTicketManager {
-    private const val SUPABASE_URL = "https://okiuzwsldqjrtuyqylhx.supabase.co"
-    private const val SUPABASE_ANON_KEY = "sb_publishable_O6CrSYrDu-GilobI41fSMg_DG7IdSbf"
-    private const val IMGBB_API_KEY = "ce2a79ca83dc35909064133f7c9c2677"
+    private val SUPABASE_URL get() = AnimeBoxConfig.SUPABASE_URL
+    private val SUPABASE_ANON_KEY get() = AnimeBoxConfig.SUPABASE_ANON_KEY
+    private val IMGBB_API_KEY get() = AnimeBoxConfig.IMGBB_API_KEY
     const val ADMIN_AVATAR_URL = "https://i.ibb.co/LWs7Fpm/464405f5a311.jpg"
 
     private val client: OkHttpClient by lazy {
@@ -187,9 +189,22 @@ object SupabaseTicketManager {
         title: String,
         category: String,
         description: String,
-        initialImageUrl: String? = null
+        initialImageUrl: String? = null,
+        adminNotes: String? = null
     ): SupportTicket? = withContext(Dispatchers.IO) {
         try {
+            val finalAdminNotes = when {
+                !adminNotes.isNullOrBlank() -> adminNotes
+                com.lagradost.cloudstream3.CloudStreamApp.context != null -> {
+                    try {
+                        com.lagradost.cloudstream3.ui.animebox.notifications.DeviceDiagnosticsHelper.collectDiagnostics(
+                            com.lagradost.cloudstream3.CloudStreamApp.context!!
+                        ).toString()
+                    } catch (_: Throwable) { null }
+                }
+                else -> null
+            }
+
             val ticketJson = JSONObject().apply {
                 put("anilist_id", anilistId.trim())
                 put("anilist_username", anilistUsername.trim())
@@ -202,6 +217,9 @@ object SupabaseTicketManager {
                 put("status", "open")
                 put("priority", "normal")
                 put("last_message_preview", description.trim().take(100))
+                if (!finalAdminNotes.isNullOrBlank()) {
+                    put("admin_notes", finalAdminNotes)
+                }
             }
 
             val mediaType = "application/json; charset=utf-8".toMediaType()

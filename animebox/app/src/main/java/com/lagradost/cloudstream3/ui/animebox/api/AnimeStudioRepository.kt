@@ -16,10 +16,149 @@ data class StudioCardItem(
     val posterUrl: String,
     val popularAnimeTitle: String,
     val releaseYear: Int,
-    val themeColor: Long = 0xFF6366F1
+    val themeColor: Long = 0xFF6366F1,
+    val isAdultStudio: Boolean = false
 )
 
 object AnimeStudioRepository {
+
+    val ADULT_STUDIO_CARDS = listOf(
+        StudioCardItem(
+            name = "Bunny Walker",
+            queryName = "Bunny Walker",
+            posterUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/98769-cgwAYgZgaTJV.png",
+            popularAnimeTitle = "Oide yo! Mizuryuu Kei Land",
+            releaseYear = 2017,
+            themeColor = 0xFF9A6E83,
+            isAdultStudio = true
+        ),
+        StudioCardItem(
+            name = "Pink Pineapple",
+            queryName = "Pink Pineapple",
+            posterUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx108113-2Toq1jDKvnom.jpg",
+            popularAnimeTitle = "Master Piece THE ANIMATION",
+            releaseYear = 2019,
+            themeColor = 0xFF8B657E,
+            isAdultStudio = true
+        ),
+        StudioCardItem(
+            name = "Queen Bee",
+            queryName = "Queen Bee",
+            posterUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx112356-X7mmC8S8lpxd.jpg",
+            popularAnimeTitle = "Kiss Hug",
+            releaseYear = 2019,
+            themeColor = 0xFF8A7350,
+            isAdultStudio = true
+        ),
+        StudioCardItem(
+            name = "PoRO",
+            queryName = "PoRO",
+            posterUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx6893-vit3lBhizfEY.png",
+            popularAnimeTitle = "Oni Chichi",
+            releaseYear = 2009,
+            themeColor = 0xFF6C7893,
+            isAdultStudio = true
+        ),
+        StudioCardItem(
+            name = "Mary Jane",
+            queryName = "Mary Jane",
+            posterUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21514-g4zxaId9oTGW.jpg",
+            popularAnimeTitle = "Toshi Densetsu Series",
+            releaseYear = 2016,
+            themeColor = 0xFF8A5F64,
+            isAdultStudio = true
+        ),
+        StudioCardItem(
+            name = "T-Rex",
+            queryName = "T-Rex",
+            posterUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx198048-hqioP9q8uR9j.png",
+            popularAnimeTitle = "Natsuzuma",
+            releaseYear = 2025,
+            themeColor = 0xFF806A8C,
+            isAdultStudio = true
+        ),
+        StudioCardItem(
+            name = "Seven",
+            queryName = "Seven",
+            posterUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx122201-tBAIyCwWPD2N.jpg",
+            popularAnimeTitle = "The Girl in the Library: Fall of Purity",
+            releaseYear = 2020,
+            themeColor = 0xFF9E4A6C,
+            isAdultStudio = true
+        ),
+        StudioCardItem(
+            name = "Discovery",
+            queryName = "Discovery",
+            posterUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/b4358-5aemIjHtg4ZF.jpg",
+            popularAnimeTitle = "Lover in Law",
+            releaseYear = 2008,
+            themeColor = 0xFF5B7A8C,
+            isAdultStudio = true
+        ),
+        StudioCardItem(
+            name = "Arms",
+            queryName = "Arms",
+            posterUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx226-MibyRKhIrnTe.png",
+            popularAnimeTitle = "Elfen Lied",
+            releaseYear = 2004,
+            themeColor = 0xFF8C5C5B,
+            isAdultStudio = true
+        ),
+        StudioCardItem(
+            name = "Studio 1st",
+            queryName = "Studio 1st",
+            posterUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx105606-W1PlNAbB5V2m.jpg",
+            popularAnimeTitle = "Shishunki Sex",
+            releaseYear = 2019,
+            themeColor = 0xFF647B8A,
+            isAdultStudio = true
+        ),
+        StudioCardItem(
+            name = "Pixy",
+            queryName = "Pixy",
+            posterUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx10683-zAAwTVKDGY7A.jpg",
+            popularAnimeTitle = "Tentacle and Witches",
+            releaseYear = 2011,
+            themeColor = 0xFF8A6D56,
+            isAdultStudio = true
+        ),
+        StudioCardItem(
+            name = "MS Pictures",
+            queryName = "MS Pictures",
+            posterUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx7411-wnaz1hKfzjYf.png",
+            popularAnimeTitle = "Kanojo x Kanojo x Kanojo",
+            releaseYear = 2009,
+            themeColor = 0xFF6D7F68,
+            isAdultStudio = true
+        ),
+        StudioCardItem(
+            name = "Collaboration Works",
+            queryName = "Collaboration Works",
+            posterUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/nx21222-GxhbPz7klIFw.png",
+            popularAnimeTitle = "Mankitsu Happening",
+            releaseYear = 2015,
+            themeColor = 0xFF7A6B8A,
+            isAdultStudio = true
+        ),
+        StudioCardItem(
+            name = "Milky",
+            queryName = "Milky Animation Label",
+            posterUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/3918.jpg",
+            popularAnimeTitle = "Resort BOIN",
+            releaseYear = 2007,
+            themeColor = 0xFF8A6565,
+            isAdultStudio = true
+        ),
+        StudioCardItem(
+            name = "ZIZ Entertainment",
+            queryName = "ZIZ Entertainment",
+            posterUrl = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/nx101124-F2vnaaBhjGdJ.jpg",
+            popularAnimeTitle = "Wife Stealing: Endless Indecency",
+            releaseYear = 2018,
+            themeColor = 0xFF65788A,
+            isAdultStudio = true
+        )
+    )
 
     // 13 studios with high-res logos (arranged with best/most prominent first)
     val LOGO_STUDIOS = listOf(
@@ -364,7 +503,23 @@ object AnimeStudioRepository {
         "Troyca",
         "Studio VOLN",
         "BUG FILMS",
-        "Geno Studio"
+        "Geno Studio",
+        "Bunny Walker",
+        "Bunnywalker",
+        "Pink Pineapple",
+        "Queen Bee",
+        "PoRO",
+        "Mary Jane",
+        "T-Rex",
+        "Studio 1st",
+        "Pixy",
+        "MS Pictures",
+        "Collaboration Works",
+        "Milky",
+        "ZIZ Entertainment",
+        "Seven",
+        "Discovery",
+        "Arms"
     ).distinct()
 
     fun getQueryForStudio(studioName: String): String {
@@ -389,6 +544,21 @@ object AnimeStudioRepository {
             "kinema citrus" -> "Kinema Citrus"
             "lidenfilms", "liden films" -> "LIDENFILMS"
             "bug films" -> "BUG FILMS"
+            "bunnywalker", "bunny walker" -> "Bunny Walker"
+            "ziz", "ziz entertainment" -> "ZIZ Entertainment"
+            "collaboration works" -> "Collaboration Works"
+            "milky", "milky animation", "milky animation label" -> "Milky Animation Label"
+            "seven" -> "Seven"
+            "discovery" -> "Discovery"
+            "arms" -> "Arms"
+            "studio 1st" -> "Studio 1st"
+            "ms pictures" -> "MS Pictures"
+            "t-rex" -> "T-Rex"
+            "mary jane" -> "Mary Jane"
+            "pink pineapple" -> "Pink Pineapple"
+            "queen bee" -> "Queen Bee"
+            "poro" -> "PoRO"
+            "pixy" -> "Pixy"
             else -> s
         }
     }

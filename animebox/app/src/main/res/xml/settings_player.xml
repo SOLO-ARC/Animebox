@@ -90,13 +90,13 @@
             android:icon="@drawable/ic_baseline_skip_next_24"
             android:summary="@string/autoplay_next_settings_des"
             android:title="@string/autoplay_next_settings"
-            app:defaultValue="true"
+            app:defaultValue="false"
             app:key="@string/autoplay_next_key" />
         <SwitchPreference
             android:icon="@drawable/ic_baseline_skip_next_24"
             android:summary="@string/enable_skip_op_from_database_des"
             android:title="@string/video_skip_op"
-            app:defaultValue="true"
+            app:defaultValue="false"
             app:key="@string/enable_skip_op_from_database" />
         <SwitchPreference
             android:icon="@drawable/screen_rotation"

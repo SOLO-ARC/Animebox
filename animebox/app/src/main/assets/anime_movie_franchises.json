@@ -1,0 +1,1869 @@
+{
+  "Doraemon": [
+    {
+      "id": 3727,
+      "title_romaji": "Doraemon: Nobita no Kyouryuu",
+      "title_english": "Doraemon: Nobita's Dinosaur",
+      "year": 1980,
+      "anilist_url": "https://anilist.co/anime/3727"
+    },
+    {
+      "id": 2662,
+      "title_romaji": "Doraemon: Nobita no Uchuu Kaitakushi",
+      "title_english": null,
+      "year": 1981,
+      "anilist_url": "https://anilist.co/anime/2662"
+    },
+    {
+      "id": 2671,
+      "title_romaji": "Doraemon: Nobita no Daimakyou",
+      "title_english": "Doraemon: Nobita and the Haunts of Evil",
+      "year": 1982,
+      "anilist_url": "https://anilist.co/anime/2671"
+    },
+    {
+      "id": 2667,
+      "title_romaji": "Doraemon: Nobita no Kaitei Kiganjou",
+      "title_english": "Doraemon: Nobita's Undersea Fortress",
+      "year": 1983,
+      "anilist_url": "https://anilist.co/anime/2667"
+    },
+    {
+      "id": 2672,
+      "title_romaji": "Doraemon: Nobita no Makai Daibouken",
+      "title_english": "Doraemon: Nobita's Great Adventure in the World of Magic",
+      "year": 1984,
+      "anilist_url": "https://anilist.co/anime/2672"
+    },
+    {
+      "id": 2669,
+      "title_romaji": "Doraemon: Nobita no Little Star Wars",
+      "title_english": "Doraemon: Nobita's Little Star Wars",
+      "year": 1985,
+      "anilist_url": "https://anilist.co/anime/2669"
+    },
+    {
+      "id": 2665,
+      "title_romaji": "Doraemon: Nobita to Tetsujin Heidan",
+      "title_english": "Doraemon: Nobita and the Platoon of Iron Men",
+      "year": 1986,
+      "anilist_url": "https://anilist.co/anime/2665"
+    },
+    {
+      "id": 2657,
+      "title_romaji": "Doraemon: Nobita to Ryuu no Kishi",
+      "title_english": "Doraemon: Nobita and the Dragon Rider",
+      "year": 1987,
+      "anilist_url": "https://anilist.co/anime/2657"
+    },
+    {
+      "id": 2658,
+      "title_romaji": "Doraemon: Nobita no Parallel Saiyuuki",
+      "title_english": null,
+      "year": 1988,
+      "anilist_url": "https://anilist.co/anime/2658"
+    },
+    {
+      "id": 2666,
+      "title_romaji": "Doraemon: Nobita no Nippon Tanjou",
+      "title_english": "Doraemon: Nobita at the Birth of Japan",
+      "year": 1989,
+      "anilist_url": "https://anilist.co/anime/2666"
+    },
+    {
+      "id": 2677,
+      "title_romaji": "Doraemon: Nobita to Animal Planet",
+      "title_english": "Doraemon: Nobita's Animal Planet",
+      "year": 1990,
+      "anilist_url": "https://anilist.co/anime/2677"
+    },
+    {
+      "id": 2670,
+      "title_romaji": "Doraemon: Nobita in Dorabian Nights",
+      "title_english": null,
+      "year": 1991,
+      "anilist_url": "https://anilist.co/anime/2670"
+    },
+    {
+      "id": 2661,
+      "title_romaji": "Doraemon: Nobita to Kumo no Oukoku",
+      "title_english": "Doraemon: Nobita and the Kingdom of Clouds",
+      "year": 1992,
+      "anilist_url": "https://anilist.co/anime/2661"
+    },
+    {
+      "id": 2659,
+      "title_romaji": "Doraemon: Nobita to Buriki no Meikyuu",
+      "title_english": null,
+      "year": 1993,
+      "anilist_url": "https://anilist.co/anime/2659"
+    },
+    {
+      "id": 2676,
+      "title_romaji": "Doraemon: Nobita to Mugen Sankenshi",
+      "title_english": "Doraemon: Nobita's Fantastical Three Musketeers",
+      "year": 1994,
+      "anilist_url": "https://anilist.co/anime/2676"
+    },
+    {
+      "id": 2648,
+      "title_romaji": "Doraemon: 2112-nen Doraemon Tanjou",
+      "title_english": null,
+      "year": 1995,
+      "anilist_url": "https://anilist.co/anime/2648"
+    },
+    {
+      "id": 2674,
+      "title_romaji": "Doraemon: Nobita no Sousei Nikki",
+      "title_english": null,
+      "year": 1995,
+      "anilist_url": "https://anilist.co/anime/2674"
+    },
+    {
+      "id": 2675,
+      "title_romaji": "Doraemon: Nobita to Ginga Express",
+      "title_english": "Doraemon: Nobita's Galactic Express",
+      "year": 1996,
+      "anilist_url": "https://anilist.co/anime/2675"
+    },
+    {
+      "id": 2651,
+      "title_romaji": "Kaette Kita Doraemon",
+      "title_english": "Doraemon Comes Back",
+      "year": 1998,
+      "anilist_url": "https://anilist.co/anime/2651"
+    },
+    {
+      "id": 2668,
+      "title_romaji": "Doraemon: Nobita no Uchuu Hyouryuuki",
+      "title_english": "Doraemon: Nobita Gets Lost in Space",
+      "year": 1999,
+      "anilist_url": "https://anilist.co/anime/2668"
+    },
+    {
+      "id": 2649,
+      "title_romaji": "Doraemon: Obaachan no Omoide",
+      "title_english": "Doraemon: A Grandmother's Recollections",
+      "year": 2000,
+      "anilist_url": "https://anilist.co/anime/2649"
+    },
+    {
+      "id": 2653,
+      "title_romaji": "Doraemon: Ganbare! Gian!!",
+      "title_english": "Doraemon: Ganbare! Gian!!",
+      "year": 2001,
+      "anilist_url": "https://anilist.co/anime/2653"
+    },
+    {
+      "id": 2654,
+      "title_romaji": "Doraemon: Nobita to Tsubasa no Yuusha-tachi",
+      "title_english": "Doraemon: Nobita's Winged Heroes",
+      "year": 2001,
+      "anilist_url": "https://anilist.co/anime/2654"
+    },
+    {
+      "id": 2652,
+      "title_romaji": "Doraemon: Boku no Umareta Hi",
+      "title_english": "Doraemon: The Day When I Was Born",
+      "year": 2002,
+      "anilist_url": "https://anilist.co/anime/2652"
+    },
+    {
+      "id": 2655,
+      "title_romaji": "Doraemon: Nobita to Robot Oukoku",
+      "title_english": null,
+      "year": 2002,
+      "anilist_url": "https://anilist.co/anime/2655"
+    },
+    {
+      "id": 2393,
+      "title_romaji": "Doraemon: Nobita to Fushigi Kaze Tsukai",
+      "title_english": "Doraemon: Nobita and the Strange Wind Rider",
+      "year": 2003,
+      "anilist_url": "https://anilist.co/anime/2393"
+    },
+    {
+      "id": 2392,
+      "title_romaji": "Doraemon: Nobita no Kyouryuu (2006)",
+      "title_english": null,
+      "year": 2006,
+      "anilist_url": "https://anilist.co/anime/2392"
+    },
+    {
+      "id": 2673,
+      "title_romaji": "Doraemon: Nobita no Shin Makai Daibouken - Shichinin no Mahoutsukai",
+      "title_english": "Doraemon The Movie 2007",
+      "year": 2007,
+      "anilist_url": "https://anilist.co/anime/2673"
+    },
+    {
+      "id": 5096,
+      "title_romaji": "Doraemon: Nobita to Midori no Kyojin Den",
+      "title_english": null,
+      "year": 2008,
+      "anilist_url": "https://anilist.co/anime/5096"
+    },
+    {
+      "id": 6930,
+      "title_romaji": "Doraemon: Shin Nobita no Uchuu Kaitakushi",
+      "title_english": "Doraemon: The New Record of Nobita - Spaceblazer",
+      "year": 2009,
+      "anilist_url": "https://anilist.co/anime/6930"
+    },
+    {
+      "id": 6988,
+      "title_romaji": "Doraemon: Nobita no Ningyo Daikaisen",
+      "title_english": "Doraemon: Nobita's Great Mermaid Naval Battle",
+      "year": 2010,
+      "anilist_url": "https://anilist.co/anime/6988"
+    },
+    {
+      "id": 10534,
+      "title_romaji": "Doraemon: Shin Nobita to Tetsujin Heidan - Habatake Tenshi-tachi",
+      "title_english": "Doraemon the Movie 2011: Nobita and the New Steel Troops: ~Winged Angels~",
+      "year": 2011,
+      "anilist_url": "https://anilist.co/anime/10534"
+    },
+    {
+      "id": 11053,
+      "title_romaji": "Doraemon: Nobita to Kiseki no Shima - Animal Adventure",
+      "title_english": "Doraemon the Movie 2012: Nobita and the Island of Miracles - Animal Adventure",
+      "year": 2012,
+      "anilist_url": "https://anilist.co/anime/11053"
+    },
+    {
+      "id": 15925,
+      "title_romaji": "Doraemon: Nobita no Himitsu Dougu Museum",
+      "title_english": null,
+      "year": 2013,
+      "anilist_url": "https://anilist.co/anime/15925"
+    },
+    {
+      "id": 20515,
+      "title_romaji": "STAND BY ME Doraemon",
+      "title_english": "STAND BY ME Doraemon",
+      "year": 2014,
+      "anilist_url": "https://anilist.co/anime/20515"
+    },
+    {
+      "id": 100291,
+      "title_romaji": "Doraemon: Nobita no Space Heroes",
+      "title_english": "Doraemon: Nobita no Space Heroes",
+      "year": 2015,
+      "anilist_url": "https://anilist.co/anime/100291"
+    },
+    {
+      "id": 87438,
+      "title_romaji": "Doraemon: Shin Nobita no Nippon Tanjou",
+      "title_english": "Doraemon the Movie 2016: Nobita and the Birth of Japan",
+      "year": 2016,
+      "anilist_url": "https://anilist.co/anime/87438"
+    },
+    {
+      "id": 99085,
+      "title_romaji": "Doraemon: Nobita no Nankyoku Kachi Kochi Daibouken",
+      "title_english": "Doraemon the Movie 2017: Great Adventure in the Antarctic Kachi Kochi",
+      "year": 2017,
+      "anilist_url": "https://anilist.co/anime/99085"
+    },
+    {
+      "id": 99084,
+      "title_romaji": "Doraemon: Nobita no Takarajima",
+      "title_english": null,
+      "year": 2018,
+      "anilist_url": "https://anilist.co/anime/99084"
+    },
+    {
+      "id": 106493,
+      "title_romaji": "Doraemon: Nobita no Getsumen Tansa-ki",
+      "title_english": "Doraemon the Movie 2019: Nobita's Chronicle of the Moon Exploration",
+      "year": 2019,
+      "anilist_url": "https://anilist.co/anime/106493"
+    },
+    {
+      "id": 113669,
+      "title_romaji": "Doraemon: Nobita no Shin Kyoryuu",
+      "title_english": null,
+      "year": 2020,
+      "anilist_url": "https://anilist.co/anime/113669"
+    },
+    {
+      "id": 122575,
+      "title_romaji": "STAND BY ME Doraemon 2",
+      "title_english": "STAND BY ME Doraemon 2",
+      "year": 2020,
+      "anilist_url": "https://anilist.co/anime/122575"
+    },
+    {
+      "id": 126783,
+      "title_romaji": "Doraemon: Nobita no Little Star Wars 2021",
+      "title_english": "Doraemon the Movie 2021: Nobita's Space War",
+      "year": 2022,
+      "anilist_url": "https://anilist.co/anime/126783"
+    },
+    {
+      "id": 151896,
+      "title_romaji": "Doraemon: Nobita to Sora no Utopia",
+      "title_english": null,
+      "year": 2023,
+      "anilist_url": "https://anilist.co/anime/151896"
+    },
+    {
+      "id": 166976,
+      "title_romaji": "Doraemon: Nobita no Chikyuu Symphony",
+      "title_english": null,
+      "year": 2024,
+      "anilist_url": "https://anilist.co/anime/166976"
+    },
+    {
+      "id": 182333,
+      "title_romaji": "Doraemon: Nobita no E Sekai Monogatari",
+      "title_english": "Doraemon the Movie 2025: Nobita's Art World Tales",
+      "year": 2025,
+      "anilist_url": "https://anilist.co/anime/182333"
+    },
+    {
+      "id": 198368,
+      "title_romaji": "Doraemon: Shin Nobita no Kaitei Kiganjou",
+      "title_english": "Doraemon the Movie 2026: New Nobita and the Castle of the Undersea Devil",
+      "year": 2026,
+      "anilist_url": "https://anilist.co/anime/198368"
+    },
+    {
+      "id": 216623,
+      "title_romaji": "Doraemon: Nobita no Jouki Jikansha",
+      "title_english": null,
+      "year": 2027,
+      "anilist_url": "https://anilist.co/anime/216623"
+    }
+  ],
+  "Crayon Shin-chan": [
+    {
+      "id": 8358,
+      "title_romaji": "Crayon Shin-chan: Action Kamen vs. Haigure Maou",
+      "title_english": "Crayon Shin-chan: Action Mask vs. Leotard Devil",
+      "year": 1993,
+      "anilist_url": "https://anilist.co/anime/8358"
+    },
+    {
+      "id": 3745,
+      "title_romaji": "Crayon Shin-chan: Buriburi Oukoku no Hihou",
+      "title_english": "Crayon Shin-chan: The Hidden Treasure of the Buri Buri Kingdom",
+      "year": 1994,
+      "anilist_url": "https://anilist.co/anime/3745"
+    },
+    {
+      "id": 6217,
+      "title_romaji": "Crayon Shin-chan: Unkokusai no Yabou",
+      "title_english": "Crayon Shin-chan: Unkokusai's Ambition",
+      "year": 1995,
+      "anilist_url": "https://anilist.co/anime/6217"
+    },
+    {
+      "id": 8359,
+      "title_romaji": "Crayon Shin-chan: Henderland no Daibouken",
+      "title_english": "Crayon Shin-chan: Great Adventure In Henderland",
+      "year": 1996,
+      "anilist_url": "https://anilist.co/anime/8359"
+    },
+    {
+      "id": 6460,
+      "title_romaji": "Crayon Shin-chan: Ankoku Tamatama Daitsuiseki",
+      "title_english": "Crayon Shin-chan: Pursuit of the Balls of Darkness",
+      "year": 1997,
+      "anilist_url": "https://anilist.co/anime/6460"
+    },
+    {
+      "id": 8360,
+      "title_romaji": "Crayon Shin-chan: Dengeki! Buta no Hizume Daisakusen",
+      "title_english": "Crayon Shin-chan: Blitzkrieg! Pig's Hoof's Secret Mission",
+      "year": 1998,
+      "anilist_url": "https://anilist.co/anime/8360"
+    },
+    {
+      "id": 8361,
+      "title_romaji": "Crayon Shin-chan: Bakuhatsu! Onsen Wakuwaku Daikessen",
+      "title_english": "Crayon Shin-chan: Explosion! The Hot Spring's Feel Good Final Battle",
+      "year": 1999,
+      "anilist_url": "https://anilist.co/anime/8361"
+    },
+    {
+      "id": 8362,
+      "title_romaji": "Crayon Shin-chan: Arashi wo Yobu Jungle",
+      "title_english": "Crayon Shin-chan: Jungle That Invites Storm",
+      "year": 2000,
+      "anilist_url": "https://anilist.co/anime/8362"
+    },
+    {
+      "id": 2450,
+      "title_romaji": "Crayon Shin-chan: Arashi wo Yobu Mouretsu! Otona Teikoku no Gyakushuu",
+      "title_english": "Crayon Shin-chan: Fierceness That Invites Storm! The Adult Empire Strikes Back",
+      "year": 2001,
+      "anilist_url": "https://anilist.co/anime/2450"
+    },
+    {
+      "id": 3744,
+      "title_romaji": "Crayon Shin-chan: Arashi wo Yobu Appare! Sengoku Daikassen",
+      "title_english": null,
+      "year": 2002,
+      "anilist_url": "https://anilist.co/anime/3744"
+    },
+    {
+      "id": 8363,
+      "title_romaji": "Crayon Shin-chan: Arashi wo Yobu Eikou no Yakiniku Road",
+      "title_english": "Crayon Shin-chan: Fierceness That Invites Storm! Yakiniku Road of Honor",
+      "year": 2003,
+      "anilist_url": "https://anilist.co/anime/8363"
+    },
+    {
+      "id": 8364,
+      "title_romaji": "Crayon Shin-chan: Arashi wo Yobu! Yuuhi no Kasukabe Boys",
+      "title_english": null,
+      "year": 2004,
+      "anilist_url": "https://anilist.co/anime/8364"
+    },
+    {
+      "id": 8365,
+      "title_romaji": "Crayon Shin-chan: Densetsu wo Yobu Buriburi 3 Pun Dai Shingeki",
+      "title_english": "Crayon Shin-chan the Movie: The Legend Called Buri Buri 3 Minutes Charge",
+      "year": 2005,
+      "anilist_url": "https://anilist.co/anime/8365"
+    },
+    {
+      "id": 8366,
+      "title_romaji": "Crayon Shin-chan: Densetsu wo Yobu Odore! Amigo!",
+      "title_english": null,
+      "year": 2006,
+      "anilist_url": "https://anilist.co/anime/8366"
+    },
+    {
+      "id": 2172,
+      "title_romaji": "Crayon Shin-chan: Arashi wo Yobu Utau Ketsu dake Bakudan!",
+      "title_english": null,
+      "year": 2007,
+      "anilist_url": "https://anilist.co/anime/2172"
+    },
+    {
+      "id": 8367,
+      "title_romaji": "Crayon Shin-chan: Chou Arashi wo Yobu Kinpoko no Yuusha",
+      "title_english": "Crayon Shin-chan: Fierceness That Invites Storm! The Hero of Kinpoko",
+      "year": 2008,
+      "anilist_url": "https://anilist.co/anime/8367"
+    },
+    {
+      "id": 8368,
+      "title_romaji": "Crayon Shin-chan: Otakebe! Kasukabe Yasei Oukoku",
+      "title_english": null,
+      "year": 2009,
+      "anilist_url": "https://anilist.co/anime/8368"
+    },
+    {
+      "id": 8369,
+      "title_romaji": "Crayon Shin-chan: Chou Jikuu! Arashi wo Yobu Ora no Hanayome",
+      "title_english": null,
+      "year": 2010,
+      "anilist_url": "https://anilist.co/anime/8369"
+    },
+    {
+      "id": 10116,
+      "title_romaji": "Crayon Shin-chan: Arashi wo Yobu Ougon no Spy Daisakusen",
+      "title_english": null,
+      "year": 2011,
+      "anilist_url": "https://anilist.co/anime/10116"
+    },
+    {
+      "id": 12499,
+      "title_romaji": "Crayon Shin-chan: Arashi wo Yobu! Ora to Uchuu no Princess",
+      "title_english": null,
+      "year": 2012,
+      "anilist_url": "https://anilist.co/anime/12499"
+    },
+    {
+      "id": 17113,
+      "title_romaji": "Crayon Shin-chan: Bakauma! B-Kyuu Gourmet Survival Battle!!",
+      "title_english": null,
+      "year": 2013,
+      "anilist_url": "https://anilist.co/anime/17113"
+    },
+    {
+      "id": 20535,
+      "title_romaji": "Crayon Shin-chan: Gachinko! Gyakushuu no Robo Tou-chan",
+      "title_english": null,
+      "year": 2014,
+      "anilist_url": "https://anilist.co/anime/20535"
+    },
+    {
+      "id": 98744,
+      "title_romaji": "Crayon Shin-chan: Ora no Hikkoshi Monogatari! Saboten Daisuugeki",
+      "title_english": null,
+      "year": 2015,
+      "anilist_url": "https://anilist.co/anime/98744"
+    },
+    {
+      "id": 100289,
+      "title_romaji": "Crayon Shin-chan: Bakusui! Yumemi World Dai Totsugeki",
+      "title_english": "Crayon Shin-chan Movie 24: Bakusui! Yumemi World Dai Totsugeki",
+      "year": 2016,
+      "anilist_url": "https://anilist.co/anime/100289"
+    },
+    {
+      "id": 100290,
+      "title_romaji": "Crayon Shin-chan: Shuurai!! Uchuujin Shiriri",
+      "title_english": null,
+      "year": 2017,
+      "anilist_url": "https://anilist.co/anime/100290"
+    },
+    {
+      "id": 103690,
+      "title_romaji": "Crayon Shin-chan: Bakumori! Kung Fu Boys - Ramen Tairan",
+      "title_english": null,
+      "year": 2018,
+      "anilist_url": "https://anilist.co/anime/103690"
+    },
+    {
+      "id": 109931,
+      "title_romaji": "Crayon Shin-chan: Shinkon Ryokou Hurricane - Ushinawareta Hiroshi",
+      "title_english": null,
+      "year": 2019,
+      "anilist_url": "https://anilist.co/anime/109931"
+    },
+    {
+      "id": 111312,
+      "title_romaji": "Crayon Shin-chan: Gekitotsu! Rakuga Kingdom to Hobo Yonin no Yuusha",
+      "title_english": "Crayon Shin-chan the Movie: Crash! Rakuga-Kingdom and Almost Four Heroes",
+      "year": 2020,
+      "anilist_url": "https://anilist.co/anime/111312"
+    },
+    {
+      "id": 127331,
+      "title_romaji": "Crayon Shin-chan: Nazo Meki! Hana no Tenkasu Gakuen",
+      "title_english": null,
+      "year": 2021,
+      "anilist_url": "https://anilist.co/anime/127331"
+    },
+    {
+      "id": 142549,
+      "title_romaji": "Crayon Shin-chan: Mononoke Ninja Chinpuuden",
+      "title_english": "Crayon Shinchan the Movie: The Tornado Legend of Ninja Mononoke",
+      "year": 2022,
+      "anilist_url": "https://anilist.co/anime/142549"
+    },
+    {
+      "id": 158595,
+      "title_romaji": "Shin Jigen! Crayon Shin-chan THE MOVIE: Chounouryoku Daikessen - Tobe Tobe Temakizushi",
+      "title_english": null,
+      "year": 2023,
+      "anilist_url": "https://anilist.co/anime/158595"
+    },
+    {
+      "id": 171145,
+      "title_romaji": "Crayon Shin-chan: Ora-tachi no Kyouryuu Nikki",
+      "title_english": null,
+      "year": 2024,
+      "anilist_url": "https://anilist.co/anime/171145"
+    },
+    {
+      "id": 185537,
+      "title_romaji": "Crayon Shin-chan: Chou Karei! Shakunetsu no Kasukabe Dancers",
+      "title_english": "Crayon Shin-chan the Movie: Super Hot! The Spicy Kasukabe Dancers",
+      "year": 2025,
+      "anilist_url": "https://anilist.co/anime/185537"
+    },
+    {
+      "id": 208829,
+      "title_romaji": "Crayon Shin-chan: Kikikaikai! Ora no Youkai Vacation",
+      "title_english": null,
+      "year": 2026,
+      "anilist_url": "https://anilist.co/anime/208829"
+    }
+  ],
+  "Pok\u00e9mon": [
+    {
+      "id": 528,
+      "title_romaji": "Pocket Monsters: Mewtwo no Gyakushuu",
+      "title_english": "Pok\u00e9mon: The First Movie",
+      "year": 1998,
+      "anilist_url": "https://anilist.co/anime/528"
+    },
+    {
+      "id": 1117,
+      "title_romaji": "Pocket Monsters: Maboroshi no Pok\u00e9mon Lugia Bakutan",
+      "title_english": "Pok\u00e9mon the Movie 2000",
+      "year": 1999,
+      "anilist_url": "https://anilist.co/anime/1117"
+    },
+    {
+      "id": 1118,
+      "title_romaji": "Pocket Monsters: Kesshoutou no Teiou ENTEI",
+      "title_english": "Pok\u00e9mon 3: The Movie",
+      "year": 2000,
+      "anilist_url": "https://anilist.co/anime/1118"
+    },
+    {
+      "id": 1119,
+      "title_romaji": "Pocket Monsters: Celebi Toki wo Koeta Deai",
+      "title_english": "Pok\u00e9mon 4Ever",
+      "year": 2001,
+      "anilist_url": "https://anilist.co/anime/1119"
+    },
+    {
+      "id": 1120,
+      "title_romaji": "Pocket Monsters: Mizu no Miyako no Mamorigami Latias to Latios",
+      "title_english": "Pok\u00e9mon Heroes",
+      "year": 2002,
+      "anilist_url": "https://anilist.co/anime/1120"
+    },
+    {
+      "id": 1121,
+      "title_romaji": "Pocket Monsters Advanced Generation: Nanayo no Negaiboshi Jirachi",
+      "title_english": "Pok\u00e9mon: Jirachi Wish Maker",
+      "year": 2003,
+      "anilist_url": "https://anilist.co/anime/1121"
+    },
+    {
+      "id": 1122,
+      "title_romaji": "Pocket Monsters Advanced Generation: Rekkuu no Houmonsha Deoxys",
+      "title_english": "Pok\u00e9mon: Destiny Deoxys",
+      "year": 2004,
+      "anilist_url": "https://anilist.co/anime/1122"
+    },
+    {
+      "id": 1526,
+      "title_romaji": "Pocket Monsters Advanced Generation: Mew to Hadou no Yuusha Lucario",
+      "title_english": "Pok\u00e9mon: Lucario and the Mystery of Mew",
+      "year": 2005,
+      "anilist_url": "https://anilist.co/anime/1526"
+    },
+    {
+      "id": 2201,
+      "title_romaji": "Pocket Monsters Advanced Generation: Pok\u00e9mon Ranger to Umi no Ouji Manaphy",
+      "title_english": "Pok\u00e9mon Ranger and the Temple of the Sea",
+      "year": 2006,
+      "anilist_url": "https://anilist.co/anime/2201"
+    },
+    {
+      "id": 2847,
+      "title_romaji": "Pocket Monsters Diamond & Pearl: Dialga VS Palkia VS Darkrai",
+      "title_english": "Pok\u00e9mon: The Rise of Darkrai",
+      "year": 2007,
+      "anilist_url": "https://anilist.co/anime/2847"
+    },
+    {
+      "id": 4026,
+      "title_romaji": "Pocket Monsters Diamond & Pearl: Giratina to Sora no Hanataba Sheimi",
+      "title_english": "Pok\u00e9mon: Giratina and the Sky Warrior",
+      "year": 2008,
+      "anilist_url": "https://anilist.co/anime/4026"
+    },
+    {
+      "id": 6178,
+      "title_romaji": "Pocket Monsters Diamond & Pearl: Arceus Choukoku no Jikuu e",
+      "title_english": "Pok\u00e9mon: Arceus and the Jewel of Life",
+      "year": 2009,
+      "anilist_url": "https://anilist.co/anime/6178"
+    },
+    {
+      "id": 7695,
+      "title_romaji": "Pocket Monsters Diamond & Pearl: Genei no Hasha Zoroark",
+      "title_english": "Pok\u00e9mon: Zoroark\u2014Master of Illusions",
+      "year": 2010,
+      "anilist_url": "https://anilist.co/anime/7695"
+    },
+    {
+      "id": 9917,
+      "title_romaji": "Pocket Monsters Best Wishes!: Victini to Kuroki Eiyuu Zekrom",
+      "title_english": "Pok\u00e9mon the Movie: White\u2014Victini and Zekrom",
+      "year": 2011,
+      "anilist_url": "https://anilist.co/anime/9917"
+    },
+    {
+      "id": 10740,
+      "title_romaji": "Pocket Monsters Best Wishes!: Victini to Shiroki Eiyuu Reshiram",
+      "title_english": "Pok\u00e9mon the Movie: Black\u2014Victini and Reshiram",
+      "year": 2011,
+      "anilist_url": "https://anilist.co/anime/10740"
+    },
+    {
+      "id": 12671,
+      "title_romaji": "Pocket Monsters Best Wishes: Kyurem VS Seikenshi",
+      "title_english": "Pok\u00e9mon the Movie: Kyurem VS. The Sword of Justice",
+      "year": 2012,
+      "anilist_url": "https://anilist.co/anime/12671"
+    },
+    {
+      "id": 16680,
+      "title_romaji": "Pocket Monsters Best Wishes! Shinsoku no Genesect: Mewtwo Kakusei",
+      "title_english": "Pok\u00e9mon the Movie: Genesect and the Legend Awakened",
+      "year": 2013,
+      "anilist_url": "https://anilist.co/anime/16680"
+    },
+    {
+      "id": 20644,
+      "title_romaji": "Pok\u00e9mon The Movie XY: Hakai no Mayu to Diancie",
+      "title_english": "Pok\u00e9mon the Movie: Diancie and the Cocoon of Destruction",
+      "year": 2014,
+      "anilist_url": "https://anilist.co/anime/20644"
+    },
+    {
+      "id": 21266,
+      "title_romaji": "Pok\u00e9mon The Movie XY: Ring no Chou Majin Hoopa",
+      "title_english": "Pok\u00e9mon the Movie: Hoopa and the Clash of Ages",
+      "year": 2015,
+      "anilist_url": "https://anilist.co/anime/21266"
+    },
+    {
+      "id": 21651,
+      "title_romaji": "Pok\u00e9mon The Movie XY&Z: Volcanion to Karakuri no Magearna",
+      "title_english": "Pok\u00e9mon the Movie: Volcanion and the Mechanical Marvel",
+      "year": 2016,
+      "anilist_url": "https://anilist.co/anime/21651"
+    },
+    {
+      "id": 98298,
+      "title_romaji": "Pocket Monsters: Kimi ni Kimeta!",
+      "title_english": "Pok\u00e9mon the Movie: I Choose You!",
+      "year": 2017,
+      "anilist_url": "https://anilist.co/anime/98298"
+    },
+    {
+      "id": 100744,
+      "title_romaji": "Pocket Monsters: Minna no Monogatari",
+      "title_english": "Pok\u00e9mon the Movie: The Power of Us",
+      "year": 2018,
+      "anilist_url": "https://anilist.co/anime/100744"
+    },
+    {
+      "id": 106287,
+      "title_romaji": "Pocket Monsters: Mewtwo no Gyakushuu EVOLUTION",
+      "title_english": "Pok\u00e9mon: Mewtwo Strikes Back\u2014Evolution",
+      "year": 2019,
+      "anilist_url": "https://anilist.co/anime/106287"
+    },
+    {
+      "id": 114564,
+      "title_romaji": "Pocket Monsters: Coco",
+      "title_english": "Pok\u00e9mon the Movie: Secrets of the Jungle",
+      "year": 2020,
+      "anilist_url": "https://anilist.co/anime/114564"
+    }
+  ],
+  "Detective Conan": [
+    {
+      "id": 779,
+      "title_romaji": "Meitantei Conan: Tokei Jikake no Matenrou",
+      "title_english": "Detective Conan: The Time-Bombed Skyscraper",
+      "year": 1997,
+      "anilist_url": "https://anilist.co/anime/779"
+    },
+    {
+      "id": 780,
+      "title_romaji": "Meitantei Conan: Juuyonbanme no Target",
+      "title_english": "Detective Conan: The Fourteenth Target",
+      "year": 1998,
+      "anilist_url": "https://anilist.co/anime/780"
+    },
+    {
+      "id": 781,
+      "title_romaji": "Meitantei Conan: Seikimatsu no Majutsushi",
+      "title_english": "Detective Conan: The Last Wizard of the Century",
+      "year": 1999,
+      "anilist_url": "https://anilist.co/anime/781"
+    },
+    {
+      "id": 1363,
+      "title_romaji": "Meitantei Conan: Hitomi no Naka no Ansatsusha",
+      "title_english": "Detective Conan: Captured in Her Eyes",
+      "year": 2000,
+      "anilist_url": "https://anilist.co/anime/1363"
+    },
+    {
+      "id": 1364,
+      "title_romaji": "Meitantei Conan: Tengoku e no Count Down",
+      "title_english": "Detective Conan: Countdown to Heaven",
+      "year": 2001,
+      "anilist_url": "https://anilist.co/anime/1364"
+    },
+    {
+      "id": 1365,
+      "title_romaji": "Meitantei Conan: Baker Street no Bourei",
+      "title_english": "Detective Conan: The Phantom of Baker Street",
+      "year": 2002,
+      "anilist_url": "https://anilist.co/anime/1365"
+    },
+    {
+      "id": 1366,
+      "title_romaji": "Meitantei Conan: Meikyuu no Crossroad",
+      "title_english": "Detective Conan: Crossroad in the Ancient Capital",
+      "year": 2003,
+      "anilist_url": "https://anilist.co/anime/1366"
+    },
+    {
+      "id": 1367,
+      "title_romaji": "Meitantei Conan: Ginyoku no Magician",
+      "title_english": "Detective Conan: Magician of the Silver Sky",
+      "year": 2004,
+      "anilist_url": "https://anilist.co/anime/1367"
+    },
+    {
+      "id": 1505,
+      "title_romaji": "Meitantei Conan: Suihei Senjou no Strategy",
+      "title_english": "Detective Conan: Strategy Above the Depths",
+      "year": 2005,
+      "anilist_url": "https://anilist.co/anime/1505"
+    },
+    {
+      "id": 9785,
+      "title_romaji": "Meitantei Conan: Conan vs. Kid - SHARK & JEWEL",
+      "title_english": null,
+      "year": 2005,
+      "anilist_url": "https://anilist.co/anime/9785"
+    },
+    {
+      "id": 1506,
+      "title_romaji": "Meitantei Conan: Tantei-tachi no Requiem",
+      "title_english": "Detective Conan: The Private Eyes' Requiem",
+      "year": 2006,
+      "anilist_url": "https://anilist.co/anime/1506"
+    },
+    {
+      "id": 9786,
+      "title_romaji": "Meitantei Conan: Conan vs. Kid - Shikkoku no Sniper",
+      "title_english": null,
+      "year": 2006,
+      "anilist_url": "https://anilist.co/anime/9786"
+    },
+    {
+      "id": 2171,
+      "title_romaji": "Meitantei Conan: Konpeki no Hitsugi (Jolly Roger)",
+      "title_english": "Detective Conan: Jolly Roger in the Deep Azure",
+      "year": 2007,
+      "anilist_url": "https://anilist.co/anime/2171"
+    },
+    {
+      "id": 4447,
+      "title_romaji": "Meitantei Conan: Senritsu no Gakufu (Full Score)",
+      "title_english": "Detective Conan: Full Score of Fear",
+      "year": 2008,
+      "anilist_url": "https://anilist.co/anime/4447"
+    },
+    {
+      "id": 5460,
+      "title_romaji": "Meitantei Conan: Shikkoku no Chaser",
+      "title_english": "Detective Conan: The Raven Chaser",
+      "year": 2009,
+      "anilist_url": "https://anilist.co/anime/5460"
+    },
+    {
+      "id": 6467,
+      "title_romaji": "Meitantei Conan: Tenkuu no Lost Ship",
+      "title_english": "Detective Conan: The Lost Ship in the Sky",
+      "year": 2010,
+      "anilist_url": "https://anilist.co/anime/6467"
+    },
+    {
+      "id": 9963,
+      "title_romaji": "Meitantei Conan: Chinmoku no Quarter",
+      "title_english": "Detective Conan: Quarter of Silence",
+      "year": 2011,
+      "anilist_url": "https://anilist.co/anime/9963"
+    },
+    {
+      "id": 12117,
+      "title_romaji": "Meitantei Conan: 11 Nin-me no Striker",
+      "title_english": "Detective Conan: The Eleventh Striker",
+      "year": 2012,
+      "anilist_url": "https://anilist.co/anime/12117"
+    },
+    {
+      "id": 14735,
+      "title_romaji": "Meitantei Conan: Sekkai no Private Eye",
+      "title_english": "Detective Conan: Private Eye in the Distant Sea",
+      "year": 2013,
+      "anilist_url": "https://anilist.co/anime/14735"
+    },
+    {
+      "id": 18429,
+      "title_romaji": "Lupin III vs. Meitantei Conan: THE MOVIE",
+      "title_english": "Lupin the 3rd Vs Detective Conan: The Movie",
+      "year": 2013,
+      "anilist_url": "https://anilist.co/anime/18429"
+    },
+    {
+      "id": 20546,
+      "title_romaji": "Meitantei Conan: Ijigen no Sniper",
+      "title_english": "Detective Conan: Dimensional Sniper",
+      "year": 2014,
+      "anilist_url": "https://anilist.co/anime/20546"
+    },
+    {
+      "id": 21646,
+      "title_romaji": "Meitantei Conan: Gouka no Himawari",
+      "title_english": "Detective Conan: Sunflowers of Inferno",
+      "year": 2015,
+      "anilist_url": "https://anilist.co/anime/21646"
+    },
+    {
+      "id": 21470,
+      "title_romaji": "Meitantei Conan: Junkoku no Nightmare",
+      "title_english": "Detective Conan: The Darkest Nightmare",
+      "year": 2016,
+      "anilist_url": "https://anilist.co/anime/21470"
+    },
+    {
+      "id": 98222,
+      "title_romaji": "Meitantei Conan: Kara Kurenai no Love Letter",
+      "title_english": "Detective Conan: The Crimson Love Letter",
+      "year": 2017,
+      "anilist_url": "https://anilist.co/anime/98222"
+    },
+    {
+      "id": 100653,
+      "title_romaji": "Meitantei Conan: Zero no Shikkounin",
+      "title_english": "Detective Conan: Zero the Enforcer",
+      "year": 2018,
+      "anilist_url": "https://anilist.co/anime/100653"
+    },
+    {
+      "id": 106206,
+      "title_romaji": "Meitantei Conan: Konjou no Fist",
+      "title_english": "Detective Conan: The Fist of Blue Sapphire",
+      "year": 2019,
+      "anilist_url": "https://anilist.co/anime/106206"
+    },
+    {
+      "id": 113653,
+      "title_romaji": "Meitantei Conan: Hiiro no Dangan",
+      "title_english": "Detective Conan: The Scarlet Bullet",
+      "year": 2021,
+      "anilist_url": "https://anilist.co/anime/113653"
+    },
+    {
+      "id": 131770,
+      "title_romaji": "Meitantei Conan: Hiiro no Fuzai Shoumei",
+      "title_english": null,
+      "year": 2021,
+      "anilist_url": "https://anilist.co/anime/131770"
+    },
+    {
+      "id": 142219,
+      "title_romaji": "Meitantei Conan: Halloween no Hanayome",
+      "title_english": "Detective Conan: The Bride of Halloween",
+      "year": 2022,
+      "anilist_url": "https://anilist.co/anime/142219"
+    },
+    {
+      "id": 156841,
+      "title_romaji": "Meitantei Conan: Kurogane no Submarine",
+      "title_english": "Detective Conan: Black Iron Submarine",
+      "year": 2023,
+      "anilist_url": "https://anilist.co/anime/156841"
+    },
+    {
+      "id": 169754,
+      "title_romaji": "Meitantei Conan: 100-man Dollar no Michishirube",
+      "title_english": "Detective Conan: The Million-dollar Pentagram",
+      "year": 2024,
+      "anilist_url": "https://anilist.co/anime/169754"
+    },
+    {
+      "id": 185212,
+      "title_romaji": "Meitantei Conan: Sekigan no Flashback",
+      "title_english": "Detective Conan: One-Eyed Flashback",
+      "year": 2025,
+      "anilist_url": "https://anilist.co/anime/185212"
+    },
+    {
+      "id": 198369,
+      "title_romaji": "Meitantei Conan: Highway no Datenshi",
+      "title_english": "Detective Conan: Fallen Angel of the Highway",
+      "year": 2026,
+      "anilist_url": "https://anilist.co/anime/198369"
+    }
+  ],
+  "Dragon Ball": [
+    {
+      "id": 502,
+      "title_romaji": "Dragon Ball: Shen Long no Densetsu",
+      "title_english": "Dragon Ball: Curse of the Blood Rubies",
+      "year": 1986,
+      "anilist_url": "https://anilist.co/anime/502"
+    },
+    {
+      "id": 891,
+      "title_romaji": "Dragon Ball: Majinjou no Nemuri Hime",
+      "title_english": "Dragon Ball: Sleeping Princess in Devil's Castle",
+      "year": 1987,
+      "anilist_url": "https://anilist.co/anime/891"
+    },
+    {
+      "id": 892,
+      "title_romaji": "Dragon Ball: Makafushigi Daibouken",
+      "title_english": "Dragon Ball: Mystical Adventure",
+      "year": 1988,
+      "anilist_url": "https://anilist.co/anime/892"
+    },
+    {
+      "id": 894,
+      "title_romaji": "Dragon Ball Z: Ora no Gohan wo Kaese!!",
+      "title_english": "Dragon Ball Z: Dead Zone",
+      "year": 1989,
+      "anilist_url": "https://anilist.co/anime/894"
+    },
+    {
+      "id": 895,
+      "title_romaji": "Dragon Ball Z: Konoyo de Ichiban Tsuyoi Yatsu",
+      "title_english": "Dragon Ball Z: The World's Strongest",
+      "year": 1990,
+      "anilist_url": "https://anilist.co/anime/895"
+    },
+    {
+      "id": 896,
+      "title_romaji": "Dragon Ball Z: Chikyuu Marugoto Chou Kessen",
+      "title_english": "Dragon Ball Z: The Tree of Might",
+      "year": 1990,
+      "anilist_url": "https://anilist.co/anime/896"
+    },
+    {
+      "id": 897,
+      "title_romaji": "Dragon Ball Z: Super Saiyajin da Son Goku",
+      "title_english": "Dragon Ball Z: Lord Slug",
+      "year": 1991,
+      "anilist_url": "https://anilist.co/anime/897"
+    },
+    {
+      "id": 898,
+      "title_romaji": "Dragon Ball Z: Tobikkiri no Saikyou Tai Saikyou",
+      "title_english": "Dragon Ball Z: Cooler's Revenge",
+      "year": 1991,
+      "anilist_url": "https://anilist.co/anime/898"
+    },
+    {
+      "id": 899,
+      "title_romaji": "Dragon Ball Z: Gekitotsu!! 100-oku Power no Senshi-tachi",
+      "title_english": "Dragon Ball Z: The Return of Cooler",
+      "year": 1992,
+      "anilist_url": "https://anilist.co/anime/899"
+    },
+    {
+      "id": 900,
+      "title_romaji": "Dragon Ball Z: Kyokugen Battle!! Sandai Super Saiyajin",
+      "title_english": "Dragon Ball Z: Super Android 13!",
+      "year": 1992,
+      "anilist_url": "https://anilist.co/anime/900"
+    },
+    {
+      "id": 901,
+      "title_romaji": "Dragon Ball Z: Moetsukiro!! Nessen - Ressen - Chou Gekisen",
+      "title_english": "Dragon Ball Z: Broly - The Legendary Super Saiyan",
+      "year": 1993,
+      "anilist_url": "https://anilist.co/anime/901"
+    },
+    {
+      "id": 902,
+      "title_romaji": "Dragon Ball Z: Ginga Girigiri!! Bucchigiri no Sugoi Yatsu",
+      "title_english": "Dragon Ball Z: Bojack Unbound",
+      "year": 1993,
+      "anilist_url": "https://anilist.co/anime/902"
+    },
+    {
+      "id": 903,
+      "title_romaji": "Dragon Ball Z: Kiken na Futari! Super Senshi wa Nemurenai",
+      "title_english": "Dragon Ball Z: Broly - Second Coming",
+      "year": 1994,
+      "anilist_url": "https://anilist.co/anime/903"
+    },
+    {
+      "id": 904,
+      "title_romaji": "Dragon Ball Z: Super Senshi Gekiha!! Katsu no wa Ore da",
+      "title_english": "Dragon Ball Z: Bio-Broly",
+      "year": 1994,
+      "anilist_url": "https://anilist.co/anime/904"
+    },
+    {
+      "id": 905,
+      "title_romaji": "Dragon Ball Z: Fukkatsu no Fusion!! Goku to Vegeta",
+      "title_english": "Dragon Ball Z: Fusion Reborn",
+      "year": 1995,
+      "anilist_url": "https://anilist.co/anime/905"
+    },
+    {
+      "id": 906,
+      "title_romaji": "Dragon Ball Z: Ryuuken Bakuhatsu!! Goku ga Yaraneba Dare ga Yaru",
+      "title_english": "Dragon Ball Z: Wrath of the Dragon",
+      "year": 1995,
+      "anilist_url": "https://anilist.co/anime/906"
+    },
+    {
+      "id": 893,
+      "title_romaji": "Dragon Ball: Saikyou e no Michi",
+      "title_english": "Dragon Ball: The Path to Power",
+      "year": 1996,
+      "anilist_url": "https://anilist.co/anime/893"
+    },
+    {
+      "id": 14837,
+      "title_romaji": "Dragon Ball Z: Kami to Kami",
+      "title_english": "Dragon Ball Z: Battle of Gods",
+      "year": 2013,
+      "anilist_url": "https://anilist.co/anime/14837"
+    },
+    {
+      "id": 20778,
+      "title_romaji": "Dragon Ball Z: Fukkatsu no \"F\"",
+      "title_english": "Dragon Ball Z: Resurrection 'F'",
+      "year": 2015,
+      "anilist_url": "https://anilist.co/anime/20778"
+    },
+    {
+      "id": 101302,
+      "title_romaji": "Dragon Ball Super: Broly",
+      "title_english": "Dragon Ball Super: Broly",
+      "year": 2018,
+      "anilist_url": "https://anilist.co/anime/101302"
+    },
+    {
+      "id": 133898,
+      "title_romaji": "Dragon Ball Super: Super Hero",
+      "title_english": "Dragon Ball Super: SUPER HERO",
+      "year": 2022,
+      "anilist_url": "https://anilist.co/anime/133898"
+    }
+  ],
+  "Naruto": [
+    {
+      "id": 442,
+      "title_romaji": "NARUTO: Dai Katsugeki! Yuki Hime Ninpouchou Dattebayo!!",
+      "title_english": "Naruto the Movie: Ninja Clash in the Land of Snow",
+      "year": 2004,
+      "anilist_url": "https://anilist.co/anime/442"
+    },
+    {
+      "id": 936,
+      "title_romaji": "NARUTO: Dai Gekitotsu! Maboroshi no Chitei Iseki Dattebayo",
+      "title_english": "Naruto the Movie: Legend of the Stone of Gelel",
+      "year": 2005,
+      "anilist_url": "https://anilist.co/anime/936"
+    },
+    {
+      "id": 2144,
+      "title_romaji": "NARUTO: Dai Koufun! Mikazukijima no Animal Panic Dattebayo!",
+      "title_english": "Naruto the Movie: Guardians of the Crescent Moon Kingdom",
+      "year": 2006,
+      "anilist_url": "https://anilist.co/anime/2144"
+    },
+    {
+      "id": 2472,
+      "title_romaji": "NARUTO: Shippuuden Movie",
+      "title_english": "Naruto Shippuden the Movie",
+      "year": 2007,
+      "anilist_url": "https://anilist.co/anime/2472"
+    },
+    {
+      "id": 4437,
+      "title_romaji": "NARUTO: Shippuuden - Kizuna",
+      "title_english": "Naruto Shippuden the Movie: Bonds",
+      "year": 2008,
+      "anilist_url": "https://anilist.co/anime/4437"
+    },
+    {
+      "id": 6325,
+      "title_romaji": "NARUTO: Shippuuden - Hi no Ishi wo Tsugu Mono",
+      "title_english": "Naruto Shippuden the Movie: The Will of Fire",
+      "year": 2009,
+      "anilist_url": "https://anilist.co/anime/6325"
+    },
+    {
+      "id": 8246,
+      "title_romaji": "NARUTO: Shippuuden - The Lost Tower",
+      "title_english": "Naruto Shippuden the Movie: The Lost Tower",
+      "year": 2010,
+      "anilist_url": "https://anilist.co/anime/8246"
+    },
+    {
+      "id": 10589,
+      "title_romaji": "NARUTO: Blood Prison",
+      "title_english": "Naruto Shippuden the Movie: Blood Prison",
+      "year": 2011,
+      "anilist_url": "https://anilist.co/anime/10589"
+    },
+    {
+      "id": 10686,
+      "title_romaji": "NARUTO: Honoo no Chuunin Shiken! Naruto vs Konohamaru!!",
+      "title_english": null,
+      "year": 2011,
+      "anilist_url": "https://anilist.co/anime/10686"
+    },
+    {
+      "id": 13667,
+      "title_romaji": "ROAD TO NINJA: NARUTO THE MOVIE",
+      "title_english": "Road to Ninja: Naruto the Movie",
+      "year": 2012,
+      "anilist_url": "https://anilist.co/anime/13667"
+    },
+    {
+      "id": 16870,
+      "title_romaji": "THE LAST: NARUTO THE MOVIE",
+      "title_english": "The Last: Naruto the Movie",
+      "year": 2014,
+      "anilist_url": "https://anilist.co/anime/16870"
+    },
+    {
+      "id": 21220,
+      "title_romaji": "BORUTO: NARUTO THE MOVIE",
+      "title_english": "Boruto: Naruto the Movie",
+      "year": 2015,
+      "anilist_url": "https://anilist.co/anime/21220"
+    }
+  ],
+  "Demon Slayer: Kimetsu no Yaiba": [
+    {
+      "id": 112151,
+      "title_romaji": "Kimetsu no Yaiba: Mugen Ressha-hen",
+      "title_english": "Demon Slayer -Kimetsu no Yaiba- The Movie: Mugen Train",
+      "year": 2020,
+      "anilist_url": "https://anilist.co/anime/112151"
+    },
+    {
+      "id": 178788,
+      "title_romaji": "Kimetsu no Yaiba: Mugenjou-hen Movie 1 - Akaza Sairai",
+      "title_english": "Demon Slayer: Kimetsu no Yaiba Infinity Castle",
+      "year": 2025,
+      "anilist_url": "https://anilist.co/anime/178788"
+    },
+    {
+      "id": 195200,
+      "title_romaji": "Kimetsu no Yaiba: Mugenjou-hen Movie 2",
+      "title_english": "Demon Slayer: Kimetsu no Yaiba Infinity Castle Part 2",
+      "year": null,
+      "anilist_url": "https://anilist.co/anime/195200"
+    },
+    {
+      "id": 195201,
+      "title_romaji": "Kimetsu no Yaiba: Mugenjou-hen Movie 3",
+      "title_english": null,
+      "year": null,
+      "anilist_url": "https://anilist.co/anime/195201"
+    }
+  ],
+  "That Time I Got Reincarnated as a Slime (Tensura)": [
+    {
+      "id": 139498,
+      "title_romaji": "Tensei Shitara Slime Datta Ken: Guren no Kizuna-hen",
+      "title_english": "That Time I Got Reincarnated as a Slime the Movie: Scarlet Bond",
+      "year": 2022,
+      "anilist_url": "https://anilist.co/anime/139498"
+    },
+    {
+      "id": 182206,
+      "title_romaji": "Tensei Shitara Slime Datta Ken: Soukai no Namida-hen",
+      "title_english": "That Time I Got Reincarnated as a Slime the Movie: Tears of the Azure Sea",
+      "year": 2026,
+      "anilist_url": "https://anilist.co/anime/182206"
+    }
+  ],
+  "Inuyasha": [
+    {
+      "id": 452,
+      "title_romaji": "Inuyasha: Toki wo Koeru Omoi",
+      "title_english": "InuYasha the Movie: Affections Touching Across Time",
+      "year": 2001,
+      "anilist_url": "https://anilist.co/anime/452"
+    },
+    {
+      "id": 450,
+      "title_romaji": "Inuyasha: Kagami no Naka no Mugenjo",
+      "title_english": "InuYasha the Movie 2: The Castle Beyond the Looking Glass",
+      "year": 2002,
+      "anilist_url": "https://anilist.co/anime/450"
+    },
+    {
+      "id": 451,
+      "title_romaji": "Inuyasha: Tenka Hadou no Ken",
+      "title_english": "InuYasha the Movie 3: Swords of an Honorable Ruler",
+      "year": 2003,
+      "anilist_url": "https://anilist.co/anime/451"
+    },
+    {
+      "id": 449,
+      "title_romaji": "Inuyasha: Guren no Houraijima",
+      "title_english": "InuYasha the Movie 4: Fire on the Mystic Island",
+      "year": 2004,
+      "anilist_url": "https://anilist.co/anime/449"
+    }
+  ],
+  "One Piece": [
+    {
+      "id": 459,
+      "title_romaji": "ONE PIECE (Movie)",
+      "title_english": "ONE PIECE: The Movie",
+      "year": 2000,
+      "anilist_url": "https://anilist.co/anime/459"
+    },
+    {
+      "id": 460,
+      "title_romaji": "ONE PIECE: Nejimaki-jima no Bouken",
+      "title_english": "One Piece: Clockwork Island Adventure",
+      "year": 2001,
+      "anilist_url": "https://anilist.co/anime/460"
+    },
+    {
+      "id": 461,
+      "title_romaji": "ONE PIECE: Chinjuu-jima no Chopper Oukoku",
+      "title_english": "One Piece: Chopper\u2019s Kingdom on the Island of Strange Animals",
+      "year": 2002,
+      "anilist_url": "https://anilist.co/anime/461"
+    },
+    {
+      "id": 462,
+      "title_romaji": "ONE PIECE THE MOVIE: Dead End no Bouken",
+      "title_english": "One Piece The Movie: The Dead End Adventure",
+      "year": 2003,
+      "anilist_url": "https://anilist.co/anime/462"
+    },
+    {
+      "id": 463,
+      "title_romaji": "ONE PIECE: Norowareta Seiken",
+      "title_english": "One Piece: The Curse of the Sacred Sword",
+      "year": 2004,
+      "anilist_url": "https://anilist.co/anime/463"
+    },
+    {
+      "id": 464,
+      "title_romaji": "ONE PIECE THE MOVIE: Omatsuri Danshaku to Himitsu no Shima",
+      "title_english": "One Piece: Baron Omatsuri and the Secret Island",
+      "year": 2005,
+      "anilist_url": "https://anilist.co/anime/464"
+    },
+    {
+      "id": 465,
+      "title_romaji": "ONE PIECE THE MOVIE: Karakuri-jou no Mecha Kyohei",
+      "title_english": "One Piece: Mega Mecha Soldier of Karakuri Castle",
+      "year": 2006,
+      "anilist_url": "https://anilist.co/anime/465"
+    },
+    {
+      "id": 2107,
+      "title_romaji": "ONE PIECE: Episode of Alabasta - Sabaku no Oujo to Kaizoku-tachi",
+      "title_english": "One Piece: The Desert Princess and the Pirates, Adventures in Alabasta",
+      "year": 2007,
+      "anilist_url": "https://anilist.co/anime/2107"
+    },
+    {
+      "id": 3848,
+      "title_romaji": "ONE PIECE THE MOVIE: Episode of Chopper Plus - Fuyu ni Saku, Kiseki no Sakura",
+      "title_english": "One Piece: Episode Of Chopper +: The Miracle Winter Cherry Blossom",
+      "year": 2008,
+      "anilist_url": "https://anilist.co/anime/3848"
+    },
+    {
+      "id": 4155,
+      "title_romaji": "ONE PIECE FILM: STRONG WORLD",
+      "title_english": "One Piece Film: Strong World",
+      "year": 2009,
+      "anilist_url": "https://anilist.co/anime/4155"
+    },
+    {
+      "id": 12859,
+      "title_romaji": "ONE PIECE FILM: Z",
+      "title_english": "One Piece Film: Z",
+      "year": 2012,
+      "anilist_url": "https://anilist.co/anime/12859"
+    },
+    {
+      "id": 21335,
+      "title_romaji": "ONE PIECE FILM: GOLD",
+      "title_english": "One Piece Film: Gold",
+      "year": 2016,
+      "anilist_url": "https://anilist.co/anime/21335"
+    },
+    {
+      "id": 105143,
+      "title_romaji": "ONE PIECE STAMPEDE",
+      "title_english": "One Piece: Stampede",
+      "year": 2019,
+      "anilist_url": "https://anilist.co/anime/105143"
+    },
+    {
+      "id": 141902,
+      "title_romaji": "ONE PIECE FILM: RED",
+      "title_english": "One Piece Film: Red",
+      "year": 2022,
+      "anilist_url": "https://anilist.co/anime/141902"
+    },
+    {
+      "id": 215855,
+      "title_romaji": "ONE PIECE FILM: GOD VALLEY",
+      "title_english": null,
+      "year": 2027,
+      "anilist_url": "https://anilist.co/anime/215855"
+    },
+    {
+      "id": 215856,
+      "title_romaji": "ONE PIECE FILM: BAAD",
+      "title_english": null,
+      "year": 2029,
+      "anilist_url": "https://anilist.co/anime/215856"
+    }
+  ],
+  "Bleach": [
+    {
+      "id": 1686,
+      "title_romaji": "BLEACH: MEMORIES OF NOBODY",
+      "title_english": "Bleach the Movie: Memories of Nobody",
+      "year": 2006,
+      "anilist_url": "https://anilist.co/anime/1686"
+    },
+    {
+      "id": 2889,
+      "title_romaji": "BLEACH: The DiamondDust Rebellion - Mou Hitotsu no Hyourinmaru",
+      "title_english": "Bleach the Movie: The DiamondDust Rebellion",
+      "year": 2007,
+      "anilist_url": "https://anilist.co/anime/2889"
+    },
+    {
+      "id": 4835,
+      "title_romaji": "BLEACH: Fade to Black - Kimi no Na wo Yobu",
+      "title_english": "Bleach the Movie: Fade to Black",
+      "year": 2008,
+      "anilist_url": "https://anilist.co/anime/4835"
+    },
+    {
+      "id": 8247,
+      "title_romaji": "BLEACH: Jigoku-hen",
+      "title_english": "Bleach the Movie: Hell Verse",
+      "year": 2010,
+      "anilist_url": "https://anilist.co/anime/8247"
+    }
+  ],
+  "My Hero Academia": [
+    {
+      "id": 100723,
+      "title_romaji": "Boku no Hero Academia THE MOVIE: Futari no Hero",
+      "title_english": "My Hero Academia: Two Heroes",
+      "year": 2018,
+      "anilist_url": "https://anilist.co/anime/100723"
+    },
+    {
+      "id": 108553,
+      "title_romaji": "Boku no Hero Academia THE MOVIE: Heroes:Rising",
+      "title_english": "My Hero Academia: Heroes Rising",
+      "year": 2019,
+      "anilist_url": "https://anilist.co/anime/108553"
+    },
+    {
+      "id": 126659,
+      "title_romaji": "Boku no Hero Academia THE MOVIE: World Heroes' Mission",
+      "title_english": "My Hero Academia: World Heroes' Mission",
+      "year": 2021,
+      "anilist_url": "https://anilist.co/anime/126659"
+    },
+    {
+      "id": 168013,
+      "title_romaji": "Boku no Hero Academia THE MOVIE: YOU'RE NEXT",
+      "title_english": "My Hero Academia: You\u2019re Next",
+      "year": 2024,
+      "anilist_url": "https://anilist.co/anime/168013"
+    }
+  ],
+  "Sword Art Online": [
+    {
+      "id": 21403,
+      "title_romaji": "Sword Art Online: Ordinal Scale",
+      "title_english": "Sword Art Online the Movie: Ordinal Scale",
+      "year": 2017,
+      "anilist_url": "https://anilist.co/anime/21403"
+    },
+    {
+      "id": 124140,
+      "title_romaji": "Sword Art Online: Progressive - Hoshinaki Yoru no Aria",
+      "title_english": "Sword Art Online the Movie -Progressive- Aria of a Starless Night",
+      "year": 2021,
+      "anilist_url": "https://anilist.co/anime/124140"
+    },
+    {
+      "id": 140999,
+      "title_romaji": "Sword Art Online: Progressive - Kuraki Yuuyami no Scherzo",
+      "title_english": "Sword Art Online the Movie -Progressive- Scherzo of Deep Night",
+      "year": 2022,
+      "anilist_url": "https://anilist.co/anime/140999"
+    },
+    {
+      "id": 208754,
+      "title_romaji": "Unanswered//butterfly: Sword Art Online",
+      "title_english": null,
+      "year": 2026,
+      "anilist_url": "https://anilist.co/anime/208754"
+    },
+    {
+      "id": 156631,
+      "title_romaji": "Sword Art Online: Integral Domain",
+      "title_english": null,
+      "year": 2028,
+      "anilist_url": "https://anilist.co/anime/156631"
+    }
+  ],
+  "Attack on Titan": [
+    {
+      "id": 20691,
+      "title_romaji": "Shingeki no Kyojin Zenpen: Guren no Yumiya",
+      "title_english": "Attack on Titan Part I: Crimson Bow and Arrow",
+      "year": 2014,
+      "anilist_url": "https://anilist.co/anime/20691"
+    },
+    {
+      "id": 20692,
+      "title_romaji": "Shingeki no Kyojin Kouhen: Jiyuu no Tsubasa",
+      "title_english": "Attack on Titan Part II: Wings of Freedom",
+      "year": 2015,
+      "anilist_url": "https://anilist.co/anime/20692"
+    },
+    {
+      "id": 100465,
+      "title_romaji": "Shingeki no Kyojin Season 2: Kakusei no Houkou",
+      "title_english": "Attack on Titan: The Roar of Awakening",
+      "year": 2018,
+      "anilist_url": "https://anilist.co/anime/100465"
+    },
+    {
+      "id": 119113,
+      "title_romaji": "Shingeki no Kyojin: Chronicle",
+      "title_english": "Attack on Titan ~Chronicle~",
+      "year": 2020,
+      "anilist_url": "https://anilist.co/anime/119113"
+    }
+  ],
+  "Jujutsu Kaisen": [
+    {
+      "id": 131573,
+      "title_romaji": "Jujutsu Kaisen 0",
+      "title_english": "JUJUTSU KAISEN 0",
+      "year": 2021,
+      "anilist_url": "https://anilist.co/anime/131573"
+    },
+    {
+      "id": 192809,
+      "title_romaji": "Jujutsu Kaisen: Kaigyoku\u30fbGyokusetsu",
+      "title_english": "JUJUTSU KAISEN: Hidden Inventory / Premature Death \u2013 The Movie",
+      "year": 2025,
+      "anilist_url": "https://anilist.co/anime/192809"
+    },
+    {
+      "id": 204066,
+      "title_romaji": "Jujutsu Kaisen: Shibuya Jihen Tokubetsu Henshuu-ban \u00d7 Shimetsu Kaiyuu Senkou Jouei",
+      "title_english": "JUJUTSU KAISEN: Execution -Shibuya Incident x The Culling Game Begins-",
+      "year": 2025,
+      "anilist_url": "https://anilist.co/anime/204066"
+    }
+  ],
+  "Hunter x Hunter": [
+    {
+      "id": 13271,
+      "title_romaji": "HUNTER\u00d7HUNTER: Phantom Rouge",
+      "title_english": "Hunter x Hunter: Phantom Rouge",
+      "year": 2013,
+      "anilist_url": "https://anilist.co/anime/13271"
+    },
+    {
+      "id": 19951,
+      "title_romaji": "HUNTER\u00d7HUNTER: THE LAST MISSION",
+      "title_english": "Hunter x Hunter: The Last Mission",
+      "year": 2013,
+      "anilist_url": "https://anilist.co/anime/19951"
+    }
+  ],
+  "Fairy Tail": [
+    {
+      "id": 12049,
+      "title_romaji": "FAIRY TAIL: Houou no Miko",
+      "title_english": "Fairy Tail: Phoenix Priestess",
+      "year": 2012,
+      "anilist_url": "https://anilist.co/anime/12049"
+    },
+    {
+      "id": 21191,
+      "title_romaji": "FAIRY TAIL: DRAGON CRY",
+      "title_english": "Fairy Tail: Dragon Cry",
+      "year": 2017,
+      "anilist_url": "https://anilist.co/anime/21191"
+    }
+  ],
+  "Neon Genesis Evangelion": [
+    {
+      "id": 31,
+      "title_romaji": "Shin Seiki Evangelion Movie: Shi to Shinsei",
+      "title_english": "Neon Genesis Evangelion: Death & Rebirth",
+      "year": 1997,
+      "anilist_url": "https://anilist.co/anime/31"
+    },
+    {
+      "id": 32,
+      "title_romaji": "Shin Seiki Evangelion Movie: Air / Magokoro wo, Kimi ni",
+      "title_english": "Neon Genesis Evangelion: The End of Evangelion",
+      "year": 1997,
+      "anilist_url": "https://anilist.co/anime/32"
+    },
+    {
+      "id": 2759,
+      "title_romaji": "Evangelion Shin Movie: Jo",
+      "title_english": "Evangelion: 1.0 You Are (Not) Alone",
+      "year": 2007,
+      "anilist_url": "https://anilist.co/anime/2759"
+    },
+    {
+      "id": 3784,
+      "title_romaji": "Evangelion Shin Movie: Ha",
+      "title_english": "Evangelion: 2.0 You Can (Not) Advance",
+      "year": 2009,
+      "anilist_url": "https://anilist.co/anime/3784"
+    },
+    {
+      "id": 3785,
+      "title_romaji": "Evangelion Shin Movie: Kyuu",
+      "title_english": "Evangelion: 3.0 You Can (Not) Redo",
+      "year": 2012,
+      "anilist_url": "https://anilist.co/anime/3785"
+    },
+    {
+      "id": 3786,
+      "title_romaji": "Shin Evangelion Movie:||",
+      "title_english": "Evangelion: 3.0+1.0 Thrice Upon a Time",
+      "year": 2021,
+      "anilist_url": "https://anilist.co/anime/3786"
+    }
+  ],
+  "Fate Series": [
+    {
+      "id": 6922,
+      "title_romaji": "Fate/stay night Movie: UNLIMITED BLADE WORKS",
+      "title_english": "Fate/stay night: Unlimited Blade Works (Movie)",
+      "year": 2010,
+      "anilist_url": "https://anilist.co/anime/6922"
+    },
+    {
+      "id": 20791,
+      "title_romaji": "Fate/stay night [Heaven's Feel] I. presage flower",
+      "title_english": "Fate/stay night [Heaven's Feel] I. presage flower",
+      "year": 2017,
+      "anilist_url": "https://anilist.co/anime/20791"
+    },
+    {
+      "id": 97757,
+      "title_romaji": "Fate/kaleid liner Prisma\u2606Illya: Sekka no Chikai",
+      "title_english": "Fate/kaleid liner Prisma\u2606Illya: Vow in the Snow",
+      "year": 2017,
+      "anilist_url": "https://anilist.co/anime/97757"
+    },
+    {
+      "id": 21718,
+      "title_romaji": "Fate/stay night [Heaven's Feel] II. lost butterfly",
+      "title_english": "Fate/stay night [Heaven's Feel] II. lost butterfly",
+      "year": 2019,
+      "anilist_url": "https://anilist.co/anime/21718"
+    },
+    {
+      "id": 21719,
+      "title_romaji": "Fate/stay night [Heaven's Feel] III. spring song",
+      "title_english": "Fate/stay night [Heaven\u2019s Feel] III. spring song",
+      "year": 2020,
+      "anilist_url": "https://anilist.co/anime/21719"
+    },
+    {
+      "id": 103276,
+      "title_romaji": "Fate/Grand Order: Shinsei Entaku Ryouiki Camelot - Wandering; Agateram",
+      "title_english": "Fate/Grand Order Divine Realm of the Round Table: Camelot - Wandering; Agateram",
+      "year": 2020,
+      "anilist_url": "https://anilist.co/anime/103276"
+    },
+    {
+      "id": 103277,
+      "title_romaji": "Fate/Grand Order: Shinsei Entaku Ryouiki Camelot - Paladin; Agateram",
+      "title_english": "Fate/Grand Order Divine Realm of the Round Table: Camelot - Paladin; Agateram",
+      "year": 2021,
+      "anilist_url": "https://anilist.co/anime/103277"
+    },
+    {
+      "id": 116756,
+      "title_romaji": "Fate/Grand Order: Shuukyoku Tokuiten - Kani Jikan Shinden Solomon",
+      "title_english": "Fate/Grand Order Final Singularity - Grand Temple of Time: Solomon",
+      "year": 2021,
+      "anilist_url": "https://anilist.co/anime/116756"
+    },
+    {
+      "id": 118743,
+      "title_romaji": "Fate/kaleid liner Prisma\u2606Illya: Licht - Namae no Nai Shoujo",
+      "title_english": "Fate/kaleid liner Prisma\u2606Illya: Licht Nameless Girl",
+      "year": 2021,
+      "anilist_url": "https://anilist.co/anime/118743"
+    }
+  ],
+  "Studio Ghibli": [
+    {
+      "id": 572,
+      "title_romaji": "Kaze no Tani no Nausica\u00e4",
+      "title_english": "Nausica\u00e4 of the Valley of the Wind",
+      "year": 1984,
+      "anilist_url": "https://anilist.co/anime/572"
+    },
+    {
+      "id": 513,
+      "title_romaji": "Tenkuu no Shiro Laputa",
+      "title_english": "Castle in the Sky",
+      "year": 1986,
+      "anilist_url": "https://anilist.co/anime/513"
+    },
+    {
+      "id": 578,
+      "title_romaji": "Hotaru no Haka",
+      "title_english": "Grave of the Fireflies",
+      "year": 1988,
+      "anilist_url": "https://anilist.co/anime/578"
+    },
+    {
+      "id": 523,
+      "title_romaji": "Tonari no Totoro",
+      "title_english": "My Neighbor Totoro",
+      "year": 1988,
+      "anilist_url": "https://anilist.co/anime/523"
+    },
+    {
+      "id": 512,
+      "title_romaji": "Majo no Takkyuubin",
+      "title_english": "Kiki's Delivery Service",
+      "year": 1989,
+      "anilist_url": "https://anilist.co/anime/512"
+    },
+    {
+      "id": 1029,
+      "title_romaji": "Omoide Poroporo",
+      "title_english": "Only Yesterday",
+      "year": 1991,
+      "anilist_url": "https://anilist.co/anime/1029"
+    },
+    {
+      "id": 416,
+      "title_romaji": "Kurenai no Buta",
+      "title_english": "Porco Rosso",
+      "year": 1992,
+      "anilist_url": "https://anilist.co/anime/416"
+    },
+    {
+      "id": 743,
+      "title_romaji": "Umi ga Kikoeru",
+      "title_english": "Ocean Waves",
+      "year": 1993,
+      "anilist_url": "https://anilist.co/anime/743"
+    },
+    {
+      "id": 1030,
+      "title_romaji": "Heisei Tanuki Gassen Ponpoko",
+      "title_english": "Pom Poko",
+      "year": 1994,
+      "anilist_url": "https://anilist.co/anime/1030"
+    },
+    {
+      "id": 585,
+      "title_romaji": "Mimi wo Sumaseba",
+      "title_english": "Whisper of the Heart",
+      "year": 1995,
+      "anilist_url": "https://anilist.co/anime/585"
+    },
+    {
+      "id": 164,
+      "title_romaji": "Mononoke-hime",
+      "title_english": "Princess Mononoke",
+      "year": 1997,
+      "anilist_url": "https://anilist.co/anime/164"
+    },
+    {
+      "id": 415,
+      "title_romaji": "Hoohokekyo Tonari no Yamada-kun",
+      "title_english": "My Neighbors the Yamadas",
+      "year": 1999,
+      "anilist_url": "https://anilist.co/anime/415"
+    },
+    {
+      "id": 199,
+      "title_romaji": "Sen to Chihiro no Kamikakushi",
+      "title_english": "Spirited Away",
+      "year": 2001,
+      "anilist_url": "https://anilist.co/anime/199"
+    },
+    {
+      "id": 597,
+      "title_romaji": "Neko no Ongaeshi",
+      "title_english": "The Cat Returns",
+      "year": 2002,
+      "anilist_url": "https://anilist.co/anime/597"
+    },
+    {
+      "id": 431,
+      "title_romaji": "Howl no Ugoku Shiro",
+      "title_english": "Howl's Moving Castle",
+      "year": 2004,
+      "anilist_url": "https://anilist.co/anime/431"
+    },
+    {
+      "id": 1829,
+      "title_romaji": "Ged Senki",
+      "title_english": "Tales from Earthsea",
+      "year": 2006,
+      "anilist_url": "https://anilist.co/anime/1829"
+    },
+    {
+      "id": 2890,
+      "title_romaji": "Gake no Ue no Ponyo",
+      "title_english": "Ponyo",
+      "year": 2008,
+      "anilist_url": "https://anilist.co/anime/2890"
+    },
+    {
+      "id": 7711,
+      "title_romaji": "Karigurashi no Arrietty",
+      "title_english": "The Secret World of Arrietty",
+      "year": 2010,
+      "anilist_url": "https://anilist.co/anime/7711"
+    },
+    {
+      "id": 10029,
+      "title_romaji": "Coquelicot-zaka kara",
+      "title_english": "From Up on Poppy Hill",
+      "year": 2011,
+      "anilist_url": "https://anilist.co/anime/10029"
+    },
+    {
+      "id": 16662,
+      "title_romaji": "Kaze Tachinu",
+      "title_english": "The Wind Rises",
+      "year": 2013,
+      "anilist_url": "https://anilist.co/anime/16662"
+    },
+    {
+      "id": 16664,
+      "title_romaji": "Kaguya-hime no Monogatari",
+      "title_english": "The Tale of the Princess Kaguya",
+      "year": 2013,
+      "anilist_url": "https://anilist.co/anime/16664"
+    },
+    {
+      "id": 20555,
+      "title_romaji": "Omoide no Marnie",
+      "title_english": "When Marnie Was There",
+      "year": 2014,
+      "anilist_url": "https://anilist.co/anime/20555"
+    },
+    {
+      "id": 119321,
+      "title_romaji": "Aya to Majo",
+      "title_english": "Earwig and the Witch",
+      "year": 2020,
+      "anilist_url": "https://anilist.co/anime/119321"
+    },
+    {
+      "id": 109979,
+      "title_romaji": "Kimitachi wa Dou Ikiru ka",
+      "title_english": "The Boy and the Heron",
+      "year": 2023,
+      "anilist_url": "https://anilist.co/anime/109979"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+Solar icons by 480 Design, served through Iconify.
+License: Creative Commons Attribution 4.0 International (CC BY 4.0).
+Source: https://icon-sets.iconify.design/solar/
+Icons used/adapted for the watch screen include play-linear, pause-linear, full-screen-linear, download-linear, and the 10-second rewind/forward symbols.

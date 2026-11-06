@@ -1,4 +1,5 @@
 package com.lagradost.cloudstream3.ui.animebox.api
+import com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxDnsHelper
 
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
@@ -25,14 +26,14 @@ data class ShinChanEpisodeEntry(
 
 object ShinChanSupabaseManager {
 
-    private const val SUPABASE_URL = "https://okiuzwsldqjrtuyqylhx.supabase.co"
-    private const val SUPABASE_KEY = "sb_publishable_O6CrSYrDu-GilobI41fSMg_DG7IdSbf"
+    private val SUPABASE_URL get() = AnimeBoxConfig.SUPABASE_URL
+    private val SUPABASE_KEY get() = AnimeBoxConfig.SUPABASE_ANON_KEY
     private const val STATS_API_URL = "https://episode-finder-api.lovable.app/api/public/anime/stats"
     private const val FULL_EPISODES_API_URL = "https://episode-finder-api.lovable.app/api/public/anime/episodes?limit=all"
 
     private const val DEFAULT_LATEST_EP = 1349
 
-    private val client = OkHttpClient.Builder()
+    private val client = AnimeBoxDnsHelper.applyDns(OkHttpClient.Builder())
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
         .followRedirects(true)

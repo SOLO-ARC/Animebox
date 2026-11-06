@@ -38,6 +38,7 @@ object AnimeMovieTmdbMapping {
         171145 to 1221404, // 2024: Our Dinosaur Diary
         185537 to 1404404, // 2025: Super Hot! The Spicy Kasukabe Dancers
         208829 to 1598766, // 2026: Very Bizarre! My Yokai Vacation
+        160275 to 1526917, // 2026: Made in Abyss: Mezameru Shinpi
 
         // === DORAEMON MOVIES ===
         3727 to 64789,     // 1980: Nobita's Dinosaur
@@ -95,6 +96,7 @@ object AnimeMovieTmdbMapping {
         198368 to 1542261, // 2026: New Nobita and the Castle of the Undersea Devil
 
         // === OTHER POPULAR MOVIES ===
+        1689 to 38142,     // 2007: 5 Centimeters per Second (Byousoku 5 Centimeter)
         20954 to 378064,   // 2016: A Silent Voice (Koe no Katachi)
         21519 to 372058,   // 2016: Your Name. (Kimi no Na wa.)
         106286 to 568160,  // 2019: Weathering With You (Tenki no Ko)
@@ -127,6 +129,12 @@ object AnimeMovieTmdbMapping {
         2890 to 18491,     // 2007: Evangelion: 1.0 You Are (Not) Alone
         4789 to 24188,     // 2009: Evangelion: 2.0 You Can (Not) Advance
         10521 to 109088,   // 2012: Evangelion: 3.0 You Can (Not) Redo
+
+        // === PERSONA 3 MOVIES ===
+        14407 to 227719,   // 2013: Persona 3 The Movie #1 Spring of Birth
+        20545 to 248934,   // 2014: Persona 3 The Movie #2 Midsummer Knight's Dream
+        20737 to 315664,   // 2015: Persona 3 The Movie #3 Falling Down
+        21088 to 340676,   // 2016: Persona 3 The Movie #4 Winter of Rebirth
 
         // === DETECTIVE CONAN (CASE CLOSED) MOVIES ===
         779 to 21422,      // 1997: The Time-Bombed Skyscraper (M01)
@@ -242,19 +250,58 @@ object AnimeMovieTmdbMapping {
         8245 to 417179     // 2010: Metal Fight Beyblade VS Taiyou: Sol Blaze
     )
 
+    private val staticTvMappings = mapOf(
+        4731 to 130123,   // 2009-2011: Hiiro no Koku (The Time Colored Scarlet) -> TMDB 130123
+        1403 to 85123,    // 2003: Tsumamigui (Wife Eater)
+        21870 to 338096,  // 2016-2018: Tsumamigui 3
+        186497 to 283428, // The Ramparts of Ice Season 1 (Koori no Jouheki) -> TMDB 283428
+        213805 to 283428, // The Ramparts of Ice Season 2 (Koori no Jouheki 2nd Season) -> TMDB Season 1 eps 15-28
+        207329 to 313346, // The Laid-Off Cheat-Granting Mage Enjoys a Second Lease on Life -> TMDB 313346
+        14513 to 60654, // Magi: The Labyrinth of Magic (Season 1)
+        918 to 57041,   // Gintama Season 1
+        // Pokemon TV shows (TMDB 60572)
+        527 to 60572, 1564 to 60572, 1565 to 60572, 9107 to 60572, 14093 to 60572,
+        17115 to 60572, 17873 to 60572, 20570 to 60572, 19291 to 60572, 21356 to 60572,
+        97634 to 60572, 112153 to 60572, 158870 to 60572, 160488 to 60572
+    )
+
+    fun getTvTmdbId(anilistId: Int): Int? = staticTvMappings[anilistId]
+
+    fun isStaticTv(anilistId: Int): Boolean = staticTvMappings.containsKey(anilistId)
+
+    private val staticLogos = mapOf(
+        // === PERSONA TV SHOWS ===
+        10588 to "https://artworks.thetvdb.com/banners/v4/series/252232/clearlogo/611c0b51d1ec6.png", // Persona 4 The Animation
+        20589 to "https://artworks.thetvdb.com/banners/v4/series/281691/clearlogo/611c0f055a40b.png", // Persona 4 The Golden Animation
+        99878 to "https://artworks.thetvdb.com/banners/v4/series/342261/clearlogo/611c210bd34bb.png"  // Persona 5 The Animation
+    )
+
+    fun getStaticLogo(anilistId: Int): String? = staticLogos[anilistId]
+
     private val dynamicMappingsCache = java.util.concurrent.ConcurrentHashMap<Int, Int>()
     private val dynamicTypeCache = java.util.concurrent.ConcurrentHashMap<Int, String>()
     private val dynamicLogoCache = java.util.concurrent.ConcurrentHashMap<Int, String>()
 
-    private const val SUPABASE_URL = "https://okiuzwsldqjrtuyqylhx.supabase.co"
-    private const val SUPABASE_KEY = "sb_publishable_O6CrSYrDu-GilobI41fSMg_DG7IdSbf"
+    private val SUPABASE_URL get() = AnimeBoxConfig.SUPABASE_URL
+    private val SUPABASE_KEY get() = AnimeBoxConfig.SUPABASE_ANON_KEY
 
     fun getMovieTmdbId(anilistId: Int): Int? = dynamicMappingsCache[anilistId] ?: staticMovieMappings[anilistId]
 
-    fun isStaticMovie(anilistId: Int): Boolean = staticMovieMappings.containsKey(anilistId) || dynamicTypeCache[anilistId] == "movie"
+    fun isStaticMovie(anilistId: Int): Boolean {
+        if (staticTvMappings.containsKey(anilistId)) return false
+        if (staticMovieMappings.containsKey(anilistId)) return true
+        if (AniZipClient.getLongRunningTmdbId(anilistId) != null) return false
+        if (dynamicTypeCache[anilistId] == "movie") return true
+        return false
+    }
 
     suspend fun getTmdbMapping(anilistId: Int): Int? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (staticTvMappings.containsKey(anilistId)) return@withContext staticTvMappings[anilistId]
         dynamicMappingsCache[anilistId]?.let { return@withContext it }
+        staticMovieMappings[anilistId]?.let {
+            dynamicTypeCache[anilistId] = "movie"
+            return@withContext it
+        }
 
         try {
             val url = "$SUPABASE_URL/rest/v1/anime_tmdb_mappings?anilist_id=eq.$anilistId&select=tmdb_id,tmdb_type,logo_url"
@@ -271,12 +318,16 @@ object AnimeMovieTmdbMapping {
                         if (arr.length() > 0) {
                             val obj = arr.getJSONObject(0)
                             val tId = obj.optInt("tmdb_id", 0)
-                            val tType = obj.optString("tmdb_type", "tv")
+                            val rawType = obj.optString("tmdb_type", "tv")
+                            val tType = if (AniZipClient.getLongRunningTmdbId(anilistId) != null) "tv" else rawType
                             val lUrl = if (obj.has("logo_url") && !obj.isNull("logo_url")) obj.getString("logo_url").trim() else ""
                             if (tId > 0) {
                                 dynamicMappingsCache[anilistId] = tId
                                 dynamicTypeCache[anilistId] = tType
-                                if (lUrl.isNotEmpty()) {
+                                // AniList 112151 is Mugen Train. Ignore stale custom-logo rows for it:
+                                // one previously pointed at unrelated Pokémon artwork. Its curated
+                                // TMDB movie mapping below is the reliable source instead.
+                                if (lUrl.isNotEmpty() && anilistId != 10250 && anilistId != 4216 && anilistId != 112151) {
                                     dynamicLogoCache[anilistId] = lUrl
                                 }
                                 return@withContext tId
@@ -287,19 +338,33 @@ object AnimeMovieTmdbMapping {
             }
         } catch (_: Exception) {}
 
-        return@withContext staticMovieMappings[anilistId]
+        val sMovie = staticMovieMappings[anilistId]
+        if (sMovie != null) {
+            dynamicTypeCache[anilistId] = "movie"
+            return@withContext sMovie
+        }
+        return@withContext null
     }
 
-    fun getDynamicTmdbType(anilistId: Int): String? = dynamicTypeCache[anilistId]
+    fun getDynamicTmdbType(anilistId: Int): String? {
+        if (staticTvMappings.containsKey(anilistId)) return "tv"
+        if (AniZipClient.getLongRunningTmdbId(anilistId) != null) return "tv"
+        return dynamicTypeCache[anilistId]
+    }
 
-    fun getDynamicLogo(anilistId: Int): String? = dynamicLogoCache[anilistId]
+    fun getDynamicLogo(anilistId: Int): String? {
+        if (anilistId == 10250 || anilistId == 4216 || anilistId == 112151) return ""
+        return dynamicLogoCache[anilistId]
+    }
 
     fun setDynamicMapping(anilistId: Int, tmdbId: Int, type: String = "movie") {
         dynamicMappingsCache[anilistId] = tmdbId
-        dynamicTypeCache[anilistId] = type
+        val finalType = if (AniZipClient.getLongRunningTmdbId(anilistId) != null) "tv" else type
+        dynamicTypeCache[anilistId] = finalType
     }
 
     fun setDynamicType(anilistId: Int, type: String) {
-        dynamicTypeCache[anilistId] = type
+        val finalType = if (AniZipClient.getLongRunningTmdbId(anilistId) != null) "tv" else type
+        dynamicTypeCache[anilistId] = finalType
     }
 }

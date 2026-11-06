@@ -75,7 +75,7 @@ open class TmdbProvider : MainAPI() {
 
     // Fuck it, public private api key because github actions won't co-operate.
     // Please no stealy.
-    private val tmdb = Tmdb("e6333b32409e02a4a6eba6fb7ff866bb")
+    private val tmdb = Tmdb("YOUR_TMDB_API_KEY_HERE")
 
     private fun getImageUrl(link: String?): String? {
         if (link == null) return null

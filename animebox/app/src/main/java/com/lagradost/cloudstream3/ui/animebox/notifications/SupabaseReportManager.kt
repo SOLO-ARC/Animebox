@@ -1,5 +1,7 @@
 package com.lagradost.cloudstream3.ui.animebox.notifications
 
+import com.lagradost.cloudstream3.ui.animebox.api.AnimeBoxConfig
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -10,8 +12,8 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 object SupabaseReportManager {
-    private const val SUPABASE_URL = "https://okiuzwsldqjrtuyqylhx.supabase.co"
-    private const val SUPABASE_ANON_KEY = "sb_publishable_O6CrSYrDu-GilobI41fSMg_DG7IdSbf"
+    private val SUPABASE_URL get() = AnimeBoxConfig.SUPABASE_URL
+    private val SUPABASE_ANON_KEY get() = AnimeBoxConfig.SUPABASE_ANON_KEY
 
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -21,7 +23,7 @@ object SupabaseReportManager {
     }
 
     /**
-     * Submit an issue report directly to Supabase reports table.
+     * Submit an issue report directly to Supabase reports table along with full diagnostics log.
      */
     suspend fun submitReport(
         userName: String,
@@ -31,7 +33,9 @@ object SupabaseReportManager {
         episodeNumber: Int,
         issueType: String,
         description: String = "",
-        userId: String? = null
+        userId: String? = null,
+        diagnostics: JSONObject? = null,
+        adminNotes: String? = null
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             val isValidUuid = try {
@@ -44,6 +48,12 @@ object SupabaseReportManager {
             val effectiveName = if (!userId.isNullOrBlank() && !isValidUuid && !userName.contains(userId)) {
                 "$userName ($userId)"
             } else userName
+
+            val finalAdminNotes = when {
+                !adminNotes.isNullOrBlank() -> adminNotes
+                diagnostics != null -> diagnostics.toString()
+                else -> null
+            }
 
             val json = JSONObject().apply {
                 put("target_id", java.util.UUID.randomUUID().toString())
@@ -63,6 +73,9 @@ object SupabaseReportManager {
                 put("issue_type", issueType)
                 put("description", description.trim())
                 put("status", "pending")
+                if (!finalAdminNotes.isNullOrBlank()) {
+                    put("admin_notes", finalAdminNotes)
+                }
             }
 
             val mediaType = "application/json; charset=utf-8".toMediaType()
@@ -78,9 +91,15 @@ object SupabaseReportManager {
                 .build()
 
             client.newCall(request).execute().use { response ->
+                android.util.Log.d("SupabaseReport", "Supabase report response code: ${response.code}")
+                if (!response.isSuccessful) {
+                    val errBody = response.body?.string() ?: ""
+                    android.util.Log.e("SupabaseReport", "Supabase report error: code=${response.code}, body=$errBody")
+                }
                 response.isSuccessful
             }
         } catch (e: Exception) {
+            android.util.Log.e("SupabaseReport", "Exception in submitReport: ${e.message}", e)
             e.printStackTrace()
             false
         }

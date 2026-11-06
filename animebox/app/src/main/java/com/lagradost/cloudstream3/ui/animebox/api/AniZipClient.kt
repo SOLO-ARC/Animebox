@@ -3,26 +3,54 @@ package com.lagradost.cloudstream3.ui.animebox.api
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.async
+import android.net.Uri
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+import com.lagradost.cloudstream3.CloudStreamApp
+import com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxDnsHelper
 
 object AniZipClient {
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
-        .writeTimeout(5, TimeUnit.SECONDS)
-        .build()
+    private fun buildHttpClient(): OkHttpClient {
+        val builder = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .writeTimeout(10, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+        return AnimeBoxDnsHelper.applyDns(builder, CloudStreamApp.context).build()
+    }
 
-    private val tmdbImagesCache = mutableMapOf<Int, MutableMap<String, String>>()
+    private var client = buildHttpClient()
+
+    private val tmdbImagesCache = java.util.concurrent.ConcurrentHashMap<Int, java.util.concurrent.ConcurrentHashMap<String, String>>()
+    private val tmdbAdultTitleCache = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    private val tmdbAdultMissCache = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    init {
+        tmdbAdultTitleCache["hiiro no koku"] = 130123
+        tmdbAdultTitleCache["hiiro ni koku"] = 130123
+        tmdbAdultTitleCache["the time colored scarlet"] = 130123
+
+        val hiiro130123 = tmdbImagesCache.computeIfAbsent(130123) { java.util.concurrent.ConcurrentHashMap() }
+        hiiro130123["1_1"] = "https://image.tmdb.org/t/p/w500/9CqAEQC1KxhLAtsh8pNvbSToDqx.jpg"
+        hiiro130123["1_2"] = "https://image.tmdb.org/t/p/w500/fI4kdYZHtoE8Cp2wVvPhLb0hWIc.jpg"
+        hiiro130123["1_3"] = "https://image.tmdb.org/t/p/w500/9gW5Z98wZ90eeOaLptokp1hWX5v.jpg"
+        hiiro130123["1_4"] = "https://image.tmdb.org/t/p/w500/pCI8do7RMMa9VOLh0ME4DKX6wb7.jpg"
+        hiiro130123["1_5"] = "https://image.tmdb.org/t/p/w500/9XDBPZNVgUktFd9v7JI4xN0cfme.jpg"
+    }
+    private val TMDB_API_KEY get() = AnimeBoxConfig.TMDB_API_KEY
     private val aniZipJsonCache = android.util.LruCache<Int, JSONObject>(100)
     private val kitsuAniZipJsonCache = android.util.LruCache<Int, JSONObject>(100)
     private val kitsuToAnilistCache = android.util.LruCache<Int, Int>(100)
 
+    private val aniZipJsonFetchedAt = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+    private const val ANIZIP_JSON_TTL_MS = 30L * 60L * 1000L
+
     suspend fun getAniZipJson(anilistId: Int): JSONObject? = withContext(Dispatchers.IO) {
         val cached = aniZipJsonCache.get(anilistId)
-        if (cached != null) return@withContext cached
+        val isFresh = cached != null && (System.currentTimeMillis() - (aniZipJsonFetchedAt[anilistId] ?: 0L)) < ANIZIP_JSON_TTL_MS
+        if (cached != null && isFresh) return@withContext cached
 
         val url = "https://api.ani.zip/mappings?anilist_id=$anilistId"
         val request = Request.Builder().url(url).build()
@@ -32,13 +60,15 @@ object AniZipClient {
                     val jsonStr = response.body?.string() ?: return@use null
                     val json = JSONObject(jsonStr)
                     aniZipJsonCache.put(anilistId, json)
+                    aniZipJsonFetchedAt[anilistId] = System.currentTimeMillis()
                     return@withContext json
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
-        null
+        // Refresh failed: a stale copy is still better than nothing.
+        cached
     }
 
     suspend fun getAniZipJsonByKitsuId(kitsuId: Int): JSONObject? = withContext(Dispatchers.IO) {
@@ -138,18 +168,19 @@ object AniZipClient {
 
         if (resultMap.isNotEmpty()) {
             kitsuEpisodeImagesCache[kitsuId] = resultMap
+            return@withContext resultMap
         }
         resultMap
     }
 
     suspend fun getTmdbEpisodeImage(tmdbId: Int, season: Int, episode: Int): String = withContext(Dispatchers.IO) {
         val key = "${season}_${episode}"
-        val cache = tmdbImagesCache.getOrPut(tmdbId) { mutableMapOf() }
+        val cache = tmdbImagesCache.computeIfAbsent(tmdbId) { java.util.concurrent.ConcurrentHashMap() }
         if (cache.containsKey(key)) {
             return@withContext cache[key] ?: ""
         }
         
-        val url = "https://api.themoviedb.org/3/tv/$tmdbId/season/$season?api_key=5a7f00b2528e0278ae94cd386deb6116"
+        val url = "https://api.themoviedb.org/3/tv/$tmdbId/season/$season?api_key=$TMDB_API_KEY"
         val request = Request.Builder()
             .url(url)
             .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
@@ -180,6 +211,41 @@ object AniZipClient {
         return@withContext cache[key] ?: ""
     }
 
+    suspend fun getTmdbSeasonEpisodeMetadata(tmdbId: Int, season: Int = 1): Map<Int, EpisodeMeta> = withContext(Dispatchers.IO) {
+        if (tmdbId <= 0) return@withContext emptyMap()
+        val result = mutableMapOf<Int, EpisodeMeta>()
+        try {
+            val url = "https://api.themoviedb.org/3/tv/$tmdbId/season/$season?api_key=$TMDB_API_KEY"
+            val req = Request.Builder().url(url).addHeader("User-Agent", "Mozilla/5.0").build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string().orEmpty()
+                    if (body.isNotBlank()) {
+                        val json = JSONObject(body)
+                        val eps = json.optJSONArray("episodes") ?: return@use
+                        val cache = tmdbImagesCache.computeIfAbsent(tmdbId) { java.util.concurrent.ConcurrentHashMap() }
+                        for (i in 0 until eps.length()) {
+                            val epObj = eps.optJSONObject(i) ?: continue
+                            val epNum = epObj.optInt("episode_number", i + 1)
+                            val stillPath = epObj.optString("still_path", "")
+                            val stillUrl = if (stillPath.isNotBlank() && stillPath != "null") {
+                                val u = "https://image.tmdb.org/t/p/w500$stillPath"
+                                cache["${season}_${epNum}"] = u
+                                u
+                            } else ""
+                            val title = epObj.optString("name", "Episode $epNum").ifBlank { "Episode $epNum" }
+                            val overview = epObj.optString("overview", "")
+                            val airdate = epObj.optString("air_date", "")
+                            val runtime = epObj.optInt("runtime", 24)
+                            result[epNum] = EpisodeMeta(title, stillUrl, airdate, season, epNum, overview, runtime, false)
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        result
+    }
+
     private suspend fun getTmdbAirdateStills(tmdbId: Int): Map<String, String> = withContext(Dispatchers.IO) {
         if (tmdbId <= 0) return@withContext emptyMap()
         val cached = tmdbAirdateMapCache[tmdbId]
@@ -187,7 +253,7 @@ object AniZipClient {
 
         val map = mutableMapOf<String, String>()
         try {
-            val url = "https://api.themoviedb.org/3/tv/$tmdbId/season/1?api_key=5a7f00b2528e0278ae94cd386deb6116"
+            val url = "https://api.themoviedb.org/3/tv/$tmdbId/season/1?api_key=$TMDB_API_KEY"
             val req = Request.Builder()
                 .url(url)
                 .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
@@ -216,8 +282,166 @@ object AniZipClient {
         map
     }
 
+    fun refreshClient() {
+        client = buildHttpClient()
+        aniZipJsonCache.evictAll()
+        kitsuAniZipJsonCache.evictAll()
+        tmdbImagesCache.clear()
+        tmdbAirdateMapCache.clear()
+    }
+
+    suspend fun getTmdbAdultEpisodeImage(
+        title: String,
+        episode: Int,
+        altTitles: List<String> = emptyList()
+    ): String = withContext(Dispatchers.IO) {
+        val spacedTitle = title.replace(Regex("""(\d+)([a-zA-Z]+)"""), "$1 $2").replace(Regex("""([a-zA-Z]+)(\d+)"""), "$1 $2").trim()
+        val primary = getTmdbAdultEpisodeImageSingle(title, episode)
+        if (primary.isNotBlank()) return@withContext primary
+        if (spacedTitle != title && spacedTitle.isNotBlank()) {
+            val spacedRes = getTmdbAdultEpisodeImageSingle(spacedTitle, episode)
+            if (spacedRes.isNotBlank()) return@withContext spacedRes
+        }
+        val allAlts = (altTitles + if (spacedTitle != title && spacedTitle.isNotBlank()) listOf(spacedTitle) else emptyList()).distinct()
+        for (alt in allAlts) {
+            if (alt.equals(title, ignoreCase = true) || alt.isBlank()) continue
+            val fallback = getTmdbAdultEpisodeImageSingle(alt, episode)
+            if (fallback.isNotBlank()) return@withContext fallback
+        }
+        ""
+    }
+
+    private suspend fun getTmdbAdultEpisodeImageSingle(title: String, episode: Int): String = withContext(Dispatchers.IO) {
+        if (title.isBlank() || episode <= 0) return@withContext ""
+        val cacheKey = title.lowercase().replace(Regex("""[^\p{L}\p{N}]+"""), " ").trim()
+        tmdbAdultTitleCache[cacheKey]?.let { tmdbId ->
+            val seasons = tmdbAdultSeasonNumbers(tmdbId)
+            for (season in seasons) {
+                val image = getTmdbEpisodeImage(tmdbId, season, episode)
+                if (image.isNotBlank()) return@withContext image
+            }
+            return@withContext ""
+        }
+        if (cacheKey in tmdbAdultMissCache) return@withContext ""
+
+        val queryUrl = "https://api.themoviedb.org/3/search/tv?api_key=$TMDB_API_KEY&include_adult=true&query=${Uri.encode(title.trim())}"
+        var searchCompleted = false
+        val bestMatch = try {
+            val request = Request.Builder()
+                .url(queryUrl)
+                .header("User-Agent", "Animexera/1.0 (Android; episode artwork lookup)")
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use null
+                val results = JSONObject(response.body?.string().orEmpty()).optJSONArray("results") ?: return@use null
+                searchCompleted = true
+                val wanted = cacheKey.split(Regex("\\s+")).filter { it.length > 1 }.toSet()
+                var best: JSONObject? = null
+                var bestScore = 0.0
+                for (index in 0 until results.length()) {
+                    val candidate = results.optJSONObject(index) ?: continue
+                    val names = listOf(candidate.optString("name"), candidate.optString("original_name"))
+                        .filter { it.isNotBlank() && it != "null" }
+                        .map { it.lowercase().replace(Regex("""[^\p{L}\p{N}]+"""), " ").trim() }
+                    val exact = names.any { it == cacheKey }
+                    val candidateTokens = names.flatMap { it.split(Regex("\\s+")) }.filter { it.length > 1 }.toSet()
+                    val overlap = if (wanted.isEmpty()) 0.0 else wanted.intersect(candidateTokens).size.toDouble() / wanted.size
+                    val score = (if (exact) 1.0 else overlap) + if (candidate.optString("poster_path").isNotBlank()) 0.01 else 0.0
+                    if (score > bestScore) {
+                        bestScore = score
+                        best = candidate
+                    }
+                }
+                best?.takeIf { bestScore >= 0.55 }
+            }
+        } catch (_: Exception) {
+            null
+        }
+
+        val tmdbId = bestMatch?.optInt("id", 0)?.takeIf { it > 0 }
+        if (tmdbId == null) {
+            if (title.contains(":") || title.contains("-")) {
+                val prefix = title.split(':', '-').first().trim()
+                if (prefix.isNotBlank() && prefix.length > 2 && !prefix.equals(title.trim(), ignoreCase = true)) {
+                    val fallbackImg = getTmdbAdultEpisodeImage(prefix, episode)
+                    if (fallbackImg.isNotBlank()) return@withContext fallbackImg
+                }
+            }
+            val movieMatch = try {
+                val mUrl = "https://api.themoviedb.org/3/search/movie?api_key=$TMDB_API_KEY&include_adult=true&query=${Uri.encode(title.trim())}"
+                val req = Request.Builder().url(mUrl).header("User-Agent", "Animexera/1.0 (Android; episode artwork lookup)").build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use null
+                    val mResults = JSONObject(resp.body?.string().orEmpty()).optJSONArray("results") ?: return@use null
+                    // Only accept a movie whose title actually matches; the first search hit used to be taken
+                    // blindly, which produced unrelated "random" covers for adult titles.
+                    val wantedTokens = cacheKey.split(Regex("\\s+")).filter { it.length > 1 }.toSet()
+                    var bestMovie: JSONObject? = null
+                    var bestMovieScore = 0.0
+                    for (mi in 0 until mResults.length()) {
+                        val cand = mResults.optJSONObject(mi) ?: continue
+                        val candNames = listOf(cand.optString("title"), cand.optString("original_title"))
+                            .filter { it.isNotBlank() && it != "null" }
+                            .map { it.lowercase().replace(Regex("""[^\p{L}\p{N}]+"""), " ").trim() }
+                        val candTokens = candNames.flatMap { it.split(Regex("\\s+")) }.filter { it.length > 1 }.toSet()
+                        val sc = if (candNames.any { it == cacheKey }) 1.0
+                            else if (wantedTokens.isEmpty()) 0.0
+                            else wantedTokens.intersect(candTokens).size.toDouble() / wantedTokens.size
+                        if (sc > bestMovieScore) { bestMovieScore = sc; bestMovie = cand }
+                    }
+                    bestMovie?.takeIf { bestMovieScore >= 0.8 }
+                }
+            } catch (_: Exception) { null }
+            val moviePoster = movieMatch?.optString("backdrop_path", "")?.ifEmpty { movieMatch.optString("poster_path", "") }
+            if (!moviePoster.isNullOrBlank()) {
+                return@withContext "https://image.tmdb.org/t/p/w780$moviePoster"
+            }
+            if (searchCompleted) tmdbAdultMissCache.add(cacheKey)
+            return@withContext ""
+        }
+        tmdbAdultTitleCache[cacheKey] = tmdbId
+        for (season in tmdbAdultSeasonNumbers(tmdbId)) {
+            val image = getTmdbEpisodeImage(tmdbId, season, episode)
+            if (image.isNotBlank()) return@withContext image
+        }
+        val adultBackdrop = bestMatch?.optString("backdrop_path", "")?.ifEmpty { bestMatch?.optString("poster_path", "") }
+        if (!adultBackdrop.isNullOrBlank()) {
+            return@withContext "https://image.tmdb.org/t/p/w780$adultBackdrop"
+        }
+        ""
+    }
+
+    private suspend fun tmdbAdultSeasonNumbers(tmdbId: Int): List<Int> = withContext(Dispatchers.IO) {
+        if (tmdbId <= 0) return@withContext listOf(1)
+        try {
+            val request = Request.Builder()
+                .url("https://api.themoviedb.org/3/tv/$tmdbId?api_key=$TMDB_API_KEY&include_adult=true")
+                .header("User-Agent", "Animexera/1.0 (Android; episode artwork lookup)")
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use listOf(1)
+                val seasons = JSONObject(response.body?.string().orEmpty()).optJSONArray("seasons") ?: return@use listOf(1)
+                val numbers = (0 until seasons.length()).mapNotNull { index ->
+                    seasons.optJSONObject(index)?.optInt("season_number", 0)?.takeIf { it > 0 }
+                }.distinct().sorted()
+                numbers.ifEmpty { listOf(1) }.take(8)
+            }
+        } catch (_: Exception) {
+            listOf(1)
+        }
+    }
+
+    fun getSeasonNumber(anilistId: Int): Int? {
+        val json = aniZipJsonCache.get(anilistId) ?: return null
+        val episodesObj = json.optJSONObject("episodes") ?: return null
+        val firstEp = episodesObj.optJSONObject("1") ?: return null
+        val s = firstEp.optInt("seasonNumber", 1)
+        return if (s > 0) s else 1
+    }
+
     suspend fun getEpisodeMetadata(anilistId: Int): Map<Int, EpisodeMeta> = withContext(Dispatchers.IO) {
         val metadataMap = mutableMapOf<Int, EpisodeMeta>()
+        val isGintama = anilistId == 918
         if (ShinChanEpisodeProvider.isShinChan(anilistId)) {
             val covers = ShinChanSupabaseManager.getAllEpisodeCovers()
             val maxEp = ShinChanSupabaseManager.getLatestEpisodeNumber()
@@ -232,9 +456,106 @@ object AniZipClient {
             }
             return@withContext metadataMap
         }
+        // Task 5: Hiiro ni Koku (The Time Colored Scarlet) (AniList ID 4731, TMDB ID 130123)
+        if (anilistId == 4731) {
+            val hMap = mutableMapOf<Int, EpisodeMeta>()
+            val stillPaths = mapOf(
+                1 to "/9CqAEQC1KxhLAtsh8pNvbSToDqx.jpg",
+                2 to "/fI4kdYZHtoE8Cp2wVvPhLb0hWIc.jpg",
+                3 to "/9gW5Z98wZ90eeOaLptokp1hWX5v.jpg",
+                4 to "/pCI8do7RMMa9VOLh0ME4DKX6wb7.jpg",
+                5 to "/9XDBPZNVgUktFd9v7JI4xN0cfme.jpg"
+            )
+            for (ep in 1..5) {
+                val img = "https://image.tmdb.org/t/p/w500${stillPaths[ep]}"
+                tmdbImagesCache.computeIfAbsent(130123) { java.util.concurrent.ConcurrentHashMap() }["1_$ep"] = img
+                hMap[ep] = EpisodeMeta(
+                    title = "Episode $ep",
+                    imageUrl = img,
+                    seasonNumber = 1,
+                    episodeNumber = ep
+                )
+            }
+            return@withContext hMap
+        }
+
+        // Task 6: Tsumamigui 1 (2003, AniList ID 1403, TMDB 85123)
+        if (anilistId == 1403) {
+            val t1Map = mutableMapOf<Int, EpisodeMeta>()
+            t1Map[1] = EpisodeMeta(
+                title = "Episode 1",
+                imageUrl = "https://image.tmdb.org/t/p/w500/k17vdkLzviKlvzO5VK5XzagltVL.jpg",
+                seasonNumber = 1,
+                episodeNumber = 1,
+                airdate = "2003-08-22",
+                runtime = 30
+            )
+            t1Map[2] = EpisodeMeta(
+                title = "Episode 2",
+                imageUrl = "https://image.tmdb.org/t/p/w500/beH9vcyAwdmd2pttAJ2b5H8QUAP.jpg",
+                seasonNumber = 1,
+                episodeNumber = 2,
+                airdate = "2003-11-28",
+                runtime = 30
+            )
+            return@withContext t1Map
+        }
+        // Task 3: Tsumamigui 3 (AniList ID 21870) from TMDB (show_id 338096)
+        if (anilistId == 21870) {
+            val t3Map = mutableMapOf<Int, EpisodeMeta>()
+            t3Map[1] = EpisodeMeta(
+                title = "Episode 1",
+                imageUrl = "https://image.tmdb.org/t/p/w500/sV9jJxQzVHabWf59nYO5xUQ05Pv.jpg",
+                seasonNumber = 1,
+                episodeNumber = 1,
+                airdate = "2016-09-30",
+                runtime = 30
+            )
+            t3Map[2] = EpisodeMeta(
+                title = "Episode 2",
+                imageUrl = "https://image.tmdb.org/t/p/w500/igiDdqa0VOAXlnymHoQkcfo8pZQ.jpg",
+                seasonNumber = 1,
+                episodeNumber = 2,
+                airdate = "2017-06-30",
+                runtime = 30
+            )
+            return@withContext t3Map
+        }
+        if (anilistId == 213805) {
+            val s2Map = mutableMapOf<Int, EpisodeMeta>()
+            for (ep in 1..14) {
+                val tmdbStill = getTmdbEpisodeImage(283428, 1, 14 + ep)
+                s2Map[ep] = EpisodeMeta(
+                    title = "Episode $ep",
+                    imageUrl = tmdbStill,
+                    seasonNumber = 2,
+                    episodeNumber = ep,
+                    runtime = 24
+                )
+            }
+            if (s2Map.isNotEmpty()) {
+                return@withContext s2Map
+            }
+        }
+        if (anilistId == 207329) {
+            val mageMap = mutableMapOf<Int, EpisodeMeta>()
+            for (ep in 1..12) {
+                val tmdbStill = getTmdbEpisodeImage(313346, 1, ep)
+                mageMap[ep] = EpisodeMeta(
+                    title = "Episode $ep",
+                    imageUrl = tmdbStill,
+                    seasonNumber = 1,
+                    episodeNumber = ep,
+                    runtime = 24
+                )
+            }
+            if (mageMap.isNotEmpty()) {
+                return@withContext mageMap
+            }
+        }
         try {
-            val json = getAniZipJson(anilistId) ?: return@withContext metadataMap
-            val mappings = json.optJSONObject("mappings")
+            val json = getAniZipJson(anilistId)
+            val mappings = json?.optJSONObject("mappings")
             val kitsuId = mappings?.optInt("kitsu_id", -1) ?: -1
             val tmdbId = mappings?.optInt("themoviedb_id", 0) ?: 0
 
@@ -247,7 +568,7 @@ object AniZipClient {
 
             var tmdbAirdateMap: Map<String, String>? = null
 
-            if (json.has("episodes")) {
+            if (json != null && json.has("episodes")) {
                 val episodesObj = json.getJSONObject("episodes")
                 val keys = episodesObj.keys()
                 while (keys.hasNext()) {
@@ -264,7 +585,11 @@ object AniZipClient {
                         if (cleanEn.isNotEmpty()) cleanEn else if (cleanJa.isNotEmpty()) cleanJa else "Episode $epNum"
                     } else "Episode $epNum"
                     
-                    var imageUrl = if (epObj.has("image")) epObj.getString("image") else ""
+                    // org.json's getString() turns a JSON null into the literal text "null"; that non-empty value
+                    // used to block every Kitsu/TMDB/Anilili cover fallback for new episodes with no image yet.
+                    var imageUrl = if (epObj.has("image") && !epObj.isNull("image")) {
+                        epObj.optString("image", "").trim().let { if (it.equals("null", ignoreCase = true)) "" else it }
+                    } else ""
                     val season = epObj.optInt("seasonNumber", 1)
                     val episode = epObj.optInt("episodeNumber", epNum)
 
@@ -306,16 +631,232 @@ object AniZipClient {
                     metadataMap[epNum] = EpisodeMeta(title, imageUrl, airdate, season, episode, overview, runtime, isFiller)
                 }
             }
+
+            if (!isGintama) {
+                // Fallback 1: If AniZip had no episodes, check Kitsu episode images
+                if (metadataMap.isEmpty() && kitsuImages.isNotEmpty()) {
+                    for ((epNum, imgUrl) in kitsuImages) {
+                        metadataMap[epNum] = EpisodeMeta("Episode $epNum", imgUrl, "", 1, epNum, "", 24, false)
+                    }
+                }
+
+                // Fallback 2: Try Anilili Konoha episodes logic directly
+                if (metadataMap.isEmpty()) {
+                    val anililiEps = getAnililiEpisodes(anilistId)
+                    if (anililiEps.isNotEmpty()) {
+                        metadataMap.putAll(anililiEps)
+                    }
+                }
+
+                // Fallback 3: Query TMDB TV season 1 if still empty or if episode covers are missing
+                var effectiveTmdbId = getLongRunningTmdbId(anilistId)
+                    ?: AnimeMovieTmdbMapping.getTvTmdbId(anilistId)
+                    ?: (if (tmdbId > 0) tmdbId else getTmdbId(anilistId))
+                    ?: 0
+
+                val hasMissingCovers = metadataMap.isEmpty() || metadataMap.values.any { it.imageUrl.isBlank() }
+                if (effectiveTmdbId <= 0 && hasMissingCovers) {
+                    effectiveTmdbId = resolveTmdbTvIdDynamically(anilistId)
+                }
+
+                if (effectiveTmdbId > 0) {
+                    if (metadataMap.isEmpty()) {
+                        val tmdbEps = getTmdbSeasonEpisodeMetadata(effectiveTmdbId, 1)
+                        if (tmdbEps.isNotEmpty()) {
+                            metadataMap.putAll(tmdbEps)
+                        }
+                    } else {
+                        for ((epNum, epMeta) in metadataMap.toMap()) {
+                            if (epMeta.imageUrl.isBlank()) {
+                                val tmdbStill = getTmdbEpisodeImage(effectiveTmdbId, epMeta.seasonNumber, epMeta.episodeNumber)
+                                    .ifBlank { getTmdbEpisodeImage(effectiveTmdbId, 1, epMeta.episodeNumber) }
+                                if (tmdbStill.isNotEmpty()) {
+                                    metadataMap[epNum] = epMeta.copy(imageUrl = tmdbStill)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Fallback 4: If any individual episode still lacks an imageUrl, fill it using Anilili / Kitsu
+                val missingCovers = metadataMap.filter { it.value.imageUrl.isBlank() }
+                if (missingCovers.isNotEmpty()) {
+                    val anililiEps = getAnililiEpisodes(anilistId)
+                    for ((epNum, epMeta) in missingCovers) {
+                        val anililiStill = anililiEps[epNum]?.imageUrl
+                        if (!anililiStill.isNullOrBlank()) {
+                            metadataMap[epNum] = epMeta.copy(imageUrl = anililiStill)
+                        } else if (kitsuImages.containsKey(epNum)) {
+                            val kImg = kitsuImages[epNum].orEmpty()
+                            if (kImg.isNotBlank()) {
+                                metadataMap[epNum] = epMeta.copy(imageUrl = kImg)
+                            }
+                        }
+                    }
+                }
+
+                // Detect repetitive/duplicate episode covers across episodes
+                val imgCounts = metadataMap.values.map { it.imageUrl }.filter { it.isNotBlank() }.groupingBy { it }.eachCount()
+                val duplicateImgs = imgCounts.filter { it.value > 1 }.keys
+                if (duplicateImgs.isNotEmpty()) {
+                    // Step A: First try Anilili Konoha episodes logic for the whole show to replace duplicates with unique stills
+                    val anililiEps = getAnililiEpisodes(anilistId)
+                    if (anililiEps.isNotEmpty()) {
+                        val anililiCounts = anililiEps.values.map { it.imageUrl }.filter { it.isNotBlank() }.groupingBy { it }.eachCount()
+                        val anililiHasDuplicates = anililiCounts.any { it.value > 1 }
+                        if (!anililiHasDuplicates) {
+                            for ((epNum, anililiMeta) in anililiEps) {
+                                val existing = metadataMap[epNum]
+                                if (existing != null) {
+                                    if (anililiMeta.imageUrl.isNotBlank()) {
+                                        metadataMap[epNum] = existing.copy(imageUrl = anililiMeta.imageUrl)
+                                    }
+                                } else {
+                                    metadataMap[epNum] = anililiMeta
+                                }
+                            }
+                        }
+                    }
+
+                    // Check again if duplicates remain
+                    val remainingCounts = metadataMap.values.map { it.imageUrl }.filter { it.isNotBlank() }.groupingBy { it }.eachCount()
+                    val remainingDuplicates = remainingCounts.filter { it.value > 1 }.keys
+
+                    if (remainingDuplicates.isNotEmpty()) {
+                        var effectiveTmdbId = getLongRunningTmdbId(anilistId) 
+                            ?: AnimeMovieTmdbMapping.getTvTmdbId(anilistId)
+                            ?: (if (tmdbId > 0) tmdbId else getTmdbId(anilistId)) 
+                            ?: 0
+
+                        if (effectiveTmdbId <= 0) {
+                            try {
+                                val aniTitles = getAnimeTitlesFromAnySource(anilistId)
+                                for (aniTitle in aniTitles) {
+                                    if (effectiveTmdbId > 0) break
+                                    val encoded = java.net.URLEncoder.encode(aniTitle, "UTF-8")
+                                    val sUrl = "https://api.themoviedb.org/3/search/tv?api_key=$TMDB_API_KEY&query=$encoded"
+                                    val req = Request.Builder().url(sUrl).build()
+                                    client.newCall(req).execute().use { r ->
+                                        if (r.isSuccessful) {
+                                            val b = r.body?.string().orEmpty()
+                                            val j = JSONObject(b)
+                                            val res = j.optJSONArray("results")
+                                            val firstId = res?.optJSONObject(0)?.optInt("id", 0) ?: 0
+                                            if (firstId > 0) effectiveTmdbId = firstId
+                                        }
+                                    }
+                                }
+                            } catch (_: Exception) {}
+                        }
+
+                        for ((epNum, epMeta) in metadataMap.toMap()) {
+                            if (epMeta.imageUrl in remainingDuplicates) {
+                                var altImg = ""
+                                if (effectiveTmdbId > 0) {
+                                    if (epMeta.airdate.isNotEmpty()) {
+                                        if (tmdbAirdateMap == null) {
+                                            tmdbAirdateMap = getTmdbAirdateStills(effectiveTmdbId)
+                                        }
+                                        val airMatch = tmdbAirdateMap?.get(epMeta.airdate)
+                                        if (!airMatch.isNullOrEmpty() && airMatch !in remainingDuplicates) {
+                                            altImg = airMatch
+                                        }
+                                    }
+                                    if (altImg.isEmpty()) {
+                                        val tmdbStill = getTmdbEpisodeImage(effectiveTmdbId, epMeta.seasonNumber, epMeta.episodeNumber)
+                                        if (tmdbStill.isNotEmpty() && tmdbStill !in remainingDuplicates) {
+                                            altImg = tmdbStill
+                                        }
+                                    }
+                                }
+                                if (altImg.isEmpty()) {
+                                    val anililiStill = anililiEps[epNum]?.imageUrl
+                                    if (!anililiStill.isNullOrBlank() && anililiStill !in remainingDuplicates) {
+                                        altImg = anililiStill
+                                    }
+                                }
+                                if (altImg.isEmpty()) {
+                                    val customCover = EpisodeCoverUploader.getCustomEpisodeCover(null, anilistId, epNum)
+                                    if (!customCover.isNullOrEmpty() && customCover !in remainingDuplicates) {
+                                        altImg = customCover
+                                    }
+                                }
+                                if (altImg.isNotEmpty()) {
+                                    metadataMap[epNum] = epMeta.copy(imageUrl = altImg)
+                                } else if (epNum > 1) {
+                                    metadataMap[epNum] = epMeta.copy(imageUrl = "")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         } catch (e: Exception) {
             android.util.Log.e("AniZipClient", "getEpisodeMetadata error: ${e.message}", e)
+        }
+        if (com.lagradost.cloudstream3.ui.animebox.extractors.PokemonHindiExtractor.isPokemon(anilistId)) {
+            val tmdbShowId = if (anilistId == 158871 || anilistId == 171616) 220150 else 60572
+            for ((epNum, epMeta) in metadataMap.toMap()) {
+                val (seasonNum, relEpNum) = com.lagradost.cloudstream3.ui.animebox.extractors.PokemonHindiExtractor.getSeasonAndRelativeEpisode(anilistId, epNum)
+                var img = epMeta.imageUrl
+                if (img.isBlank()) {
+                    img = getTmdbEpisodeImage(tmdbShowId, seasonNum, relEpNum)
+                }
+                metadataMap[epNum] = epMeta.copy(
+                    seasonNumber = seasonNum,
+                    episodeNumber = relEpNum,
+                    imageUrl = img
+                )
+            }
+            if (metadataMap.isEmpty()) {
+                val count = when (anilistId) {
+                    527 -> 276
+                    1564 -> 192
+                    1565 -> 191
+                    9107 -> 84
+                    14093 -> 24
+                    17115 -> 14
+                    17873 -> 20
+                    19291 -> 93
+                    21356 -> 47
+                    97634 -> 146
+                    112151, 112153 -> 136
+                    158870, 160488 -> 11
+                    158871 -> 45
+                    171616 -> 25
+                    else -> 0
+                }
+                if (count > 0) {
+                    for (epNum in 1..count) {
+                        val (sNum, relEp) = com.lagradost.cloudstream3.ui.animebox.extractors.PokemonHindiExtractor.getSeasonAndRelativeEpisode(anilistId, epNum)
+                        val still = getTmdbEpisodeImage(tmdbShowId, sNum, relEp)
+                        metadataMap[epNum] = EpisodeMeta(
+                            title = "Episode $epNum",
+                            imageUrl = still,
+                            airdate = "",
+                            seasonNumber = sNum,
+                            episodeNumber = relEp,
+                            overview = "",
+                            runtime = 24,
+                            isFiller = false
+                        )
+                    }
+                }
+            }
         }
         return@withContext metadataMap
     }
 
-    suspend fun getAnimeLogoUrl(anilistId: Int, isMovie: Boolean = false): String = withContext(Dispatchers.IO) {
+    suspend fun getAnimeLogoUrl(anilistId: Int, isMovie: Boolean = false, title: String = ""): String = withContext(Dispatchers.IO) {
+        if (anilistId <= 0 || AniListClient.isAdultAnimeCached(anilistId)) return@withContext ""
         if (ShinChanEpisodeProvider.isShinChan(anilistId)) {
             return@withContext ShinChanEpisodeProvider.SHINCHAN_LOGO_URL
         }
+        val staticLogo = AnimeMovieTmdbMapping.getStaticLogo(anilistId)
+        if (!staticLogo.isNullOrBlank()) {
+            return@withContext staticLogo
+        }
+
         // 0. Check Supabase dynamic custom logo first!
         val dynamicLogo = AnimeMovieTmdbMapping.getDynamicLogo(anilistId)
         if (!dynamicLogo.isNullOrBlank()) {
@@ -324,9 +865,14 @@ object AniZipClient {
 
         val dynamicType = AnimeMovieTmdbMapping.getDynamicTmdbType(anilistId)
         val staticMovie = AnimeMovieTmdbMapping.isStaticMovie(anilistId)
+        val isExplicitTv = AnimeMovieTmdbMapping.isStaticTv(anilistId) ||
+                (getLongRunningTmdbId(anilistId) != null && !isMovie && !staticMovie) ||
+                dynamicType?.equals("tv", ignoreCase = true) == true
+        val isExplicitMovie = staticMovie || dynamicType?.equals("movie", ignoreCase = true) == true
+
         var targetIsMovie = when {
-            dynamicType != null -> dynamicType.equals("movie", ignoreCase = true)
-            staticMovie -> true
+            isExplicitMovie -> true
+            isExplicitTv -> false
             else -> isMovie
         }
         var targetType = if (targetIsMovie) "movie" else "tv"
@@ -367,74 +913,27 @@ object AniZipClient {
             tmdbId = getTmdbIdFromFribb(anilistId, isMovie = targetIsMovie)
         }
         
-        // Helper to query TMDB logos for a given media type
-        fun queryTmdbLogo(type: String, id: Int): String {
-            try {
-                val tmdbUrl = "https://api.themoviedb.org/3/$type/$id/images?api_key=5a7f00b2528e0278ae94cd386deb6116&include_image_language=en,null"
-                val tmdbRequest = Request.Builder().url(tmdbUrl).build()
-                client.newCall(tmdbRequest).execute().use { tmdbResponse ->
-                    if (tmdbResponse.isSuccessful) {
-                        val tmdbJsonStr = tmdbResponse.body?.string() ?: return@use
-                        val tmdbJson = JSONObject(tmdbJsonStr)
-                        if (tmdbJson.has("logos")) {
-                            val logosArray = tmdbJson.getJSONArray("logos")
-                            var englishLogo = ""
-                            var fallbackLogo = ""
-                            for (i in 0 until logosArray.length()) {
-                                val obj = logosArray.getJSONObject(i)
-                                val lang = obj.optString("iso_639_1", "")
-                                val filePath = obj.optString("file_path", "")
-                                if (filePath.isNotEmpty()) {
-                                    if (lang == "en" && englishLogo.isEmpty()) {
-                                        englishLogo = "https://image.tmdb.org/t/p/original$filePath"
-                                    } else if (fallbackLogo.isEmpty()) {
-                                        fallbackLogo = "https://image.tmdb.org/t/p/original$filePath"
-                                    }
-                                }
-                            }
-                            val chosenLogo = englishLogo.ifEmpty { fallbackLogo }
-                            if (chosenLogo.isNotEmpty()) return chosenLogo
-                        }
-                    }
-                }
-            } catch (_: Exception) {}
 
-            try {
-                val allLangUrl = "https://api.themoviedb.org/3/$type/$id/images?api_key=5a7f00b2528e0278ae94cd386deb6116"
-                val allLangRequest = Request.Builder().url(allLangUrl).build()
-                client.newCall(allLangRequest).execute().use { tmdbResponse ->
-                    if (tmdbResponse.isSuccessful) {
-                        val tmdbJsonStr = tmdbResponse.body?.string() ?: return@use
-                        val tmdbJson = JSONObject(tmdbJsonStr)
-                        if (tmdbJson.has("logos")) {
-                            val logosArray = tmdbJson.getJSONArray("logos")
-                            if (logosArray.length() > 0) {
-                                val filePath = logosArray.getJSONObject(0).optString("file_path", "")
-                                if (filePath.isNotEmpty()) {
-                                    return "https://image.tmdb.org/t/p/original$filePath"
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (_: Exception) {}
-            return ""
-        }
 
         // 1. Try TMDB logo for targetType
         if (tmdbId != null && tmdbId > 0) {
             val logo = queryTmdbLogo(targetType, tmdbId)
             if (logo.isNotEmpty()) return@withContext logo
 
-            // Fallback: try alternate media type (movie <-> tv)
-            val altType = if (targetType == "movie") "tv" else "movie"
-            val altLogo = queryTmdbLogo(altType, tmdbId)
-            if (altLogo.isNotEmpty()) {
-                if (altType == "movie") {
-                    AnimeMovieTmdbMapping.setDynamicType(anilistId, "movie")
-                    AnimeMovieTmdbMapping.setDynamicMapping(anilistId, tmdbId, "movie")
+            // Fallback: ONLY try alternate media type if neither TV nor Movie was explicitly fixed/mapped
+            // AND only if TMDB confirms that the alternate media type ID actually represents an anime!
+            if (!isExplicitTv && !isExplicitMovie) {
+                val altType = if (targetType == "movie") "tv" else "movie"
+                if (verifyTmdbIsAnime(tmdbId, altType) != null) {
+                    val altLogo = queryTmdbLogo(altType, tmdbId)
+                    if (altLogo.isNotEmpty()) {
+                        if (altType == "movie") {
+                            AnimeMovieTmdbMapping.setDynamicType(anilistId, "movie")
+                            AnimeMovieTmdbMapping.setDynamicMapping(anilistId, tmdbId, "movie")
+                        }
+                        return@withContext altLogo
+                    }
                 }
-                return@withContext altLogo
             }
         }
 
@@ -461,12 +960,404 @@ object AniZipClient {
                 }
             }
         } catch (e: Exception) {}
+
+        // 3. Try Anilili Konoha media-index logo (exact logic investigated from Anilili pommieyewear index.json)
+        val anililiLogo = getAnililiLogoUrl(anilistId)
+        if (!anililiLogo.isNullOrEmpty()) {
+            return@withContext anililiLogo
+        }
+
+        // 4. Anilili TMDB title search & franchise logo resolution (e.g. for movies like Made in Abyss: Mezameru Shinpi, Dragon Ball Super: Beerus, etc.)
+        val titleSearchLogo = searchTmdbLogoByTitles(anilistId, targetType)
+        if (!titleSearchLogo.isNullOrEmpty()) {
+            return@withContext titleSearchLogo
+        }
+
         return@withContext ""
+    }
+
+    private val anililiLogoCache = android.util.LruCache<Int, String>(100)
+    private val anililiEpisodesCache = android.util.LruCache<Int, Map<Int, EpisodeMeta>>(50)
+
+    /**
+     * Retrieves anime title clear logo using Anilili Konoha media-index repository logic
+     */
+    suspend fun getAnililiLogoUrl(anilistId: Int): String? = withContext(Dispatchers.IO) {
+        if (anilistId <= 0) return@withContext null
+        val cached = anililiLogoCache.get(anilistId)
+        if (cached != null) return@withContext cached
+
+        val bucket = anilistId / 1000
+        val url = "https://cdn.jsdelivr.net/gh/pommieyewear/media-index@main/data/anime/$bucket/$anilistId/index.json"
+        try {
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .addHeader("Accept", "application/json")
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string() ?: return@use
+                    val json = JSONObject(body)
+                    val imagesObj = json.optJSONObject("images")
+                    val logo = imagesObj?.optString("logo", "")?.trim() ?: ""
+                    if (logo.isNotEmpty() && !logo.equals("null", ignoreCase = true)) {
+                        anililiLogoCache.put(anilistId, logo)
+                        return@withContext logo
+                    }
+
+                    // Anilili franchise inheritance: check series list
+                    val seriesArr = json.optJSONArray("series")
+                    if (seriesArr != null && seriesArr.length() > 0) {
+                        for (i in 0 until seriesArr.length()) {
+                            val relatedId = seriesArr.optInt(i, 0)
+                            if (relatedId > 0 && relatedId != anilistId) {
+                                val cachedRelated = anililiLogoCache.get(relatedId)
+                                if (!cachedRelated.isNullOrEmpty()) {
+                                    anililiLogoCache.put(anilistId, cachedRelated)
+                                    return@withContext cachedRelated
+                                }
+                                val relatedLogo = getAnimeLogoUrl(relatedId)
+                                if (relatedLogo.isNotEmpty()) {
+                                    anililiLogoCache.put(anilistId, relatedLogo)
+                                    return@withContext relatedLogo
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        // Fallback to lili.json in media-index
+        try {
+            val liliUrl = "https://cdn.jsdelivr.net/gh/pommieyewear/media-index@main/data/anime/$bucket/$anilistId/lili.json"
+            val req = Request.Builder()
+                .url(liliUrl)
+                .addHeader("User-Agent", "Mozilla/5.0")
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string() ?: return@use
+                    val json = JSONObject(body)
+                    val imagesObj = json.optJSONObject("images")
+                    val logo = imagesObj?.optString("logo", "")?.trim() ?: ""
+                    if (logo.isNotEmpty() && !logo.equals("null", ignoreCase = true)) {
+                        anililiLogoCache.put(anilistId, logo)
+                        return@withContext logo
+                    }
+
+                    // Anilili franchise inheritance: check series list
+                    val seriesArr = json.optJSONArray("series")
+                    if (seriesArr != null && seriesArr.length() > 0) {
+                        for (i in 0 until seriesArr.length()) {
+                            val relatedId = seriesArr.optInt(i, 0)
+                            if (relatedId > 0 && relatedId != anilistId) {
+                                val cachedRelated = anililiLogoCache.get(relatedId)
+                                if (!cachedRelated.isNullOrEmpty()) {
+                                    anililiLogoCache.put(anilistId, cachedRelated)
+                                    return@withContext cachedRelated
+                                }
+                                val relatedLogo = getAnimeLogoUrl(relatedId)
+                                if (relatedLogo.isNotEmpty()) {
+                                    anililiLogoCache.put(anilistId, relatedLogo)
+                                    return@withContext relatedLogo
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        null
+    }
+
+    /**
+     * Retrieves complete episode list metadata & stills using Anilili Konoha media-index repository logic
+     */
+    /**
+     * Resolves clear logo by searching TMDB using title variations and franchise inheritance
+     * (Anilili's exact logic for Made in Abyss: Mezameru Shinpi, Dragon Ball Super, etc.)
+     */
+    // Helper to query TMDB logos for a given media type.
+    // Language priority: English -> Japanese -> Chinese -> any other available language.
+    // A lower-priority language is only used when every higher-priority language has no logo at all.
+    private fun queryTmdbLogo(type: String, id: Int): String {
+        try {
+            // Request ALL languages in one call. Filtering to "en,null" server-side hid Japanese/Chinese
+            // logos and let language-less entries win before ja/zh were ever considered.
+            val allLangUrl = "https://api.themoviedb.org/3/$type/$id/images?api_key=$TMDB_API_KEY"
+            val allLangRequest = Request.Builder().url(allLangUrl).build()
+            client.newCall(allLangRequest).execute().use { tmdbResponse ->
+                if (tmdbResponse.isSuccessful) {
+                    val tmdbJsonStr = tmdbResponse.body?.string() ?: return@use
+                    val tmdbJson = JSONObject(tmdbJsonStr)
+                    val logosArray = tmdbJson.optJSONArray("logos")
+                    if (logosArray != null && logosArray.length() > 0) {
+                        val priority = listOf("en", "ja", "zh")
+                        var bestRank = Int.MAX_VALUE
+                        var bestScore = -1.0
+                        var bestPath = ""
+                        for (i in 0 until logosArray.length()) {
+                            val obj = logosArray.getJSONObject(i)
+                            val filePath = obj.optString("file_path", "")
+                            if (filePath.isEmpty()) continue
+                            val lang = if (obj.isNull("iso_639_1")) "" else obj.optString("iso_639_1", "")
+                            val idx = priority.indexOf(lang.lowercase())
+                            // en=0, ja=1, zh=2, any other language=3, language-less/textless=4
+                            val rank = when {
+                                idx >= 0 -> idx
+                                lang.isNotEmpty() -> priority.size
+                                else -> priority.size + 1
+                            }
+                            val score = obj.optDouble("vote_average", 0.0) * 1000 + obj.optDouble("vote_count", 0.0)
+                            if (rank < bestRank || (rank == bestRank && score > bestScore)) {
+                                bestRank = rank
+                                bestScore = score
+                                bestPath = filePath
+                            }
+                        }
+                        if (bestPath.isNotEmpty()) return "https://image.tmdb.org/t/p/original$bestPath"
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return ""
+    }
+
+    private val dynamicTvSearchCache = java.util.concurrent.ConcurrentHashMap<Int, Int>()
+
+    fun cleanAnimeTitleForSearch(title: String): String {
+        var str = title
+        val seasonPatterns = listOf(
+            Regex("(?i)\\b\\d+(?:st|nd|rd|th)\\s+season\\b"),
+            Regex("(?i)\\bseason\\s*\\d+\\b"),
+            Regex("(?i)\\bpart\\s*\\d+\\b"),
+            Regex("(?i)\\bcour\\s*\\d+\\b"),
+            Regex("(?i)\\bfinal\\s+season\\b"),
+            Regex("(?i)\\s+(?:ii|iii|iv|v|vi|vii|viii|ix|x)\\s*$"),
+            Regex("(?i)\\b(?:the\\s+movie|movies?|gekijou-?ban|ovas?|oads?|onas?|specials?)\\b")
+        )
+        for (pattern in seasonPatterns) {
+            str = pattern.replace(str, " ")
+        }
+        return str.replace(Regex("\\s+"), " ").trim()
+    }
+
+    suspend fun resolveTmdbTvIdDynamically(anilistId: Int): Int = withContext(Dispatchers.IO) {
+        if (anilistId <= 0) return@withContext 0
+        dynamicTvSearchCache[anilistId]?.let { return@withContext it }
+
+        val candidateQueries = mutableListOf<String>()
+        val baseTitles = getAnimeTitlesFromAnySource(anilistId)
+        candidateQueries.addAll(baseTitles)
+
+        // Add Anilili-style cleaned titles and arc/sub-series prefixes (e.g. 'Dragon Ball Super: Beerus' -> 'Dragon Ball Super')
+        for (t in baseTitles) {
+            val cleaned = cleanAnimeTitleForSearch(t)
+            if (cleaned.isNotBlank() && !candidateQueries.contains(cleaned)) {
+                candidateQueries.add(cleaned)
+            }
+            if (t.contains(":") || t.contains("-") || t.contains("–") || t.contains("—")) {
+                val prefix = t.split(':', '-', '–', '—').first().trim()
+                if (prefix.length >= 3 && !candidateQueries.contains(prefix)) {
+                    candidateQueries.add(prefix)
+                }
+                val cleanedPrefix = cleanAnimeTitleForSearch(prefix)
+                if (cleanedPrefix.length >= 3 && !candidateQueries.contains(cleanedPrefix)) {
+                    candidateQueries.add(cleanedPrefix)
+                }
+            }
+        }
+
+        var foundId = 0
+        for (query in candidateQueries.distinct()) {
+            if (foundId > 0) break
+            try {
+                val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+                val sUrl = "https://api.themoviedb.org/3/search/tv?api_key=$TMDB_API_KEY&query=$encoded"
+                val req = Request.Builder().url(sUrl).build()
+                client.newCall(req).execute().use { r ->
+                    if (r.isSuccessful) {
+                        val b = r.body?.string().orEmpty()
+                        val j = JSONObject(b)
+                        val res = j.optJSONArray("results") ?: return@use
+                        val qClean = query.lowercase().filter { it.isLetterOrDigit() }
+                        for (idx in 0 until res.length()) {
+                            val cand = res.optJSONObject(idx) ?: continue
+                            val candId = cand.optInt("id", 0)
+                            if (candId <= 0) continue
+                            val name = cand.optString("name", "")
+                            val origName = cand.optString("original_name", "")
+                            val nameClean = name.lowercase().filter { it.isLetterOrDigit() }
+                            val origClean = origName.lowercase().filter { it.isLetterOrDigit() }
+
+                            val isMatch = (qClean.length >= 4 && (nameClean.contains(qClean) || qClean.contains(nameClean))) ||
+                                          (origClean.isNotEmpty() && qClean.length >= 4 && (origClean.contains(qClean) || qClean.contains(origClean))) ||
+                                          idx == 0
+                            if (isMatch) {
+                                foundId = candId
+                                break
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        if (foundId > 0) {
+            dynamicTvSearchCache[anilistId] = foundId
+            AnimeMovieTmdbMapping.setDynamicMapping(anilistId, foundId, "tv")
+        }
+        foundId
+    }
+
+    private suspend fun getAnimeTitlesFromAnySource(anilistId: Int): List<String> {
+        if (anilistId <= 0 || AniListClient.isAdultAnimeCached(anilistId)) return emptyList()
+        val list = mutableListOf<String>()
+        try {
+            val aniJson = getAniZipJson(anilistId)
+            val titlesObj = aniJson?.optJSONObject("titles")
+            if (titlesObj != null) {
+                titlesObj.optString("en", "").takeIf { it.isNotBlank() }?.let { list.add(it) }
+                titlesObj.optString("rj", "").takeIf { it.isNotBlank() }?.let { list.add(it) }
+                titlesObj.optString("en_jp", "").takeIf { it.isNotBlank() }?.let { list.add(it) }
+            }
+        } catch (_: Exception) {}
+
+        if (list.isEmpty()) {
+            try {
+                val detailsJsonStr = AniListClient.getAnimeDetails(anilistId)
+                if (!detailsJsonStr.isNullOrEmpty()) {
+                    val media = JSONObject(detailsJsonStr).optJSONObject("data")?.optJSONObject("Media")
+                    val tObj = media?.optJSONObject("title")
+                    if (tObj != null) {
+                        tObj.optString("english", "").takeIf { it.isNotBlank() }?.let { list.add(it) }
+                        tObj.optString("romaji", "").takeIf { it.isNotBlank() }?.let { list.add(it) }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return list.filter { it.isNotBlank() && !it.equals("null", ignoreCase = true) && !it.contains("stjerner", ignoreCase = true) }.distinct()
+    }
+
+    suspend fun searchTmdbLogoByTitles(anilistId: Int, preferredType: String): String? = withContext(Dispatchers.IO) {
+        if (anilistId <= 0) return@withContext null
+        val cached = anililiLogoCache.get(anilistId)
+        if (!cached.isNullOrEmpty()) return@withContext cached
+
+        // Gather titles from AniZip JSON or AniList
+        val titleList = getAnimeTitlesFromAnySource(anilistId).toMutableList()
+
+        val candidates = mutableListOf<String>()
+        val prefixes = mutableListOf<String>()
+        for (t in titleList) {
+            candidates.add(t)
+            if (t.contains(":")) {
+                prefixes.add(t.substringBefore(":").trim())
+            }
+            if (t.contains(" - ")) {
+                prefixes.add(t.substringBefore(" - ").trim())
+            }
+        }
+        val distinctQueries = (candidates + prefixes).filter {
+            it.length >= 3 &&
+            !it.equals("null", ignoreCase = true) &&
+            !it.equals("nul", ignoreCase = true) &&
+            !it.contains("stjerner", ignoreCase = true)
+        }.distinct()
+
+        for (q in distinctQueries) {
+            val encoded = java.net.URLEncoder.encode(q, "UTF-8")
+            val typesToTry = if (preferredType == "movie") listOf("movie", "tv") else listOf("tv", "movie")
+            for (type in typesToTry) {
+                try {
+                    val sUrl = "https://api.themoviedb.org/3/search/$type?api_key=$TMDB_API_KEY&query=$encoded"
+                    val req = Request.Builder().url(sUrl).build()
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@use
+                        val body = resp.body?.string() ?: return@use
+                        val j = JSONObject(body)
+                        val results = j.optJSONArray("results") ?: return@use
+                        for (i in 0 until minOf(results.length(), 2)) {
+                            val item = results.optJSONObject(i) ?: continue
+                            val resName = item.optString("name", item.optString("title", "")).trim()
+                            if (resName.contains("stjerner", ignoreCase = true) || resName.equals("null", ignoreCase = true)) continue
+                            val normQ = q.lowercase().filter { it.isLetterOrDigit() }
+                            val normRes = resName.lowercase().filter { it.isLetterOrDigit() }
+                            if (!normRes.contains(normQ) && !normQ.contains(normRes)) continue
+                            val tmdbId = item.optInt("id", 0)
+                            if (tmdbId > 0) {
+                                val logo = queryTmdbLogo(type, tmdbId)
+                                if (logo.isNotEmpty() && !logo.contains("stjerner", ignoreCase = true) && !logo.contains("null", ignoreCase = true)) {
+                                    anililiLogoCache.put(anilistId, logo)
+                                    return@withContext logo
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+        null
+    }
+
+    suspend fun getAnililiEpisodes(anilistId: Int): Map<Int, EpisodeMeta> = withContext(Dispatchers.IO) {
+        if (anilistId <= 0) return@withContext emptyMap()
+        val cached = anililiEpisodesCache.get(anilistId)
+        if (cached != null) return@withContext cached
+
+        val bucket = anilistId / 1000
+        val url = "https://cdn.jsdelivr.net/gh/pommieyewear/media-index@main/data/anime/$bucket/$anilistId/episodes.json"
+        val resultMap = mutableMapOf<Int, EpisodeMeta>()
+        try {
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .addHeader("Accept", "application/json")
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string() ?: return@use
+                    val arr = org.json.JSONArray(body)
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.optJSONObject(i) ?: continue
+                        val num = obj.optDouble("number", (i + 1).toDouble()).toInt()
+                        val still = obj.optString("still", "").trim()
+                        val title = obj.optString("title", "Episode $num").trim()
+                        val overview = obj.optString("overview", "").trim()
+                        val airDate = obj.optString("air_date", "").trim()
+                        val runtime = obj.optInt("runtime", 24)
+                        if (num > 0) {
+                            resultMap[num] = EpisodeMeta(
+                                title = title.ifEmpty { "Episode $num" },
+                                imageUrl = if (still.isNotEmpty() && !still.equals("null", ignoreCase = true)) still else "",
+                                airdate = airDate,
+                                seasonNumber = 1,
+                                episodeNumber = num,
+                                overview = overview,
+                                runtime = runtime,
+                                isFiller = false
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        if (resultMap.isNotEmpty()) {
+            anililiEpisodesCache.put(anilistId, resultMap)
+        }
+        resultMap
     }
 
     private val animeCoverCache = android.util.LruCache<Int, String>(100)
 
     suspend fun getAnimeCover(anilistId: Int): String = withContext(Dispatchers.IO) {
+        if (anilistId == 21870) return@withContext "https://image.tmdb.org/t/p/w500/6Csk5iIk4q9hfPPrQLl1dox9EVr.jpg"
+        if (anilistId == 1403) return@withContext "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/1403.jpg"
+        if (anilistId == 196750) return@withContext "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx196750-qwkwqdNMXIwD.png"
         if (ShinChanEpisodeProvider.isShinChan(anilistId)) {
             return@withContext ShinChanEpisodeProvider.SHINCHAN_POSTER_URL
         }
@@ -548,7 +1439,7 @@ object AniZipClient {
         if (tmdbId != null && tmdbId > 0) {
             // Check direct show details first
             try {
-                val detailsUrl = "https://api.themoviedb.org/3/$targetType/$tmdbId?api_key=5a7f00b2528e0278ae94cd386deb6116"
+                val detailsUrl = "https://api.themoviedb.org/3/$targetType/$tmdbId?api_key=$TMDB_API_KEY"
                 val req = Request.Builder().url(detailsUrl).build()
                 client.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
@@ -563,7 +1454,7 @@ object AniZipClient {
                 }
             } catch (_: Exception) {}
 
-            val tmdbUrl = "https://api.themoviedb.org/3/$targetType/$tmdbId/images?api_key=5a7f00b2528e0278ae94cd386deb6116"
+            val tmdbUrl = "https://api.themoviedb.org/3/$targetType/$tmdbId/images?api_key=$TMDB_API_KEY"
             val tmdbRequest = Request.Builder().url(tmdbUrl).build()
             try {
                 client.newCall(tmdbRequest).execute().use { tmdbResponse ->
@@ -713,7 +1604,7 @@ object AniZipClient {
     private fun verifyTmdbIsAnime(tmdbId: Int, mediaType: String): String? {
         if (tmdbId <= 0) return null
         try {
-            val tmdbUrl = "https://api.themoviedb.org/3/$mediaType/$tmdbId?api_key=5a7f00b2528e0278ae94cd386deb6116"
+            val tmdbUrl = "https://api.themoviedb.org/3/$mediaType/$tmdbId?api_key=$TMDB_API_KEY"
             val request = Request.Builder().url(tmdbUrl).build()
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
@@ -810,6 +1701,20 @@ object AniZipClient {
                 return@withContext verified
             }
         }
+        val staticTvTmdb = AnimeMovieTmdbMapping.getTvTmdbId(anilistId)
+        if (staticTvTmdb != null && staticTvTmdb > 0) {
+            val verified = verifyTmdbIsAnime(staticTvTmdb, "tv")
+            if (!verified.isNullOrEmpty()) {
+                return@withContext verified
+            }
+        }
+        val longRunningTmdb = getLongRunningTmdbId(anilistId)
+        if (longRunningTmdb != null && longRunningTmdb > 0) {
+            val verified = verifyTmdbIsAnime(longRunningTmdb, "tv")
+            if (!verified.isNullOrEmpty()) {
+                return@withContext verified
+            }
+        }
         val targetMediaType = if (isMovie || staticMovieTmdb != null) "movie" else "tv"
         try {
             // Step 1: Check AniZip mapping with Anime Verification (Animation genre / Japan country & strict media type)
@@ -864,6 +1769,8 @@ object AniZipClient {
                     return@withContext altBackdrop
                 }
             }
+
+
         } catch (e: Exception) {
             android.util.Log.e("AniZipClient", "getTmdbBackdropUrl error for $anilistId: ${e.message}", e)
         }
@@ -901,7 +1808,7 @@ object AniZipClient {
         return@withContext getTvdbBackdropUrl(anilistId)
     }
 
-    suspend fun getBestBackdropUrl(anilistId: Int, anilistBanner: String = "", isMovie: Boolean = false): String = withContext(Dispatchers.IO) {
+    suspend fun getBestBackdropUrl(anilistId: Int, anilistBanner: String = "", isMovie: Boolean = false, title: String = ""): String = withContext(Dispatchers.IO) {
         if (ShinChanEpisodeProvider.isShinChan(anilistId)) {
             return@withContext ShinChanEpisodeProvider.SHINCHAN_BACKDROP_URL
         }
@@ -947,7 +1854,7 @@ object AniZipClient {
 
     suspend fun getTmdbAllEpisodes(tmdbId: Int): Map<Int, EpisodeMeta> = withContext(Dispatchers.IO) {
         val resultMap = java.util.concurrent.ConcurrentHashMap<Int, EpisodeMeta>()
-        val mainUrl = "https://api.themoviedb.org/3/tv/$tmdbId?api_key=5a7f00b2528e0278ae94cd386deb6116"
+        val mainUrl = "https://api.themoviedb.org/3/tv/$tmdbId?api_key=$TMDB_API_KEY"
         val mainRequest = Request.Builder().url(mainUrl).build()
         try {
             client.newCall(mainRequest).execute().use { mainResponse ->
@@ -983,7 +1890,7 @@ object AniZipClient {
                                 val startAbs = triple.second
                                 
                                 val job = async {
-                                    val seasonUrl = "https://api.themoviedb.org/3/tv/$tmdbId/season/$seasonNum?api_key=5a7f00b2528e0278ae94cd386deb6116"
+                                    val seasonUrl = "https://api.themoviedb.org/3/tv/$tmdbId/season/$seasonNum?api_key=$TMDB_API_KEY"
                                     val seasonRequest = Request.Builder().url(seasonUrl).build()
                                     try {
                                         client.newCall(seasonRequest).execute().use { seasonResponse ->
@@ -1038,15 +1945,13 @@ object AniZipClient {
 
     fun getLongRunningTmdbId(anilistId: Int): Int? {
         if (ShinChanEpisodeProvider.isShinChan(anilistId)) return null
-        return AnimeMovieTmdbMapping.getMovieTmdbId(anilistId) ?: when (anilistId) {
+        if (com.lagradost.cloudstream3.ui.animebox.extractors.PokemonHindiExtractor.isPokemon(anilistId)) return null
+        return AnimeMovieTmdbMapping.getTvTmdbId(anilistId) ?: when (anilistId) {
         21 -> 37854    // One Piece
         235 -> 30983   // Detective Conan / Case Closed
         20 -> 46260    // Naruto
         1735 -> 31910  // Naruto Shippuden
         269 -> 30984   // Bleach
-        918 -> 57243   // Gintama
-        527 -> 60572   // Pokemon
-        158871 -> 220150 // Pokemon Horizons: The Series (2023)
         12031 -> 61663 // Fairy Tail
         223 -> 34747   // Dragon Ball
         813 -> 12697   // Dragon Ball Z
@@ -1092,6 +1997,41 @@ object AniZipClient {
         else -> null
     }
 }
+
+    fun isLongRunningSeries(anilistId: Int): Boolean = getLongRunningTmdbId(anilistId) != null
+
+    data class TmdbSearchResult(val tmdbId: Int)
+
+    suspend fun searchTmdbAnime(title: String, isMovie: Boolean = false): TmdbSearchResult? = withContext(Dispatchers.IO) {
+        if (title.isBlank()) return@withContext null
+        try {
+            val type = if (isMovie) "movie" else "tv"
+            val enc = java.net.URLEncoder.encode(title, "UTF-8")
+            val url = "https://api.themoviedb.org/3/search/$type?api_key=$TMDB_API_KEY&query=$enc"
+            val req = Request.Builder().url(url).build()
+            val res = client.newCall(req).execute()
+            val body = res.body?.string() ?: return@withContext null
+            val json = JSONObject(body)
+            val results = json.optJSONArray("results") ?: return@withContext null
+            if (results.length() > 0) {
+                val id = results.getJSONObject(0).optInt("id", 0)
+                if (id > 0) TmdbSearchResult(id) else null
+            } else null
+        } catch (_: Exception) { null }
+    }
+
+    suspend fun getTmdbOverview(tmdbId: Int, isMovie: Boolean = false): String = withContext(Dispatchers.IO) {
+        if (tmdbId <= 0) return@withContext ""
+        try {
+            val type = if (isMovie) "movie" else "tv"
+            val url = "https://api.themoviedb.org/3/$type/$tmdbId?api_key=$TMDB_API_KEY"
+            val req = Request.Builder().url(url).build()
+            val res = client.newCall(req).execute()
+            val body = res.body?.string() ?: return@withContext ""
+            val json = JSONObject(body)
+            json.optString("overview", "")
+        } catch (_: Exception) { "" }
+    }
 }
 
 data class EpisodeMeta(

@@ -19,9 +19,10 @@ class M3u8Helper {
             referer: String,
             quality: Int? = null,
             headers: Map<String, String> = mapOf(),
-            name: String = source
+            name: String = source,
+            subtitleCallback: ((com.lagradost.cloudstream3.SubtitleFile) -> Unit)? = null
         ): List<ExtractorLink> {
-            return M3u8Helper2.generateM3u8(source, streamUrl, referer, quality, headers, name)
+            return M3u8Helper2.generateM3u8(source, streamUrl, referer, quality, headers, name, subtitleCallback)
         }
     }
 
@@ -49,14 +50,16 @@ object M3u8Helper2 {
         referer: String,
         quality: Int? = null,
         headers: Map<String, String> = mapOf(),
-        name: String = source
+        name: String = source,
+        subtitleCallback: ((com.lagradost.cloudstream3.SubtitleFile) -> Unit)? = null
     ): List<ExtractorLink> {
         return m3u8Generation(
             M3u8Helper.M3u8Stream(
                 streamUrl = streamUrl,
                 quality = quality,
                 headers = headers,
-            ), true
+            ), true,
+            subtitleCallback = subtitleCallback
         )
             .map { stream ->
                 newExtractorLink(
@@ -124,11 +127,26 @@ object M3u8Helper2 {
     @Throws
     suspend fun m3u8Generation(
         m3u8: M3u8Helper.M3u8Stream,
-        returnThis: Boolean = true
+        returnThis: Boolean = true,
+        subtitleCallback: ((com.lagradost.cloudstream3.SubtitleFile) -> Unit)? = null
     ): List<M3u8Helper.M3u8Stream> {
         val list = mutableListOf<M3u8Helper.M3u8Stream>()
         val response = app.get(m3u8.streamUrl, headers = m3u8.headers, verify = false).text
         val parsed = HlsPlaylistParser.parse(m3u8.streamUrl, response)
+
+        if (parsed != null && subtitleCallback != null) {
+            parsed.subtitles.forEach { sub ->
+                val subUrl = sub.url.toString()
+                if (subUrl.isNotBlank()) {
+                    subtitleCallback.invoke(
+                        com.lagradost.cloudstream3.newSubtitleFile(
+                            sub.format.label ?: sub.format.language ?: "Subtitle",
+                            subUrl
+                        )
+                    )
+                }
+            }
+        }
 
         var anyFound = false
         if (parsed != null) {

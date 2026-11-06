@@ -32,7 +32,11 @@ object GoogleMlKitTranslatorManager {
      * Map ISO language code to Google ML Kit TranslateLanguage string.
      */
     fun mapLanguageCodeToMlKit(langCode: String): String? {
-        return when (langCode.lowercase()) {
+        val clean = langCode.trim().lowercase()
+            .removeSuffix("_pro")
+            .substringBefore("-")
+            .substringBefore("_")
+        return when (clean) {
             "en" -> TranslateLanguage.ENGLISH
             "es" -> TranslateLanguage.SPANISH
             "hi" -> TranslateLanguage.HINDI
@@ -51,7 +55,49 @@ object GoogleMlKitTranslatorManager {
             "pl" -> TranslateLanguage.POLISH
             "nl" -> TranslateLanguage.DUTCH
             "th" -> TranslateLanguage.THAI
-            else -> null
+            "bn" -> TranslateLanguage.BENGALI
+            "ta" -> TranslateLanguage.TAMIL
+            "te" -> TranslateLanguage.TELUGU
+            "mr" -> TranslateLanguage.MARATHI
+            "gu" -> TranslateLanguage.GUJARATI
+            "kn" -> TranslateLanguage.KANNADA
+            "ur" -> TranslateLanguage.URDU
+            "uk" -> TranslateLanguage.UKRAINIAN
+            "fa" -> TranslateLanguage.PERSIAN
+            "ms" -> TranslateLanguage.MALAY
+            "tl", "fil" -> TranslateLanguage.TAGALOG
+            else -> TranslateLanguage.fromLanguageTag(clean)
+        }
+    }
+
+    /**
+     * Translates a single text string from source language to target language.
+     */
+    suspend fun translateText(
+        text: String,
+        sourceLangCode: String = "ja",
+        targetLangCode: String = "en"
+    ): String? = withContext(Dispatchers.IO) {
+        val src = mapLanguageCodeToMlKit(sourceLangCode) ?: TranslateLanguage.JAPANESE
+        val tgt = mapLanguageCodeToMlKit(targetLangCode) ?: TranslateLanguage.ENGLISH
+        if (src == tgt) return@withContext text
+        try {
+            val options = TranslatorOptions.Builder()
+                .setSourceLanguage(src)
+                .setTargetLanguage(tgt)
+                .build()
+            val translator = Translation.getClient(options)
+            val conditions = DownloadConditions.Builder().build()
+            translator.downloadModelIfNeeded(conditions).awaitTask()
+            val res = translator.translate(text).awaitTask().trim()
+            translator.close()
+            if (res.isNotBlank()) res else AiSubtitleModelManager.translateSingleText(text, targetLangCode.removeSuffix("_pro"), sourceLangCode.removeSuffix("_pro"))
+        } catch (_: Throwable) {
+            try {
+                AiSubtitleModelManager.translateSingleText(text, targetLangCode.removeSuffix("_pro"), sourceLangCode.removeSuffix("_pro"))
+            } catch (_: Throwable) {
+                null
+            }
         }
     }
 
@@ -79,13 +125,16 @@ object GoogleMlKitTranslatorManager {
     ): Boolean = withContext(Dispatchers.IO) {
         val mlKitLang = mapLanguageCodeToMlKit(langCode) ?: return@withContext false
         try {
-            onProgress(10)
+            withContext(Dispatchers.Main) { onProgress(10) }
             val model = TranslateRemoteModel.Builder(mlKitLang).build()
+            val enModel = TranslateRemoteModel.Builder(TranslateLanguage.ENGLISH).build()
             val modelManager = RemoteModelManager.getInstance()
             val conditions = DownloadConditions.Builder().build()
-            onProgress(30)
+            withContext(Dispatchers.Main) { onProgress(30) }
+            modelManager.download(enModel, conditions).awaitTask()
+            withContext(Dispatchers.Main) { onProgress(65) }
             modelManager.download(model, conditions).awaitTask()
-            onProgress(100)
+            withContext(Dispatchers.Main) { onProgress(100) }
             true
         } catch (e: Exception) {
             Log.e(TAG, "downloadModel error for $langCode", e)
@@ -108,12 +157,29 @@ object GoogleMlKitTranslatorManager {
         coverUrl: String = "",
         onProgress: ((cur: Int, total: Int, tempPath: String, cues: List<LiveSubtitleCue>) -> Unit)? = null
     ): String? = withContext(Dispatchers.IO) {
-        val mlKitTargetLang = mapLanguageCodeToMlKit(targetLangCode) ?: return@withContext null
+        val cleanLangCode = targetLangCode.trim().lowercase().removeSuffix("_pro")
+        val mlKitTargetLang = mapLanguageCodeToMlKit(cleanLangCode) ?: return@withContext null
 
-        val rawVtt = fetchVttContent(context, vttUrlOrPath, hlsUrl, referer)
-        if (rawVtt.isBlank() || rawVtt.length < 50) return@withContext null
+        var rawVtt = fetchVttContent(context, vttUrlOrPath, hlsUrl, referer)
+        if (rawVtt.isBlank() || rawVtt.length < 50) {
+            rawVtt = SenseVoiceAudioTranscriber.fetchEpisodeTranscript(
+                context,
+                hlsUrl,
+                referer,
+                anilistId,
+                episodeNum,
+                animeTitle,
+                vttUrlOrPath
+            ) ?: ""
+        }
+        if (rawVtt.isBlank() || rawVtt.length < 20) return@withContext null
 
-        val originalCues = AiSubtitleModelManager.parseVttToCues(rawVtt)
+        val normalizedVtt = rawVtt
+            .replace("\r\n", "\n")
+            .replace(Regex("""(\d{2}:\d{2}:\d{2}),(\d{3})"""), "$1.$2")
+            .replace(Regex("""(\d{2}:\d{2}),(\d{3})"""), "$1.$2")
+
+        val originalCues = AiSubtitleModelManager.parseVttToCues(normalizedVtt)
         if (originalCues.isEmpty()) return@withContext null
 
         val options = TranslatorOptions.Builder()
@@ -123,13 +189,19 @@ object GoogleMlKitTranslatorManager {
 
         val translator = Translation.getClient(options)
         try {
-            val conditions = DownloadConditions.Builder().build()
-            translator.downloadModelIfNeeded(conditions).awaitTask()
+            var mlKitReady = false
+            try {
+                val conditions = DownloadConditions.Builder().build()
+                translator.downloadModelIfNeeded(conditions).awaitTask()
+                mlKitReady = true
+            } catch (dlErr: Throwable) {
+                Log.w(TAG, "ML Kit model download/init fallback to cloud neural translator", dlErr)
+            }
 
             val translatedCues = mutableListOf<LiveSubtitleCue>()
             val total = originalCues.size
 
-            val outFile = AiSubtitleModelManager.getSavedSubtitleFile(context, anilistId, episodeNum, targetLangCode)
+            val outFile = AiSubtitleModelManager.getSavedSubtitleFile(context, anilistId, episodeNum, cleanLangCode)
             val tempProgressFile = File(context.cacheDir, "mlkit_trans_tmp_${System.currentTimeMillis()}.vtt")
             val sb = StringBuilder("WEBVTT\n\n")
 
@@ -142,10 +214,22 @@ object GoogleMlKitTranslatorManager {
                     val pureLetters = origText.replace(Regex("""[.\s\dots…～・,;:!?_\-—ー。、\s]"""), "")
                     if (pureLetters.isNotBlank()) {
                         try {
-                            transText = translator.translate(origText).awaitTask().trim()
+                            transText = if (mlKitReady) {
+                                translator.translate(origText).awaitTask().trim()
+                            } else {
+                                AiSubtitleModelManager.translateSingleText(origText, cleanLangCode, "en").trim()
+                            }
+                            if (transText.isBlank() || (transText == origText && cleanLangCode != "en")) {
+                                val fallback = AiSubtitleModelManager.translateSingleText(origText, cleanLangCode, "en").trim()
+                                if (fallback.isNotBlank()) transText = fallback
+                            }
                             transText = transText.replace(Regex("""^[A-Za-z0-9_\s]{2,20}:\s*"""), "")
                         } catch (_: Throwable) {
-                            transText = origText
+                            transText = try {
+                                AiSubtitleModelManager.translateSingleText(origText, cleanLangCode, "en").trim()
+                            } catch (_: Throwable) {
+                                origText
+                            }
                         }
                     }
                 }
@@ -169,14 +253,17 @@ object GoogleMlKitTranslatorManager {
                     try {
                         tempProgressFile.writeText(sb.toString())
                     } catch (_: Throwable) {}
-                    onProgress?.invoke(i + 1, total, tempProgressFile.absolutePath, ArrayList(translatedCues))
+                    val snapshot = ArrayList(translatedCues)
+                    withContext(Dispatchers.Main) {
+                        onProgress?.invoke(i + 1, total, tempProgressFile.absolutePath, snapshot)
+                    }
                 }
             }
 
-            translator.close()
+            try { translator.close() } catch (_: Throwable) {}
             try { tempProgressFile.delete() } catch (_: Throwable) {}
 
-            if (translatedCues.size >= 5) {
+            if (translatedCues.isNotEmpty()) {
                 outFile.parentFile?.mkdirs()
                 outFile.writeText(sb.toString())
 
@@ -187,8 +274,8 @@ object GoogleMlKitTranslatorManager {
                         anilistId = anilistId,
                         episodeNum = episodeNum,
                         animeTitle = animeTitle,
-                        langCode = targetLangCode,
-                        langName = AiSubtitleModelManager.getLanguageName(targetLangCode),
+                        langCode = cleanLangCode,
+                        langName = AiSubtitleModelManager.getLanguageName(cleanLangCode),
                         fileSizeBytes = outFile.length(),
                         lastModified = System.currentTimeMillis(),
                         coverUrl = coverUrl
@@ -212,9 +299,20 @@ object GoogleMlKitTranslatorManager {
         return try {
             when {
                 urlOrPath.startsWith("http://") || urlOrPath.startsWith("https://") -> {
-                    val client = okhttp3.OkHttpClient()
-                    val req = okhttp3.Request.Builder().url(urlOrPath).build()
-                    client.newCall(req).execute().use { it.body?.string() ?: "" }
+                    val client = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxDnsHelper.applyDns(
+                        okhttp3.OkHttpClient.Builder()
+                            .connectTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
+                            .readTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
+                    ).build()
+                    val reqBuilder = okhttp3.Request.Builder()
+                        .url(urlOrPath)
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                    if (referer.isNotBlank()) {
+                        reqBuilder.header("Referer", referer)
+                    }
+                    client.newCall(reqBuilder.build()).execute().use { resp ->
+                        if (resp.isSuccessful) resp.body?.string() ?: "" else ""
+                    }
                 }
                 urlOrPath.startsWith("content://") -> {
                     context.contentResolver.openInputStream(android.net.Uri.parse(urlOrPath))?.bufferedReader()?.use { it.readText() } ?: ""

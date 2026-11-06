@@ -5,11 +5,15 @@ import android.content.SharedPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -28,7 +32,12 @@ data class LiveSubtitleCue(
 data class StreamAudioSegment(
     val url: String,
     val startMs: Long,
-    val endMs: Long
+    val endMs: Long,
+    val initUrl: String? = null,
+    /** Standard HLS AES-128 key metadata, if the media segment is encrypted. */
+    val encryptionKeyUrl: String? = null,
+    val encryptionIvHex: String? = null,
+    val mediaSequence: Long = 0L
 )
 
 data class SavedSubtitleInfo(
@@ -527,7 +536,19 @@ object AiSubtitleModelManager {
                         .replace(Regex("""\{[^}]*\}"""), "")
                         .trim()
 
-                    if (startMs >= 0 && endMs > startMs && fullText.isNotBlank()) {
+                    val isSpriteCoordinate = fullText.contains("xywh=", ignoreCase = true) ||
+                            fullText.contains("sprite_", ignoreCase = true) ||
+                            fullText.contains("thumbnails/", ignoreCase = true) ||
+                            fullText.contains(".webp", ignoreCase = true) ||
+                            fullText.contains(".jpg#", ignoreCase = true) ||
+                            fullText.contains(".png#", ignoreCase = true) ||
+                            fullText.contains("transcribe spoken", ignoreCase = true) ||
+                            fullText.contains("transcribe the spoken", ignoreCase = true) ||
+                            fullText.contains("character dialogue only", ignoreCase = true) ||
+                            fullText.contains("spoken character dialogue", ignoreCase = true) ||
+                            fullText.contains("ignore opening/ending", ignoreCase = true)
+
+                    if (!isSpriteCoordinate && startMs >= 0 && endMs > startMs && fullText.isNotBlank()) {
                         cues.add(LiveSubtitleCue(startMs, endMs, fullText, fullText))
                     }
                     continue
@@ -996,33 +1017,26 @@ object AiSubtitleModelManager {
             // Google ML Kit on-device translation model (~30MB)
             try {
                 val totalBytes = info.sizeBytes
-                for (pct in listOf(15, 35, 65, 85)) {
-                    val downloaded = (totalBytes * pct) / 100
-                    val prog = ModelDownloadProgress(
-                        langName = info.langName,
-                        langCode = info.langCode,
-                        percent = pct,
-                        downloadedBytes = downloaded,
-                        totalBytes = totalBytes,
-                        speedBps = 1024 * 1024L
-                    )
-                    _downloadProgressFlow.value = prog
-                    withContext(Dispatchers.Main) {
-                        onProgress?.invoke(prog)
+                var currentPct = 10
+                val dlSuccess = coroutineScope {
+                    val progressJob = launch {
+                        while (isActive && currentPct < 92) {
+                            currentPct = (currentPct + 3).coerceAtMost(92)
+                            val downloaded = (totalBytes * currentPct) / 100
+                            reportProgress(currentPct, downloaded, totalBytes, 1024 * 1024L)
+                            delay(250)
+                        }
                     }
-                    delay(80)
-                }
 
-                val dlSuccess = GoogleMlKitTranslatorManager.downloadModel(langCode) { mlPct ->
-                    val prog = ModelDownloadProgress(
-                        langName = info.langName,
-                        langCode = info.langCode,
-                        percent = mlPct,
-                        downloadedBytes = (totalBytes * mlPct) / 100,
-                        totalBytes = totalBytes,
-                        speedBps = 1024 * 1024L
-                    )
-                    _downloadProgressFlow.value = prog
+                    val res = withTimeoutOrNull(45_000L) {
+                        GoogleMlKitTranslatorManager.downloadModel(langCode) { mlPct ->
+                            val pct = maxOf(currentPct, mlPct).coerceIn(0, 100)
+                            reportProgress(pct, (totalBytes * pct) / 100, totalBytes, 1024 * 1024L)
+                        }
+                    } ?: false
+
+                    progressJob.cancel()
+                    res
                 }
 
                 if (dlSuccess) {

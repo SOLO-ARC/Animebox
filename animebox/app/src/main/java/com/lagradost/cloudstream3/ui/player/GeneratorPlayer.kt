@@ -196,16 +196,13 @@ class GeneratorPlayer : FullScreenPlayer() {
     private fun setSubtitles(subtitle: SubtitleData?, userInitiated: Boolean): Boolean {
         // If subtitle is changed and user initiated -> Save the language
         if (subtitle != currentSelectedSubtitles && userInitiated) {
-            val subtitleLanguageTagIETF = if (subtitle == null) {
-                "" // -> No Subtitles
-            } else {
-                subtitle.getIETF_tag()
-            }
-
-            if (subtitleLanguageTagIETF != null) {
-                Log.i(TAG, "Set SUBTITLE_AUTO_SELECT_KEY to '$subtitleLanguageTagIETF'")
-                setKey(SUBTITLE_AUTO_SELECT_KEY, subtitleLanguageTagIETF)
-                preferredAutoSelectSubtitles = subtitleLanguageTagIETF
+            if (subtitle != null) {
+                val subtitleLanguageTagIETF = subtitle.getIETF_tag()
+                if (subtitleLanguageTagIETF != null) {
+                    Log.i(TAG, "Set SUBTITLE_AUTO_SELECT_KEY to '$subtitleLanguageTagIETF'")
+                    setKey(SUBTITLE_AUTO_SELECT_KEY, subtitleLanguageTagIETF)
+                    preferredAutoSelectSubtitles = subtitleLanguageTagIETF
+                }
             }
         }
 
@@ -1686,9 +1683,9 @@ class GeneratorPlayer : FullScreenPlayer() {
                 val settingsManager = PreferenceManager.getDefaultSharedPreferences(ctx)
                 settingsManager.getBoolean(
                     ctx.getString(R.string.enable_skip_op_from_database),
-                    true
+                    false
                 )
-            } ?: true
+            } ?: false
             if (fetchStamps)
                 viewModel.loadStamps(duration)
         }
@@ -1748,53 +1745,76 @@ class GeneratorPlayer : FullScreenPlayer() {
     private fun getAutoSelectSubtitle(
         subtitles: Set<SubtitleData>, settings: Boolean, downloads: Boolean
     ): SubtitleData? {
-        val langCode = preferredAutoSelectSubtitles
+        val targetLangCode = preferredAutoSelectSubtitles.takeIf { !it.isNullOrBlank() }
+            ?: getAutoSelectLanguageTagIETF().takeIf { !it.isNullOrBlank() }
+            ?: "en"
+
+        val sorted = sortSubs(subtitles)
+        if (sorted.isEmpty()) return null
+
         if (downloads) {
-            val downloadedSubs = sortSubs(subtitles).filter { it.origin == SubtitleOrigin.DOWNLOADED_FILE }
+            val downloadedSubs = sorted.filter { it.origin == SubtitleOrigin.DOWNLOADED_FILE }
             if (downloadedSubs.isNotEmpty()) {
-                if (!langCode.isNullOrEmpty()) {
-                    downloadedSubs.firstOrNull {
-                        it.matchesLanguageCode(langCode) ||
-                                it.getIETF_tag()?.equals(langCode, ignoreCase = true) == true ||
-                                it.languageCode.equals(langCode, ignoreCase = true) ||
-                                fromTagToEnglishLanguageName(langCode)?.let { eng ->
-                                    it.originalName.contains(eng, ignoreCase = true) || it.name.contains(eng, ignoreCase = true)
-                                } == true ||
-                                it.originalName.contains(langCode, ignoreCase = true) ||
-                                it.name.contains(langCode, ignoreCase = true)
-                    }?.let { return it }
-                }
+                downloadedSubs.firstOrNull {
+                    it.matchesLanguageCode(targetLangCode) ||
+                            it.getIETF_tag()?.equals(targetLangCode, ignoreCase = true) == true ||
+                            it.languageCode.equals(targetLangCode, ignoreCase = true) ||
+                            fromTagToEnglishLanguageName(targetLangCode)?.let { eng ->
+                                it.originalName.contains(eng, ignoreCase = true) || it.name.contains(eng, ignoreCase = true)
+                            } == true ||
+                            it.originalName.contains(targetLangCode, ignoreCase = true) ||
+                            it.name.contains(targetLangCode, ignoreCase = true) ||
+                            (targetLangCode == "en" && (it.originalName.contains("eng", ignoreCase = true) || it.name.contains("eng", ignoreCase = true)))
+                }?.let { return it }
                 return downloadedSubs.first()
             }
         }
 
-        if (!settings || langCode.isNullOrEmpty()) return null
+        if (!settings) return null
 
-        return sortSubs(subtitles).firstOrNull {
-            it.matchesLanguageCode(langCode) ||
-                    it.getIETF_tag()?.equals(langCode, ignoreCase = true) == true ||
-                    it.languageCode.equals(langCode, ignoreCase = true) ||
-                    fromTagToEnglishLanguageName(langCode)?.let { eng ->
+        // 1. Try matching preferred/target language code
+        sorted.firstOrNull {
+            it.matchesLanguageCode(targetLangCode) ||
+                    it.getIETF_tag()?.equals(targetLangCode, ignoreCase = true) == true ||
+                    it.languageCode.equals(targetLangCode, ignoreCase = true) ||
+                    fromTagToEnglishLanguageName(targetLangCode)?.let { eng ->
                         it.originalName.contains(eng, ignoreCase = true) || it.name.contains(eng, ignoreCase = true)
-                    } == true
+                    } == true ||
+                    it.originalName.contains(targetLangCode, ignoreCase = true) ||
+                    it.name.contains(targetLangCode, ignoreCase = true) ||
+                    (targetLangCode == "en" && (it.originalName.contains("eng", ignoreCase = true) || it.name.contains("eng", ignoreCase = true)))
+        }?.let { return it }
+
+        // 2. Fallback: If target is "en" or auto preference is active, select any English subtitle or VTT subtitle
+        return sorted.firstOrNull {
+            it.getIETF_tag() == "en" ||
+                    it.languageCode?.lowercase()?.startsWith("en") == true ||
+                    it.originalName.contains("english", ignoreCase = true) ||
+                    it.originalName.contains("eng", ignoreCase = true) ||
+                    it.name.contains("english", ignoreCase = true) ||
+                    it.name.contains("eng", ignoreCase = true) ||
+                    it.url.lowercase().contains("en.vtt") ||
+                    it.url.lowercase().contains("eng.vtt") ||
+                    it.url.lowercase().contains("english.vtt") ||
+                    it.mimeType == androidx.media3.common.MimeTypes.TEXT_VTT
         }
     }
 
     private fun autoSelectFromSettings(): Boolean {
         // auto select subtitle based on settings
-        val langCode = preferredAutoSelectSubtitles
+        val langCode = preferredAutoSelectSubtitles.takeIf { !it.isNullOrBlank() } ?: getAutoSelectLanguageTagIETF()
         val current = player.getCurrentPreferredSubtitle()
         Log.i(TAG, "autoSelectFromSettings = $current")
         context?.let { ctx ->
             // Only use the player preferred subtitle if it matches the available language
-            if (current != null && (langCode == null || current.matchesLanguageCode(langCode))) {
+            if (current != null && current.matchesLanguageCode(langCode)) {
                 if (setSubtitles(current, false)) {
                     player.saveData()
                     player.reloadPlayer(ctx)
                     player.handleEvent(CSPlayerEvent.Play)
                     return true
                 }
-            } else if (!langCode.isNullOrEmpty()) {
+            } else {
                 getAutoSelectSubtitle(
                     viewModel.state.subtitles, settings = true, downloads = false
                 )?.let { sub ->

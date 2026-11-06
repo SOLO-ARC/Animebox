@@ -1,3 +1,6 @@
+# Other local projects in workspace
+anidash/
+__pycache__/
 Icon-Video Player/
 clean-kotlin-blueprint/
 anime-download-hub-main/
@@ -11,12 +14,15 @@ lovable api/
 multimoviesapi/
 Animestudio's logo/
 .netlify/
-
-# Extractors and proprietary download engines
-animebox/app/src/main/java/com/lagradost/cloudstream3/ui/animebox/extractors/
-animebox/app/src/main/java/com/lagradost/cloudstream3/ui/animebox/download/
-animebox/app/src/main/java/com/lagradost/cloudstream3/ui/animebox/api/CustomStreamManager.kt
-animebox/app/src/main/assets/shinchan_episodes.json
+Anilili-project/
+AnimeBox-Shareable/
+FireFly-TV-APP/
+Multi-language anime api/
+aniyomi-main/
+player2_showcase/
+referenceappforanime4k/
+audio_enhancement_testing_audio.mp3
+bunnywalker_girl.webp
 
 # Scraping & Streaming Research / Reverse-Engineering Scripts & Backends
 *.py
@@ -32,10 +38,16 @@ Anivexa-API-main/
 MiruroAPI-main/
 reference_docchi_players/
 reference_docchi_stremio_addon/
-*.sql
-*.json
 animebox/*.html
 
+# SQL and JSON rules
+*.sql
+!supabase_setup.sql
+!supabase/**/*.sql
+*.json
+!animebox/app/src/main/assets/**/*.json
+
+# Images & Assets
 *.png
 !fireflytransparentlogo.png
 !FireFlyHomescreenlogo.png
@@ -46,10 +58,15 @@ animebox/*.html
 !Animebox website/**/*.jpg
 !Animebox website/**/*.svg
 !Animebox website/**/*.webp
+!**/src/main/res/**/*.png
+!**/src/main/res/**/*.webp
+
 *.jpg
+*.jpeg
 !app showcase screenshots/*.jpg
 !Animebox website/**/*.jpg
-*.jpeg
+!**/src/main/res/**/*.jpg
+!**/src/main/res/**/*.jpeg
 
 # OS & IDE
 .idea/
@@ -62,9 +79,10 @@ replay_pid*.log
 
 # Gradle & Build artifacts
 .gradle/
+**/build/
 build/
 app/build/
 library/build/
 *.apk
 *.aar
-
+local.properties

@@ -25,6 +25,7 @@ import com.lagradost.cloudstream3.extractors.Bysezejataos
 import com.lagradost.cloudstream3.extractors.ByseBuho
 import com.lagradost.cloudstream3.extractors.ByseVepoin
 import com.lagradost.cloudstream3.extractors.ByseQekaho
+import com.lagradost.cloudstream3.extractors.ByseFujedu
 import com.lagradost.cloudstream3.extractors.Cavanhabg
 import com.lagradost.cloudstream3.extractors.Cda
 import com.lagradost.cloudstream3.extractors.Cdnplayer
@@ -1320,6 +1321,7 @@ val extractorApis: AtomicMutableList<ExtractorApi> = atomicListOf(
     GUpload(),
     HlsWish(),
     ByseQekaho(),
+    ByseFujedu(),
     Flyfile(),
     Firestream(),
     Vids(),

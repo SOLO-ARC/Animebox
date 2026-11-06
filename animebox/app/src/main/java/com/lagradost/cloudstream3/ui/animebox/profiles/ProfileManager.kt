@@ -7,7 +7,8 @@ import org.json.JSONObject
 data class UserProfile(
     val id: String,
     val name: String,
-    val avatarUrl: String
+    val avatarUrl: String,
+    val decorationUrl: String = ""
 )
 
 object ProfileManager {
@@ -35,8 +36,8 @@ object ProfileManager {
 
     fun getProfiles(context: Context): List<UserProfile> {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val guestAvatar = "android.resource://" + context.packageName + "/drawable/images"
-        val guestProfile = UserProfile("guest", "Guest", guestAvatar)
+        val guestAvatar = "android.resource://" + context.packageName + "/drawable/default_profile_picture"
+        val guestProfile = UserProfile("guest", "Guest", guestAvatar, "")
         
         val jsonStr = prefs.getString(KEY_PROFILES_LIST, null)
         if (jsonStr.isNullOrEmpty()) {
@@ -49,10 +50,17 @@ object ProfileManager {
             val arr = JSONArray(jsonStr)
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
+                var avatarUrl = obj.optString("avatarUrl", "")
+                if (avatarUrl.isBlank() || avatarUrl.contains("drawable/images")) {
+                    avatarUrl = guestAvatar
+                } else {
+                    avatarUrl = SupabaseProfileIconsManager.normalizeAvatarUrl(avatarUrl, context)
+                }
                 list.add(UserProfile(
                     obj.getString("id"),
                     obj.getString("name"),
-                    obj.getString("avatarUrl")
+                    avatarUrl,
+                    obj.optString("decorationUrl", "")
                 ))
             }
         } catch (e: Exception) {
@@ -68,10 +76,12 @@ object ProfileManager {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val arr = JSONArray()
         for (profile in profiles) {
+            val normalizedAvatar = SupabaseProfileIconsManager.normalizeAvatarUrl(profile.avatarUrl, context)
             val obj = JSONObject().apply {
                 put("id", profile.id)
                 put("name", profile.name)
-                put("avatarUrl", profile.avatarUrl)
+                put("avatarUrl", normalizedAvatar)
+                put("decorationUrl", profile.decorationUrl)
             }
             arr.put(obj)
         }

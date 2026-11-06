@@ -1614,11 +1614,11 @@ class CS3IPlayer : IPlayer {
                         }
 
                         Player.STATE_ENDED -> {
-                            // Only play next episode if autoplay is on (default)
+                            // Only play next episode if autoplay is on
                             if (PreferenceManager.getDefaultSharedPreferences(context)
                                     ?.getBoolean(
                                         context.getString(R.string.autoplay_next_key),
-                                        true
+                                        false
                                     ) == true
                             ) {
                                 handleEvent(

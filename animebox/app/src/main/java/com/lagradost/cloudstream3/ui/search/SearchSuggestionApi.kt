@@ -1,5 +1,7 @@
 package com.lagradost.cloudstream3.ui.search
 
+import com.lagradost.cloudstream3.ui.animebox.api.AnimeBoxConfig
+
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.mvvm.logError
@@ -13,7 +15,7 @@ import kotlinx.serialization.Serializable
  */
 object SearchSuggestionApi {
     private const val TMDB_API_URL = "https://api.themoviedb.org/3/search/multi"
-    private const val TMDB_API_KEY = "e6333b32409e02a4a6eba6fb7ff866bb"
+    private val TMDB_API_KEY get() = AnimeBoxConfig.TMDB_API_KEY
     
     @Serializable
     data class TmdbSearchResult(

@@ -43,6 +43,10 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -58,7 +62,8 @@ data class SearchAnimeBrief(
     val id: Int,
     val title: String,
     val coverUrl: String,
-    val rating: String
+    val rating: String,
+    val isAdult: Boolean = false
 )
 
 class AnimeBoxSearchActivity : ComponentActivity() {
@@ -162,30 +167,136 @@ class AnimeBoxSearchActivity : ComponentActivity() {
             isLoading = true
             searchJob = coroutineScope.launch {
                 val response = AniListClient.getAnimeByGenre(genreName, 1)
-                searchResults = if (response != null) parseSearchResults(response) else emptyList()
+                searchResults = if (response != null) {
+                    parseSearchResults(response)
+                } else {
+                    com.lagradost.cloudstream3.ui.animebox.api.KitsuClient.getAnimeByGenre(genreName, 1).map {
+                        SearchAnimeBrief(
+                            id = it.id,
+                            title = it.title,
+                            coverUrl = it.coverUrl,
+                            rating = if (it.averageScore > 0) it.averageScore.toString() else ""
+                        )
+                    }
+                }
                 isLoading = false
             }
         }
 
-        val performSearch: (String) -> Unit = { targetQuery ->
+        var autoCorrectInfo by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+        val executeSearch: (String, Boolean) -> Unit = { targetQuery, forceOriginal ->
             searchJob?.cancel()
-            focusManager.clearFocus()
             activeStudio = ""
             activeGenre = ""
+            if (!forceOriginal) {
+                autoCorrectInfo = null
+            }
             if (targetQuery.isNotBlank()) {
                 isLoading = true
                 saveRecentQuery(targetQuery)
                 searchJob = coroutineScope.launch {
                     kotlinx.coroutines.delay(350L)
-                    val response = AniListClient.searchAnime(targetQuery)
-                    searchResults = if (response != null) parseSearchResults(response) else emptyList()
+
+                    // 1. Check for algorithmic typo correction
+                    val localFix = if (!forceOriginal) {
+                        com.lagradost.cloudstream3.ui.animebox.search.AnimeSearchCorrector.findLocalCorrection(targetQuery)
+                    } else null
+
+                    var parsed: List<SearchAnimeBrief> = emptyList()
+                    var usedCorrection: String? = null
+
+                    // If a valid correction exists (e.g. rezero sesiojh 4 -> rezero season 4), prioritize searching it
+                    if (localFix != null && !localFix.equals(targetQuery.trim(), ignoreCase = true)) {
+                        var correctedResp = AniListClient.searchAnime(localFix)
+                        var correctedParsed = if (correctedResp != null) parseSearchResults(correctedResp) else emptyList()
+                        if (correctedParsed.isEmpty()) {
+                            val kitsuList = com.lagradost.cloudstream3.ui.animebox.api.KitsuClient.searchAnime(localFix)
+                            correctedParsed = kitsuList.map {
+                                SearchAnimeBrief(
+                                    id = it.id,
+                                    title = it.title,
+                                    coverUrl = it.coverUrl,
+                                    rating = if (it.averageScore > 0) it.averageScore.toString() else ""
+                                )
+                            }
+                        }
+                        if (correctedParsed.isEmpty() && localFix.contains("season", ignoreCase = true)) {
+                            val baseQuery = localFix.replace(Regex("""season\s*\d+""", RegexOption.IGNORE_CASE), "").trim()
+                            if (baseQuery.isNotEmpty()) {
+                                val baseResp = AniListClient.searchAnime(baseQuery)
+                                if (baseResp != null) {
+                                    correctedParsed = parseSearchResults(baseResp)
+                                }
+                            }
+                        }
+                        if (correctedParsed.isNotEmpty()) {
+                            parsed = correctedParsed
+                            usedCorrection = localFix
+                        }
+                    }
+
+                    // 2. If no correction was used or yielded no results, query the targetQuery
+                    if (parsed.isEmpty()) {
+                        val response = AniListClient.searchAnime(targetQuery)
+                        parsed = if (response != null) {
+                            parseSearchResults(response)
+                        } else {
+                            com.lagradost.cloudstream3.ui.animebox.api.KitsuClient.searchAnime(targetQuery).map {
+                                SearchAnimeBrief(
+                                    id = it.id,
+                                    title = it.title,
+                                    coverUrl = it.coverUrl,
+                                    rating = if (it.averageScore > 0) it.averageScore.toString() else ""
+                                )
+                            }
+                        }
+                    }
+
+                    // 3. If targetQuery is empty and we haven't found a local fix, try AI fallback
+                    if (parsed.isEmpty() && !forceOriginal && usedCorrection == null) {
+                        val aiFix = com.lagradost.cloudstream3.ui.animebox.search.AnimeSearchCorrector.getAiSuggestedCorrection(context, targetQuery)
+                        if (aiFix != null && !aiFix.equals(targetQuery.trim(), ignoreCase = true)) {
+                            var aiResp = AniListClient.searchAnime(aiFix)
+                            var aiParsed = if (aiResp != null) parseSearchResults(aiResp) else emptyList()
+                            if (aiParsed.isEmpty()) {
+                                val kitsuList = com.lagradost.cloudstream3.ui.animebox.api.KitsuClient.searchAnime(aiFix)
+                                aiParsed = kitsuList.map {
+                                    SearchAnimeBrief(
+                                        id = it.id,
+                                        title = it.title,
+                                        coverUrl = it.coverUrl,
+                                        rating = if (it.averageScore > 0) it.averageScore.toString() else ""
+                                    )
+                                }
+                            }
+                            if (aiParsed.isNotEmpty()) {
+                                parsed = aiParsed
+                                usedCorrection = aiFix
+                            }
+                        }
+                    }
+
+                    // Set autocorrect banner state
+                    if (usedCorrection != null) {
+                        autoCorrectInfo = Pair(usedCorrection, targetQuery)
+                    } else if (localFix != null && !localFix.equals(targetQuery.trim(), ignoreCase = true)) {
+                        autoCorrectInfo = Pair(localFix, targetQuery)
+                    } else {
+                        autoCorrectInfo = null
+                    }
+
+                    searchResults = parsed
                     isLoading = false
                 }
             } else {
                 searchResults = emptyList()
+                autoCorrectInfo = null
                 isLoading = false
             }
         }
+
+        val performSearch: (String) -> Unit = { targetQuery -> executeSearch(targetQuery, false) }
 
         // Auto filter on initial load if studio is provided
         LaunchedEffect(initialStudio) {
@@ -197,21 +308,15 @@ class AnimeBoxSearchActivity : ComponentActivity() {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF141416))
+                .background(Color(0xFF090A0D))
         ) {
-            // Background search artwork image
+            // Background search artwork image with direct alpha blending for optimal GPU fillrate
             Image(
                 painter = painterResource(id = R.drawable.search_screen_bg),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
+                alpha = 0.12f,
                 modifier = Modifier.fillMaxSize()
-            )
-
-            // Black layer with 80% opacity over the background for increased contrast
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.80f))
             )
 
             Column(
@@ -270,7 +375,10 @@ class AnimeBoxSearchActivity : ComponentActivity() {
                                     if (it.isNotBlank()) {
                                         performSearch(it)
                                     } else {
+                                        searchJob?.cancel()
                                         searchResults = emptyList()
+                                        autoCorrectInfo = null
+                                        isLoading = false
                                     }
                                 },
                                 singleLine = true,
@@ -282,7 +390,12 @@ class AnimeBoxSearchActivity : ComponentActivity() {
                                     platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
                                 ),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                                keyboardActions = KeyboardActions(onSearch = { performSearch(query) }),
+                                keyboardActions = KeyboardActions(onSearch = { 
+                                    focusManager.clearFocus()
+                                    if (query.isNotBlank()) {
+                                        performSearch(query)
+                                    }
+                                }),
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxHeight(),
@@ -365,8 +478,10 @@ class AnimeBoxSearchActivity : ComponentActivity() {
                     }
                 } else {
                     // Genre Tags Horizontal Row (Standard AniList Genres, no borders)
-                    val staticGenres = listOf(
-                        "Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy", "Hentai",
+                    val adultEnabled = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAdultContentEnabled(this@AnimeBoxSearchActivity)
+                    val staticGenres = listOfNotNull(
+                        "Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy",
+                        if (adultEnabled) "Hentai" else null,
                         "Horror", "Mahou Shoujo", "Mecha", "Music", "Mystery", "Psychological",
                         "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller"
                     )
@@ -414,8 +529,16 @@ class AnimeBoxSearchActivity : ComponentActivity() {
                         CircularProgressIndicator(color = Color(0xFFFF6B00))
                     }
                 } else {
+                    val screenWidthDp = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp
+                    val searchGridCols = when {
+                        screenWidthDp >= 1000 -> 6
+                        screenWidthDp >= 750 -> 5
+                        screenWidthDp >= 550 -> 4
+                        else -> 3
+                    }
+
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
+                        columns = GridCells.Fixed(searchGridCols),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier
@@ -425,7 +548,7 @@ class AnimeBoxSearchActivity : ComponentActivity() {
                     ) {
                         // 1. Recent Searches (When query is empty)
                         if (query.isEmpty() && recentSearchesList.isNotEmpty()) {
-                            item(span = { GridItemSpan(3) }) {
+                            item(span = { GridItemSpan(searchGridCols) }) {
                                 Column {
                                     Row(
                                         modifier = Modifier
@@ -457,9 +580,9 @@ class AnimeBoxSearchActivity : ComponentActivity() {
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .clickable {
-                                                    query = recentText
-                                                    performSearch(recentText)
-                                                }
+                                                query = recentText
+                                                performSearch(recentText)
+                                            }
                                                 .padding(vertical = 8.dp),
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
@@ -486,47 +609,55 @@ class AnimeBoxSearchActivity : ComponentActivity() {
                             }
                         }
 
-                        // 2. Typeahead suggestions (when query is being typed - max 4 suggestions)
-                        if (query.isNotBlank() && searchResults.isNotEmpty()) {
-                            val suggestions = (listOf(query) + searchResults.map { it.title }).distinct().take(4)
-                            item(span = { GridItemSpan(3) }) {
-                                Column {
-                                    suggestions.forEach { suggestionText ->
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable {
-                                                    query = suggestionText
-                                                    performSearch(suggestionText)
+
+                        // 3. Search Results or Empty State (YouTube-style Autocorrect Banner)
+                        if (autoCorrectInfo != null) {
+                            val (correctedText, originalText) = autoCorrectInfo!!
+                            item(span = { GridItemSpan(searchGridCols) }) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 4.dp, vertical = 6.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = buildAnnotatedString {
+                                                withStyle(SpanStyle(color = Color(0xFFB0B0B8), fontSize = 13.5.sp)) {
+                                                    append("Showing results for ")
                                                 }
-                                                .padding(vertical = 8.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(
-                                                imageVector = CustomSearchIcon,
-                                                contentDescription = null,
-                                                tint = Color(0xFF8E8E93),
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(12.dp))
-                                            Text(
-                                                text = suggestionText,
-                                                color = Color.White,
-                                                fontSize = 15.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
+                                                withStyle(SpanStyle(color = Color.White, fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic, fontSize = 13.5.sp)) {
+                                                    append(correctedText)
+                                                }
+                                                append("   ")
+                                                withStyle(SpanStyle(color = Color(0xFFB0B0B8), fontSize = 13.5.sp)) {
+                                                    append("Search instead for ")
+                                                }
+                                            }
+                                        )
+                                        Text(
+                                            text = originalText,
+                                            color = Color(0xFF3EA6FF),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.5.sp,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .clickable {
+                                                    autoCorrectInfo = null
+                                                    executeSearch(originalText, true)
+                                                }
+                                                .padding(horizontal = 2.dp, vertical = 1.dp)
+                                        )
                                     }
-                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Spacer(modifier = Modifier.height(4.dp))
                                 }
                             }
                         }
 
-                        // 3. Search Results or Empty State
                         if (searchResults.isNotEmpty()) {
-                            item(span = { GridItemSpan(3) }) {
+                            item(span = { GridItemSpan(searchGridCols) }) {
                                 Text(
                                     text = if (query.isNotEmpty()) "Top Results" else "Recommended Shows & Movies",
                                     color = Color.White,
@@ -536,19 +667,20 @@ class AnimeBoxSearchActivity : ComponentActivity() {
                                 )
                             }
 
-                            items(searchResults) { anime ->
+                            items(searchResults, key = { it.id }) { anime ->
                                 SearchPosterCard(
                                     anime = anime,
                                     onClick = {
                                         val intent = Intent(this@AnimeBoxSearchActivity, AnimeBoxDetailActivity::class.java).apply {
                                             putExtra("anilistId", anime.id)
+                                            putExtra("isAdult", anime.isAdult)
                                         }
                                         startActivity(intent)
                                     }
                                 )
                             }
                         } else if ((query.isNotEmpty() || activeStudio.isNotEmpty() || activeGenre.isNotEmpty()) && !isLoading) {
-                            item(span = { GridItemSpan(3) }) {
+                            item(span = { GridItemSpan(searchGridCols) }) {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -579,6 +711,14 @@ class AnimeBoxSearchActivity : ComponentActivity() {
         anime: SearchAnimeBrief,
         onClick: () -> Unit
     ) {
+        val context = LocalContext.current
+        val imagePainter = rememberAsyncImagePainter(
+            model = ImageRequest.Builder(context)
+                .data(anime.coverUrl)
+                .crossfade(false)
+                .build()
+        )
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -592,7 +732,7 @@ class AnimeBoxSearchActivity : ComponentActivity() {
                     .background(Color(0xFF1E1E22))
             ) {
                 Image(
-                    painter = rememberAsyncImagePainter(model = anime.coverUrl),
+                    painter = imagePainter,
                     contentDescription = anime.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
@@ -636,11 +776,12 @@ class AnimeBoxSearchActivity : ComponentActivity() {
             val mediaArray = obj.getJSONObject("data").getJSONObject("Page").getJSONArray("media")
             for (i in 0 until mediaArray.length()) {
                 val media = mediaArray.getJSONObject(i)
-                if (AniListClient.isBlockedMedia(media)) continue
+                if (AniListClient.isBlockedMedia(media, this@AnimeBoxSearchActivity)) continue
                 val isAdult = if (media.has("isAdult") && !media.isNull("isAdult")) {
                     media.getBoolean("isAdult")
                 } else false
-                if (isAdult) continue
+                val adultEnabled = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAdultContentEnabled(this@AnimeBoxSearchActivity)
+                if (!adultEnabled && isAdult) continue
 
                 val id = media.getInt("id")
                 val titleObj = media.getJSONObject("title")
@@ -652,9 +793,11 @@ class AnimeBoxSearchActivity : ComponentActivity() {
                 val coverUrl = media.getJSONObject("coverImage").getString("large")
                 val score = if (media.has("averageScore") && !media.isNull("averageScore")) {
                     media.getInt("averageScore").toString()
+                } else if (media.has("meanScore") && !media.isNull("meanScore")) {
+                    media.getInt("meanScore").toString()
                 } else ""
 
-                list.add(SearchAnimeBrief(id, title, coverUrl, score))
+                list.add(SearchAnimeBrief(id, title, coverUrl, score, isAdult))
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -674,11 +817,12 @@ class AnimeBoxSearchActivity : ComponentActivity() {
             val seenIds = mutableSetOf<Int>()
             for (i in 0 until nodesArray.length()) {
                 val media = nodesArray.getJSONObject(i)
-                if (AniListClient.isBlockedMedia(media)) continue
+                if (AniListClient.isBlockedMedia(media, this@AnimeBoxSearchActivity)) continue
                 val isAdult = if (media.has("isAdult") && !media.isNull("isAdult")) {
                     media.getBoolean("isAdult")
                 } else false
-                if (isAdult) continue
+                val adultEnabled = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.isAdultContentEnabled(this@AnimeBoxSearchActivity)
+                if (!adultEnabled && isAdult) continue
 
                 val id = media.getInt("id")
                 if (!seenIds.add(id)) continue
@@ -691,9 +835,11 @@ class AnimeBoxSearchActivity : ComponentActivity() {
                 val coverUrl = media.getJSONObject("coverImage").getString("large")
                 val score = if (media.has("averageScore") && !media.isNull("averageScore")) {
                     media.getInt("averageScore").toString()
+                } else if (media.has("meanScore") && !media.isNull("meanScore")) {
+                    media.getInt("meanScore").toString()
                 } else ""
 
-                list.add(SearchAnimeBrief(id, title, coverUrl, score))
+                list.add(SearchAnimeBrief(id, title, coverUrl, score, isAdult))
             }
         } catch (e: Exception) {
             e.printStackTrace()

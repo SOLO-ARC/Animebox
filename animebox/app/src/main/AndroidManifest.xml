@@ -87,6 +87,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
+        android:requestLegacyExternalStorage="true"
         android:usesCleartextTraffic="true"
         tools:targetApi="${target_sdk_version}">
 
@@ -199,6 +200,17 @@
                 <data android:mimeType="video/*" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".ui.animebox.AnimeBoxYouTubePlayerActivity"
+            android:theme="@style/AppTheme"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation"
+            android:screenOrientation="userLandscape"
+            android:supportsPictureInPicture="true"
+            android:launchMode="singleTask"
+            android:autoRemoveFromRecents="true"
+            android:taskAffinity="com.lagradost.cloudstream3.animeboxytplayer"
+            android:exported="false" />
 
         <activity
             android:name=".ui.account.AccountSelectActivity"

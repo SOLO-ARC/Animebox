@@ -69,18 +69,37 @@ class ExceptionHandler(
 
 class CloudStreamApp : Application(), SingletonImageLoader.Factory {
 
+    private var appStartTime: Long = 0L
+
     override fun onCreate() {
         super.onCreate()
+        appStartTime = android.os.SystemClock.elapsedRealtime()
         // If we want to initialize Coil as early as possible, maybe when
         // loading an image or GIF in a splash screen activity.
         // buildImageLoader(applicationContext)
 
         ExceptionHandler(filesDir.resolve("last_error")) {
             try {
+                val uptime = android.os.SystemClock.elapsedRealtime() - appStartTime
+                // Strictly suppress auto-restarts if crashing during cold start (within 8 seconds of launch)
+                if (uptime < 8_000L) {
+                    return@ExceptionHandler
+                }
+
                 val ctx = context ?: this
-                val intent = ctx.packageManager?.getLaunchIntentForPackage(ctx.packageName)
-                if (intent?.component != null) {
-                    startActivity(Intent.makeRestartActivityTask(intent.component))
+                val crashRecordFile = filesDir.resolve("crash_timestamp")
+                val now = System.currentTimeMillis()
+                val lastCrashTime = if (crashRecordFile.exists()) {
+                    crashRecordFile.readText().trim().toLongOrNull() ?: 0L
+                } else 0L
+                crashRecordFile.writeText(now.toString())
+
+                // Prevent infinite restart bootloops on startup (suppress restart if crashing within 15s of prior crash)
+                if (now - lastCrashTime > 15_000L) {
+                    val intent = ctx.packageManager?.getLaunchIntentForPackage(ctx.packageName)
+                    if (intent?.component != null) {
+                        startActivity(Intent.makeRestartActivityTask(intent.component))
+                    }
                 }
             } catch (_: Exception) {}
         }.also {

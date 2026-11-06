@@ -54,15 +54,18 @@ fun buildDefaultClient(context: Context, ignoreSSL: Boolean = false): OkHttpClie
                 maxSize = 50L * 1024L * 1024L // 50 MiB
             )
         ).apply {
-            when (dns) {
-                1 -> addGoogleDns()
-                2 -> addCloudFlareDns()
-//                3 -> addOpenDns()
-                4 -> addAdGuardDns()
-                5 -> addDNSWatchDns()
-                6 -> addQuad9Dns()
-                7 -> addDnsSbDns()
-                8 -> addCanadianShieldDns()
+            val animeBoxMode = com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxSettings.getDnsMode(context)
+            if (animeBoxMode != "system" && animeBoxMode != "default") {
+                com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxDnsHelper.applyDns(this, context)
+            } else {
+                when (dns) {
+                    1 -> addGoogleDns()
+                    2 -> addCloudFlareDns()
+                    4 -> addAdGuardDns()
+                    5 -> addControlDDns()
+                    6 -> addQuad9Dns()
+                    7 -> addDnsSbDns()
+                }
             }
         }
         // Needs to be build as otherwise the other builders will change this object

@@ -1,0 +1,49 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Box Body -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4.5,10.5 L4.5,19 C4.5,20.1 5.4,21 6.5,21 L17.5,21 C18.6,21 19.5,20.1 19.5,19 L19.5,10.5" />
+
+    <!-- Box Lid -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M3.5,7.5 C3.5,6.7 4.2,6 5,6 L19,6 C19.8,6 20.5,6.7 20.5,7.5 L20.5,10 C20.5,10.3 20.3,10.5 20,10.5 L4,10.5 C3.7,10.5 3.5,10.3 3.5,10 Z" />
+
+    <!-- Center Ribbon Vertical Line -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:pathData="M12,6 L12,21" />
+
+    <!-- Left Bow Loop on Top -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M12,6 C10.5,6 8,4.5 8,3.2 C8,2.2 9,1.5 10,2 C11.2,2.6 11.8,4.5 12,6 Z" />
+
+    <!-- Right Bow Loop on Top -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M12,6 C13.5,6 16,4.5 16,3.2 C16,2.2 15,1.5 14,2 C12.8,2.6 12.2,4.5 12,6 Z" />
+</vector>

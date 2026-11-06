@@ -297,7 +297,8 @@ class SubtitlesFragment : BaseDialogFragment<SubtitleSettingsBinding>(
         }
 
         fun getAutoSelectLanguageTagIETF(): String {
-            return getKey(SUBTITLE_AUTO_SELECT_KEY) ?: "en"
+            val key = getKey<String>(SUBTITLE_AUTO_SELECT_KEY)
+            return if (key.isNullOrBlank() || key.equals("none", ignoreCase = true)) "en" else key
         }
     }
 
@@ -647,6 +648,7 @@ class SubtitlesFragment : BaseDialogFragment<SubtitleSettingsBinding>(
             subsFont.setOnClickListener { textView ->
                 val fontTypes = listOf(
                     null to textView.context.getString(R.string.normal),
+                    R.font.trebuchet_ms_bold to "Trebuchet MS Bold",
                     R.font.trebuchet_ms to "Trebuchet MS",
                     R.font.netflix_sans to "Netflix Sans",
                     R.font.google_sans to "Google Sans",

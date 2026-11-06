@@ -100,11 +100,12 @@ class PlayerSubtitleHelper {
 
     companion object {
         fun String.toSubtitleMimeType(): String {
+            val cleanUrl = this.substringBefore("?").substringBefore("#")
             return when {
-                endsWith("vtt", true) -> MimeTypes.TEXT_VTT
-                endsWith("srt", true) -> MimeTypes.APPLICATION_SUBRIP
-                endsWith("xml", true) || endsWith("ttml", true) || endsWith("dfxp", true) -> MimeTypes.APPLICATION_TTML
-                endsWith("ass", true) || endsWith("ssa", true) -> MimeTypes.TEXT_SSA
+                cleanUrl.endsWith("vtt", true) || cleanUrl.endsWith(".vtt", true) || cleanUrl.contains(".vtt", true) -> MimeTypes.TEXT_VTT
+                cleanUrl.endsWith("srt", true) || cleanUrl.endsWith(".srt", true) -> MimeTypes.APPLICATION_SUBRIP
+                cleanUrl.endsWith("xml", true) || cleanUrl.endsWith("ttml", true) || cleanUrl.endsWith("dfxp", true) -> MimeTypes.APPLICATION_TTML
+                cleanUrl.endsWith("ass", true) || cleanUrl.endsWith("ssa", true) -> MimeTypes.TEXT_SSA
                 else -> MimeTypes.APPLICATION_SUBRIP
             }
         }

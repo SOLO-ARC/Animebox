@@ -34,6 +34,11 @@ class ByseQekaho : ByseSX() {
     override var mainUrl = "https://byseqekaho.com"
 }
 
+class ByseFujedu : ByseSX() {
+    override var name = "ByseFujedu"
+    override var mainUrl = "https://bysefujedu.com"
+}
+
 open class ByseSX : ExtractorApi() {
     override var name = "Byse"
     override var mainUrl = "https://byse.sx"
@@ -86,26 +91,27 @@ open class ByseSX : ExtractorApi() {
     }
 
     @OptIn(DelicateCryptographyApi::class)
-    private suspend fun decryptPlayback(playback: Playback): String? {
+    private suspend fun decryptPlaybackFull(playback: Playback): PlaybackDecrypt? {
         val keyBytes = buildAesKey(playback)
         val ivBytes = b64UrlDecode(playback.iv)
         val cipherBytes = b64UrlDecode(playback.payload)
 
         val aesKey = aesGcm.keyDecoder().decodeFromByteArray(AES.Key.Format.RAW, keyBytes)
-        // 128-bit GCM tag (default)
         val cipher = aesKey.cipher()
         val plainBytes = cipher.decryptWithIv(ivBytes, cipherBytes)
 
         var jsonStr = plainBytes.decodeToString()
         if (jsonStr.startsWith("\uFEFF")) jsonStr = jsonStr.substring(1)
 
-        val root = try {
+        return try {
             tryParseJson<PlaybackDecrypt>(jsonStr)
         } catch (_: Exception) {
-            return null
+            null
         }
+    }
 
-        return root?.sources?.firstOrNull()?.url
+    private suspend fun decryptPlayback(playback: Playback): String? {
+        return decryptPlaybackFull(playback)?.sources?.firstOrNull()?.url
     }
 
     override suspend fun getUrl(
@@ -116,14 +122,55 @@ open class ByseSX : ExtractorApi() {
     ) {
         val refererUrl = getBaseUrl(url)
         val playbackRoot = getPlayback(url) ?: return
-        val streamUrl = decryptPlayback(playbackRoot.playback) ?: return
+        val decrypted = decryptPlaybackFull(playbackRoot.playback) ?: return
+        val streamUrl = decrypted.sources.firstOrNull()?.url ?: return
+
+        fun isValidSubTrack(sub: PlaybackDecryptSubtitle, url: String): Boolean {
+            val k = sub.kind?.lowercase() ?: ""
+            val l = (sub.label ?: sub.lang ?: sub.language ?: "").lowercase()
+            val u = url.lowercase()
+            return !k.contains("thumbnail") && !l.contains("thumbnail") && !l.contains("sprite") &&
+                   !u.contains("thumbnail") && !u.contains("sprite") && !u.contains("xywh=")
+        }
+
+        decrypted.subtitles?.forEach { sub ->
+            val subUrl = sub.url ?: sub.file ?: sub.src ?: return@forEach
+            if (!isValidSubTrack(sub, subUrl)) return@forEach
+            subtitleCallback(
+                com.lagradost.cloudstream3.newSubtitleFile(
+                    sub.label ?: sub.lang ?: sub.language ?: "English",
+                    subUrl
+                )
+            )
+        }
+        decrypted.tracks?.forEach { sub ->
+            val subUrl = sub.url ?: sub.file ?: sub.src ?: return@forEach
+            if (!isValidSubTrack(sub, subUrl)) return@forEach
+            subtitleCallback(
+                com.lagradost.cloudstream3.newSubtitleFile(
+                    sub.label ?: sub.lang ?: sub.language ?: "English",
+                    subUrl
+                )
+            )
+        }
+        decrypted.captions?.forEach { sub ->
+            val subUrl = sub.url ?: sub.file ?: sub.src ?: return@forEach
+            if (!isValidSubTrack(sub, subUrl)) return@forEach
+            subtitleCallback(
+                com.lagradost.cloudstream3.newSubtitleFile(
+                    sub.label ?: sub.lang ?: sub.language ?: "English",
+                    subUrl
+                )
+            )
+        }
 
         val headers = mapOf("Referer" to refererUrl)
         M3u8Helper.generateM3u8(
             name,
             streamUrl,
             mainUrl,
-            headers = headers
+            headers = headers,
+            subtitleCallback = subtitleCallback
         ).forEach(callback)
     }
 }
@@ -141,6 +188,9 @@ data class DetailsRoot(
     val ownerPrivate: Boolean,
     @JsonProperty("embed_frame_url")
     val embedFrameUrl: String,
+    val subtitles: List<PlaybackDecryptSubtitle>? = null,
+    val tracks: List<PlaybackDecryptSubtitle>? = null,
+    val captions: List<PlaybackDecryptSubtitle>? = null,
 )
 
 data class PlaybackRoot(
@@ -170,8 +220,21 @@ data class DecryptKeys(
     val legacyFallback: String,
 )
 
+data class PlaybackDecryptSubtitle(
+    val file: String? = null,
+    val url: String? = null,
+    val src: String? = null,
+    val label: String? = null,
+    val lang: String? = null,
+    val language: String? = null,
+    val kind: String? = null,
+)
+
 data class PlaybackDecrypt(
-    val sources: List<PlaybackDecryptSource>,
+    val sources: List<PlaybackDecryptSource> = emptyList(),
+    val subtitles: List<PlaybackDecryptSubtitle>? = null,
+    val tracks: List<PlaybackDecryptSubtitle>? = null,
+    val captions: List<PlaybackDecryptSubtitle>? = null,
 )
 
 data class PlaybackDecryptSource(

@@ -1,0 +1,26 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="90dp"
+    android:height="145dp"
+    android:viewportWidth="100"
+    android:viewportHeight="150">
+    <!-- Deep subtle dark shadow border for poster separation -->
+    <path
+        android:pathData="M 48,138 C 30,138 20,126 18,112 L 42,108 C 44,116 50,120 58,120 C 72,120 82,106 84,78 C 76,88 64,94 50,94 C 30,94 18,80 18,56 C 18,32 34,18 54,18 C 78,18 92,38 92,76 C 92,118 74,138 48,138 Z M 54,38 C 42,38 36,46 36,58 C 36,68 42,76 54,76 C 66,76 74,68 74,58 C 74,46 66,38 54,38 Z"
+        android:fillColor="#000000"
+        android:strokeColor="#000000"
+        android:strokeWidth="4.2"
+        android:strokeLineJoin="round"
+        android:strokeLineCap="round"/>
+    <!-- Pitch black solid interior fill -->
+    <path
+        android:pathData="M 48,138 C 30,138 20,126 18,112 L 42,108 C 44,116 50,120 58,120 C 72,120 82,106 84,78 C 76,88 64,94 50,94 C 30,94 18,80 18,56 C 18,32 34,18 54,18 C 78,18 92,38 92,76 C 92,118 74,138 48,138 Z M 54,38 C 42,38 36,46 36,58 C 36,68 42,76 54,76 C 66,76 74,68 74,58 C 74,46 66,38 54,38 Z"
+        android:fillColor="#0A0A0C"/>
+    <!-- Sleek thinner white outline (Theme-locked) -->
+    <path
+        android:pathData="M 48,138 C 30,138 20,126 18,112 L 42,108 C 44,116 50,120 58,120 C 72,120 82,106 84,78 C 76,88 64,94 50,94 C 30,94 18,80 18,56 C 18,32 34,18 54,18 C 78,18 92,38 92,76 C 92,118 74,138 48,138 Z M 54,38 C 42,38 36,46 36,58 C 36,68 42,76 54,76 C 66,76 74,68 74,58 C 74,46 66,38 54,38 Z"
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.9"
+        android:strokeLineJoin="round"
+        android:strokeLineCap="round"/>
+</vector>

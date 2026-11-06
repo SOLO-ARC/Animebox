@@ -16,6 +16,7 @@ enum class PlayerResize(@StringRes val nameRes: Int) {
     Fit(R.string.resize_fit),
     Fill(R.string.resize_fill),
     Zoom(R.string.resize_zoom),
+    SixteenEight(R.string.resize_16_8),
 }
 
 // when the player should switch skip op to next episode

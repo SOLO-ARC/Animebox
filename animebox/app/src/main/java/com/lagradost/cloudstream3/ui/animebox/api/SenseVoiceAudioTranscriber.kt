@@ -337,27 +337,55 @@ object SenseVoiceAudioTranscriber {
             val content = client.newCall(reqBuilder.build()).execute().use { r -> if (r.isSuccessful) r.body?.string() ?: "" else "" }
             if (content.isEmpty()) return@withContext segments
 
+            // A muxed video file contains audio in its own container. Parsing that binary
+            // response as a playlist drops it entirely before MediaExtractor can demux it.
+            if (!content.trimStart().startsWith("#EXTM3U")) {
+                segments.add(StreamAudioSegment(hlsUrl, 0L, 0L, null))
+                return@withContext segments
+            }
+
             var mediaPlaylistContent = content
             var baseUri = URI(hlsUrl)
 
-            // If master playlist, find audio or media sub-playlist
-            if (content.contains("#EXT-X-STREAM-INF") || content.contains("#EXT-X-MEDIA:TYPE=AUDIO")) {
-                val lines = content.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            // If master playlist, prioritize dedicated audio track first, then lowest bandwidth stream
+            if (content.contains("#EXT-X-STREAM-INF") || content.contains("#EXT-X-MEDIA:", ignoreCase = true)) {
                 var mediaUriStr = ""
-                for (i in lines.indices) {
-                    val line = lines[i]
-                    if (line.startsWith("#EXT-X-STREAM-INF") && i + 1 < lines.size) {
-                        val nextLine = lines[i + 1]
-                        if (!nextLine.startsWith("#")) {
-                            mediaUriStr = nextLine
-                            break
+
+                // 1. Dedicated audio track check (highest priority: pure audio, no video overhead, 100x smaller!)
+                val audioMediaLine = content.lineSequence().firstOrNull { line ->
+                    line.trimStart().startsWith("#EXT-X-MEDIA:", ignoreCase = true) &&
+                        Regex("""TYPE\s*=\s*AUDIO""", RegexOption.IGNORE_CASE).containsMatchIn(line)
+                }
+                val audioUri = audioMediaLine?.let { line ->
+                    Regex("""URI\s*=\s*"([^"]+)"""", RegexOption.IGNORE_CASE)
+                        .find(line)?.groupValues?.getOrNull(1)
+                }
+                if (!audioUri.isNullOrBlank()) {
+                    mediaUriStr = audioUri
+                }
+
+                // 2. If no separate audio track, find the lowest bandwidth stream variant (e.g. 360p instead of 1080p)
+                if (mediaUriStr.isEmpty()) {
+                    val lines = content.lines().map { it.trim() }.filter { it.isNotEmpty() }
+                    var lowestBw = Long.MAX_VALUE
+                    var candidateUri = ""
+
+                    for (i in lines.indices) {
+                        val line = lines[i]
+                        if (line.startsWith("#EXT-X-STREAM-INF") && i + 1 < lines.size) {
+                            val nextLine = lines[i + 1]
+                            if (!nextLine.startsWith("#")) {
+                                val bwMatch = Regex("""BANDWIDTH=(\d+)""").find(line)
+                                val bw = bwMatch?.groupValues?.get(1)?.toLongOrNull() ?: 500_000L
+                                if (bw < lowestBw) {
+                                    lowestBw = bw
+                                    candidateUri = nextLine
+                                }
+                            }
                         }
                     }
-                }
-                if (mediaUriStr.isEmpty()) {
-                    val matchAudio = Regex("""#EXT-X-MEDIA:TYPE=AUDIO.*?URI="([^"]+)"""", RegexOption.IGNORE_CASE).find(content)
-                    if (matchAudio != null) {
-                        mediaUriStr = matchAudio.groupValues[1]
+                    if (candidateUri.isNotEmpty()) {
+                        mediaUriStr = candidateUri
                     }
                 }
 
@@ -370,29 +398,73 @@ object SenseVoiceAudioTranscriber {
                 }
             }
 
-            // Parse media segments
+            // Parse media segments and optional initialization segment (fMP4)
             if (mediaPlaylistContent.isNotEmpty()) {
                 val lines = mediaPlaylistContent.lines().map { it.trim() }.filter { it.isNotEmpty() }
-                var curMs = 0L
+                var curSec = 0.0
                 var curDurationSec = 0.0
+                var currentInitUrl: String? = null
+                var currentKeyUrl: String? = null
+                var currentKeyIvHex: String? = null
+                var mediaSequenceBase = 0L
+                var segmentIndex = 0L
+
+                // Look for #EXT-X-MAP:URI="init.mp4"
+                val mapMatch = Regex("""#EXT-X-MAP:URI="([^"]+)"""", RegexOption.IGNORE_CASE).find(mediaPlaylistContent)
+                if (mapMatch != null) {
+                    val rawInit = mapMatch.groupValues[1]
+                    currentInitUrl = if (rawInit.startsWith("http")) rawInit else baseUri.resolve(rawInit).toString()
+                }
 
                 for (line in lines) {
-                    if (line.startsWith("#EXTINF:")) {
+                    if (line.startsWith("#EXT-X-MEDIA-SEQUENCE:", ignoreCase = true)) {
+                        mediaSequenceBase = line.substringAfter(':').trim().toLongOrNull() ?: 0L
+                        segmentIndex = 0L
+                    } else if (line.startsWith("#EXT-X-KEY:", ignoreCase = true)) {
+                        val method = Regex("METHOD\\s*=\\s*([^,]+)", RegexOption.IGNORE_CASE)
+                            .find(line)?.groupValues?.getOrNull(1)?.trim()?.uppercase()
+                        if (method == "AES-128") {
+                            val rawKeyUrl = Regex("URI\\s*=\\s*\"([^\"]+)\"", RegexOption.IGNORE_CASE)
+                                .find(line)?.groupValues?.getOrNull(1)
+                            currentKeyUrl = rawKeyUrl?.let { if (it.startsWith("http")) it else baseUri.resolve(it).toString() }
+                            currentKeyIvHex = Regex("IV\\s*=\\s*(0x[0-9a-fA-F]+)", RegexOption.IGNORE_CASE)
+                                .find(line)?.groupValues?.getOrNull(1)
+                        } else {
+                            // METHOD=NONE clears encryption; SAMPLE-AES requires DRM handling and
+                            // must not be treated as an AES-128 transport stream.
+                            currentKeyUrl = null
+                            currentKeyIvHex = null
+                        }
+                    } else if (line.startsWith("#EXTINF:")) {
                         val durMatch = Regex("""#EXTINF:([\d.]+)""").find(line)
                         if (durMatch != null) {
                             curDurationSec = durMatch.groupValues[1].toDoubleOrNull() ?: 0.0
                         }
                     } else if (!line.startsWith("#")) {
                         if (curDurationSec > 0.0) {
-                            val startMs = curMs
-                            val endMs = curMs + (curDurationSec * 1000.0).toLong()
+                            val startMs = kotlin.math.round(curSec * 1000.0).toLong()
+                            curSec += curDurationSec
+                            val endMs = kotlin.math.round(curSec * 1000.0).toLong()
                             val segUrl = if (line.startsWith("http")) line else baseUri.resolve(line).toString()
-                            segments.add(StreamAudioSegment(segUrl, startMs, endMs))
-                            curMs = endMs
+                            segments.add(
+                                StreamAudioSegment(
+                                    url = segUrl,
+                                    startMs = startMs,
+                                    endMs = endMs,
+                                    initUrl = currentInitUrl,
+                                    encryptionKeyUrl = currentKeyUrl,
+                                    encryptionIvHex = currentKeyIvHex,
+                                    mediaSequence = mediaSequenceBase + segmentIndex
+                                )
+                            )
                             curDurationSec = 0.0
+                            segmentIndex++
                         }
                     }
                 }
+            } else if (!hlsUrl.contains(".m3u8", ignoreCase = true)) {
+                // Direct video or audio stream file (MP4, MKV, M4A, etc.)
+                segments.add(StreamAudioSegment(hlsUrl, 0L, 0L, null))
             }
         } catch (_: Exception) {}
 

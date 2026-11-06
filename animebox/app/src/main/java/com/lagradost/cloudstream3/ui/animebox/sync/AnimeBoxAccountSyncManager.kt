@@ -41,6 +41,12 @@ object AnimeBoxAccountSyncManager {
             .build()
     }
 
+    fun optCleanString(obj: JSONObject?, key: String): String? {
+        if (obj == null || !obj.has(key) || obj.isNull(key)) return null
+        val s = obj.optString(key, "")
+        return if (s.isBlank() || s.equals("null", ignoreCase = true)) null else s.trim()
+    }
+
     /**
      * Resolves the primary sync user identifier for the given profile.
      */
@@ -91,10 +97,8 @@ object AnimeBoxAccountSyncManager {
             .putString("anilist_user_$profileId", json.toString())
             .apply()
 
-        // Automatically update the profile avatar if user has a remote profile picture
-        if (user.avatarUrl.isNotBlank()) {
-            updateProfileAvatar(context, profileId, user.avatarUrl)
-        }
+        // Automatically update the profile name and avatar from AniList
+        updateProfileFromAniList(context, profileId, user.username, user.avatarUrl)
     }
 
     fun logoutAniList(context: Context, profileId: String) {
@@ -104,14 +108,18 @@ object AnimeBoxAccountSyncManager {
             .apply()
     }
 
-    private fun updateProfileAvatar(context: Context, profileId: String, newAvatarUrl: String) {
+    private fun updateProfileFromAniList(context: Context, profileId: String, newName: String, newAvatarUrl: String) {
         try {
             val profiles = ProfileManager.getProfiles(context).toMutableList()
-            val index = profiles.indexOfFirst { it.id == profileId }
+            val activeId = ProfileManager.getActiveProfile(context)
+            val index = profiles.indexOfFirst { it.id == profileId || (profileId == "guest" && it.id == "guest") || (it.id == activeId && it.name.equals("Guest", ignoreCase = true)) }
             if (index != -1) {
                 val current = profiles[index]
-                profiles[index] = UserProfile(current.id, current.name, newAvatarUrl)
+                val updatedName = if (current.name.equals("Guest", ignoreCase = true) || current.id == "guest") newName.ifBlank { current.name } else current.name
+                val updatedAvatar = if (newAvatarUrl.isNotBlank()) newAvatarUrl else current.avatarUrl
+                profiles[index] = UserProfile(current.id, updatedName, updatedAvatar, current.decorationUrl)
                 ProfileManager.saveProfiles(context, profiles)
+                ProfileManager.notifyProfilesChanged()
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -245,6 +253,7 @@ object AnimeBoxAccountSyncManager {
                 .build()
 
             val remoteMediaIds = mutableSetOf<Int>()
+            val batchItems = mutableListOf<Pair<AnimeBrief, String>>()
             var importedCount = 0
 
             httpClient.newCall(request).execute().use { response ->
@@ -278,10 +287,9 @@ object AnimeBoxAccountSyncManager {
                                 remoteMediaIds.add(mediaId)
 
                                 val titleObj = mediaObj.optJSONObject("title")
-                                val title = titleObj?.optString("english")
-                                    ?.takeIf { it.isNotBlank() }
-                                    ?: titleObj?.optString("romaji")
-                                    ?: titleObj?.optString("native")
+                                val title = optCleanString(titleObj, "english")
+                                    ?: optCleanString(titleObj, "romaji")
+                                    ?: optCleanString(titleObj, "native")
                                     ?: "Anime #$mediaId"
 
                                 val coverObj = mediaObj.optJSONObject("coverImage")
@@ -319,25 +327,32 @@ object AnimeBoxAccountSyncManager {
                                     customListCategory = category
                                 )
 
-                                // Add or merge in local app library (My Lists only)
-                                libraryManager.addOrUpdateLibraryItem(animeBrief, category)
-                                importedCount++
+                                batchItems.add(animeBrief to category)
                             }
                         }
                     }
                 }
             }
 
-            // Step 2: Push any local library items to AniList that aren't already synced
+            // Efficient single-pass batch import: writes to disk once and does not fire duplicate mutations back to AniList
+            if (batchItems.isNotEmpty()) {
+                libraryManager.addOrUpdateLibraryItemsBatch(batchItems)
+                importedCount = batchItems.size
+            }
+
+            // Step 2: Push any local library items to AniList that aren't already on AniList
             val localItems = libraryManager.getLibraryItems()
             var uploadedCount = 0
             for (local in localItems) {
                 if (local.id > 0 && !remoteMediaIds.contains(local.id)) {
                     syncLibraryItemToRemote(context, profileId, local.id, local.customListCategory, 0)
                     uploadedCount++
+                    // AniList allows about 90 requests/minute. Leave headroom for other app activity.
+                    kotlinx.coroutines.delay(850L)
                 }
             }
 
+            LibraryManager.notifyLibraryChanged()
             AniListSyncStats(importedCount, uploadedCount, true)
         } catch (e: Exception) {
             e.printStackTrace()
@@ -436,8 +451,13 @@ object AnimeBoxAccountSyncManager {
         var remoteDesc: String = ""
         var remoteEpisodes: Int = 0
 
+        val isShinChan = com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.isShinChan(anilistId)
+        if (isShinChan) {
+            remoteCover = com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.SHINCHAN_POSTER_URL
+        }
+
         // If show poster is blank or looks like an episode thumbnail, fetch official anime poster
-        if (remoteCover.isBlank() || remoteCover.contains("episode") || remoteCover.contains("ep_") || remoteCover.contains("cover_${anilistId}_")) {
+        if (!isShinChan && (remoteCover.isBlank() || remoteCover.contains("episode") || remoteCover.contains("ep_") || remoteCover.contains("okcdn.ru") || remoteCover.contains("videoPreview") || remoteCover.contains("cover_${anilistId}_"))) {
             try {
                 val detailsJson = com.lagradost.cloudstream3.ui.animebox.api.AniListClient.getAnimeDetails(anilistId)
                 if (!detailsJson.isNullOrEmpty()) {
@@ -508,10 +528,9 @@ object AnimeBoxAccountSyncManager {
                             val mediaObj = dataObj?.optJSONObject("Media")
                             if (mediaObj != null) {
                                 val titleObj = mediaObj.optJSONObject("title")
-                                val resolvedTitle = titleObj?.optString("english")
-                                    ?.takeIf { it.isNotBlank() }
-                                    ?: titleObj?.optString("romaji")
-                                    ?: titleObj?.optString("native")
+                                val resolvedTitle = optCleanString(titleObj, "english")
+                                    ?: optCleanString(titleObj, "romaji")
+                                    ?: optCleanString(titleObj, "native")
                                 if (!resolvedTitle.isNullOrBlank()) remoteTitle = resolvedTitle
 
                                 val coverObj = mediaObj.optJSONObject("coverImage")
@@ -534,57 +553,50 @@ object AnimeBoxAccountSyncManager {
                 e.printStackTrace()
             }
 
-            // Step 2: Determine if we should set status to CURRENT or preserve existing
-            // If remoteStatus is null or empty, or already CURRENT, we use CURRENT.
-            // If remoteStatus is PLANNING, COMPLETED, PAUSED, DROPPED, REPEATING, we keep it.
-            val shouldSetCurrent = when {
+            // Step 2: Determine appropriate status
+            // - If user has reached the final episode (remoteEpisodes > 0 && episodeNumber >= remoteEpisodes): COMPLETED
+            // - If the anime was already COMPLETED on AniList or in local library, and user watches again: REPEATING (Re-watching)
+            // - If already CURRENT or not in any list: CURRENT
+            // - Otherwise: keep existing status
+            val isFinalEpisode = remoteEpisodes > 0 && episodeNumber >= remoteEpisodes
+            val isAlreadyCompleted = remoteStatus.equals("COMPLETED", ignoreCase = true) || localCategory == "Completed"
+
+            val targetStatus: String = when {
+                isFinalEpisode -> "COMPLETED"
+                isAlreadyCompleted && episodeNumber < remoteEpisodes -> "REPEATING"
                 remoteStatus.isNullOrBlank() -> {
-                    // Not in any list on AniList.
-                    // Check if local library has it in another list
                     if (isInLocalLibrary && localCategory != "Currently Watching" && localCategory.isNotBlank()) {
-                        false
+                        when (localCategory) {
+                            "Completed" -> "REPEATING"
+                            "Plan to Watch" -> "PLANNING"
+                            "On Hold" -> "PAUSED"
+                            "Dropped" -> "DROPPED"
+                            else -> "CURRENT"
+                        }
                     } else {
-                        true
+                        "CURRENT"
                     }
                 }
-                remoteStatus.equals("CURRENT", ignoreCase = true) -> true
-                else -> false
+                remoteStatus.equals("CURRENT", ignoreCase = true) -> "CURRENT"
+                else -> remoteStatus ?: "CURRENT"
             }
 
             try {
-                val mutation: String
+                val mutation = """
+                    mutation (${"$"}mediaId: Int, ${"$"}progress: Int, ${"$"}status: MediaListStatus) {
+                        SaveMediaListEntry (mediaId: ${"$"}mediaId, progress: ${"$"}progress, status: ${"$"}status) {
+                            id
+                            mediaId
+                            status
+                            progress
+                        }
+                    }
+                """.trimIndent()
+
                 val variables = JSONObject().apply {
                     put("mediaId", anilistId)
                     put("progress", episodeNumber)
-                    if (shouldSetCurrent) {
-                        put("status", "CURRENT")
-                    } else if (!remoteStatus.isNullOrBlank()) {
-                        put("status", remoteStatus)
-                    }
-                }
-
-                if (variables.has("status")) {
-                    mutation = """
-                        mutation (${"$"}mediaId: Int, ${"$"}progress: Int, ${"$"}status: MediaListStatus) {
-                            SaveMediaListEntry (mediaId: ${"$"}mediaId, progress: ${"$"}progress, status: ${"$"}status) {
-                                id
-                                mediaId
-                                status
-                                progress
-                            }
-                        }
-                    """.trimIndent()
-                } else {
-                    mutation = """
-                        mutation (${"$"}mediaId: Int, ${"$"}progress: Int) {
-                            SaveMediaListEntry (mediaId: ${"$"}mediaId, progress: ${"$"}progress) {
-                                id
-                                mediaId
-                                status
-                                progress
-                            }
-                        }
-                    """.trimIndent()
+                    put("status", targetStatus)
                 }
 
                 val jsonBody = JSONObject().apply {
@@ -607,12 +619,21 @@ object AnimeBoxAccountSyncManager {
         }
 
         // Step 3: Update local LibraryManager
-        // If the anime is not in any other list (or already in Currently Watching), add/update in Currently Watching
-        if (!isInLocalLibrary || localCategory == "Currently Watching" || localCategory.isBlank()) {
-            val finalTitle = remoteTitle.ifBlank { animeTitle.ifBlank { "Anime #$anilistId" } }
+        val targetLocalCategory = when {
+            remoteEpisodes > 0 && episodeNumber >= remoteEpisodes -> "Completed"
+            (remoteStatus.equals("COMPLETED", ignoreCase = true) || localCategory == "Completed") && episodeNumber < remoteEpisodes -> "Currently Watching"
+            !isInLocalLibrary || localCategory == "Currently Watching" || localCategory.isBlank() -> "Currently Watching"
+            else -> localCategory
+        }
+
+        if (targetLocalCategory == "Completed" || targetLocalCategory == "Currently Watching") {
+            val cleanRemote = if (remoteTitle.isBlank() || remoteTitle.equals("null", ignoreCase = true)) "" else remoteTitle
+            val cleanPassed = if (animeTitle.isBlank() || animeTitle.equals("null", ignoreCase = true)) "" else animeTitle
+            val finalTitle = cleanRemote.ifBlank { cleanPassed.ifBlank { "Anime #$anilistId" } }
             val finalCover = when {
-                remoteCover.isNotBlank() && !remoteCover.contains("backdrop", ignoreCase = true) && !remoteCover.contains("banner", ignoreCase = true) && !remoteCover.contains("episode", ignoreCase = true) -> remoteCover
-                showPosterUrl.isNotBlank() && !showPosterUrl.contains("backdrop", ignoreCase = true) && !showPosterUrl.contains("banner", ignoreCase = true) && !showPosterUrl.contains("episode", ignoreCase = true) -> showPosterUrl
+                isShinChan -> com.lagradost.cloudstream3.ui.animebox.api.ShinChanEpisodeProvider.SHINCHAN_POSTER_URL
+                remoteCover.isNotBlank() && !remoteCover.contains("backdrop", ignoreCase = true) && !remoteCover.contains("banner", ignoreCase = true) && !remoteCover.contains("episode", ignoreCase = true) && !remoteCover.contains("okcdn.ru", ignoreCase = true) && !remoteCover.contains("videoPreview", ignoreCase = true) -> remoteCover
+                showPosterUrl.isNotBlank() && !showPosterUrl.contains("backdrop", ignoreCase = true) && !showPosterUrl.contains("banner", ignoreCase = true) && !showPosterUrl.contains("episode", ignoreCase = true) && !showPosterUrl.contains("okcdn.ru", ignoreCase = true) && !showPosterUrl.contains("videoPreview", ignoreCase = true) -> showPosterUrl
                 else -> remoteCover.ifBlank { showPosterUrl }
             }
             val animeBrief = AnimeBrief(
@@ -622,9 +643,9 @@ object AnimeBoxAccountSyncManager {
                 bannerUrl = remoteBanner,
                 description = remoteDesc,
                 episodes = remoteEpisodes,
-                customListCategory = "Currently Watching"
+                customListCategory = targetLocalCategory
             )
-            libraryManager.addOrUpdateLibraryItem(animeBrief, "Currently Watching")
+            libraryManager.addOrUpdateLibraryItem(animeBrief, targetLocalCategory)
         }
     }
 }

@@ -1,4 +1,5 @@
 package com.lagradost.cloudstream3.ui.animebox.api
+import com.lagradost.cloudstream3.ui.animebox.settings.AnimeBoxDnsHelper
 
 import android.content.Context
 import android.util.Log
@@ -29,11 +30,11 @@ data class PublicSubtitleItem(
 object PublicSubtitlesManager {
 
     private const val TAG = "PublicSubsManager"
-    private const val SUPABASE_URL = "https://okiuzwsldqjrtuyqylhx.supabase.co"
-    private const val SUPABASE_ANON_KEY = "sb_publishable_O6CrSYrDu-GilobI41fSMg_DG7IdSbf"
+    private val SUPABASE_URL get() = AnimeBoxConfig.SUPABASE_URL
+    private val SUPABASE_ANON_KEY get() = AnimeBoxConfig.SUPABASE_ANON_KEY
 
     private val client: OkHttpClient by lazy {
-        OkHttpClient.Builder()
+        AnimeBoxDnsHelper.applyDns(OkHttpClient.Builder())
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
             .build()

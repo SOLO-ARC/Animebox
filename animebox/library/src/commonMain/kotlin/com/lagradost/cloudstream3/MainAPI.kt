@@ -325,8 +325,15 @@ object APIHolder {
             )
         ).toJson().toRequestBody(RequestBodyTypes.JSON.toMediaTypeOrNull())
 
-        return app.post("https://graphql.anilist.co", requestBody = data)
-            .parsedSafe<AniSearch>()
+        return app.post(
+            "https://graphql.anilist.co",
+            headers = mapOf(
+                "Referer" to "https://anilist.co/",
+                "Origin" to "https://anilist.co",
+                "Accept" to "application/json",
+            ),
+            requestBody = data
+        ).parsedSafe<AniSearch>()
     }
 }
 

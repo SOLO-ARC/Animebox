@@ -1,0 +1,41 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Outer rounded badge border with generous margin to prevent any edge clipping -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M12,3 C7.03,3 3,7.03 3,12 C3,16.97 7.03,21 12,21 C16.97,21 21,16.97 21,12 C21,7.03 16.97,3 12,3 Z" />
+    
+    <!-- Number 1: Balanced serif top flag and vertical stem -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.65"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M6.2,9.8 L7.7,8.5 L7.7,15.5 M6.2,15.5 L9.2,15.5" />
+
+    <!-- Number 8: Beautiful symmetric dual loops -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.55"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M12.2,12 C13.3,12 14.1,11.15 14.1,10.1 C14.1,9.05 13.25,8.2 12.2,8.2 C11.15,8.2 10.3,9.05 10.3,10.1 C10.3,11.15 11.1,12 12.2,12 Z M12.2,12 C13.45,12 14.4,12.95 14.4,14.1 C14.4,15.25 13.4,16.1 12.2,16.1 C11.0,16.1 10.0,15.25 10.0,14.1 C10.0,12.95 10.95,12 12.2,12 Z" />
+
+    <!-- Plus symbol +: Clean, proportional, perfectly centered -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M16.0,11.5 L19.4,11.5 M17.7,9.8 L17.7,13.2" />
+</vector>

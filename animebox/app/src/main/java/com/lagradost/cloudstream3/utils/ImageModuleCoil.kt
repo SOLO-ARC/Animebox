@@ -44,8 +44,8 @@ object ImageLoader {
             .diskCachePolicy(CachePolicy.ENABLED)
             .networkCachePolicy(CachePolicy.ENABLED)
             .memoryCache {
-                MemoryCache.Builder().maxSizePercent(context, 0.1)//10 % of heap for mem-cache
-                    .strongReferencesEnabled(false)
+                MemoryCache.Builder().maxSizePercent(context, 0.25)
+                    .strongReferencesEnabled(true)
                     .build()
             }
             .diskCache {
@@ -59,6 +59,11 @@ object ImageLoader {
             or image hosting services causes unauthorized exceptions **/
             .components {
                 add(OkHttpNetworkFetcherFactory(callFactory = { buildDefaultClient(context) }))
+                if (Build.VERSION.SDK_INT >= 28) {
+                    add(coil3.gif.AnimatedImageDecoder.Factory())
+                } else {
+                    add(coil3.gif.GifDecoder.Factory())
+                }
                 if (isBrokenHardware) {
                     add(BitmapFactoryDecoder.Factory())
                 } // sw decoder

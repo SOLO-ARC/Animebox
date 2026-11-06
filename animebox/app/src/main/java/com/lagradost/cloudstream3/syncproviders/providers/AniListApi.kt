@@ -267,7 +267,11 @@ class AniListApi : SyncAPI() {
 
                 val res = app.post(
                     "https://graphql.anilist.co/",
-                    // headers = mapOf(),
+                    headers = mapOf(
+                        "Referer" to "https://anilist.co/",
+                        "Origin" to "https://anilist.co",
+                        "Accept" to "application/json",
+                    ),
                     data = data, // (if (vars == null) mapOf("query" to q) else mapOf("query" to q, "variables" to vars))
                     timeout = 5000 // REASONABLE TIMEOUT
                 ).text.replace("\\", "")
@@ -452,6 +456,11 @@ class AniListApi : SyncAPI() {
         """
             val data = app.post(
                 "https://graphql.anilist.co",
+                headers = mapOf(
+                    "Referer" to "https://anilist.co/",
+                    "Origin" to "https://anilist.co",
+                    "Accept" to "application/json",
+                ),
                 data = mapOf("query" to q),
                 cacheTime = 0,
             ).text
@@ -511,6 +520,9 @@ class AniListApi : SyncAPI() {
             "https://graphql.anilist.co/",
             headers = mapOf(
                 "Authorization" to "Bearer ${token.accessToken ?: return null}",
+                "Referer" to "https://anilist.co/",
+                "Origin" to "https://anilist.co",
+                "Accept" to "application/json",
                 if (cache) "Cache-Control" to "max-stale=$MAX_STALE" else "Cache-Control" to "no-cache"
             ),
             cacheTime = 0,

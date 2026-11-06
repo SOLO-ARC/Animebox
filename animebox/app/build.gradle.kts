@@ -149,17 +149,17 @@ android {
         buildConfigField(
             "String",
             "VERCEL_MULTIMOVIE_API",
-            "\"" + (localProperties["vercel.multimovie.api"] ?: "https://animeapi-multi.placeholder.com") + "\""
+            "\"" + (System.getenv("VERCEL_MULTIMOVIE_API") ?: localProperties["vercel.multimovie.api"] ?: "") + "\""
         )
         buildConfigField(
             "String",
             "VERCEL_SCRAPER_API",
-            "\"" + (localProperties["vercel.scraper.api"] ?: "https://animeapi1.placeholder.com") + "\""
+            "\"" + (System.getenv("VERCEL_SCRAPER_API") ?: localProperties["vercel.scraper.api"] ?: "") + "\""
         )
         buildConfigField(
             "String",
             "LOVABLE_ANIDRIVE_API",
-            "\"" + (localProperties["lovable.anidrive.api"] ?: "https://anidrive.placeholder.com") + "\""
+            "\"" + (System.getenv("LOVABLE_ANIDRIVE_API") ?: localProperties["lovable.anidrive.api"] ?: "") + "\""
         )
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         resourceConfigurations += listOf("en", "hi", "ja")
@@ -278,8 +278,10 @@ dependencies {
     implementation(libs.material)
     implementation(libs.constraintlayout)
 
-    // Coil Image Loading
+    // Coil Image Loading & APNG Animated Decorations
     implementation(libs.bundles.coil)
+    implementation("io.coil-kt.coil3:coil-gif:3.3.0")
+    implementation("com.linecorp:apng:1.12.0")
 
     // Media 3 (ExoPlayer)
     implementation(libs.bundles.media3)

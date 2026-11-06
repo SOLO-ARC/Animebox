@@ -131,18 +131,32 @@ fun AnimeBoxTicketChatDialog(
     ) {
         val view = androidx.compose.ui.platform.LocalView.current
         DisposableEffect(view) {
-            var parent = view.parent
-            while (parent != null) {
-                if (parent is android.app.Dialog) {
-                    parent.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
-                    parent.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-                    parent.window?.setLayout(
-                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
-                    )
+            var p: Any? = view
+            var dialogWin: android.view.Window? = null
+            while (p != null) {
+                if (p is androidx.compose.ui.window.DialogWindowProvider) {
+                    dialogWin = p.window
                     break
                 }
-                parent = parent.parent
+                try {
+                    val method = p.javaClass.getMethod("getWindow")
+                    val w = method.invoke(p) as? android.view.Window
+                    if (w != null) {
+                        dialogWin = w
+                        break
+                    }
+                } catch (_: Exception) {}
+                p = (p as? android.view.View)?.parent ?: (p as? android.view.ViewParent)
+            }
+
+            dialogWin?.let { win ->
+                win.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+                win.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+                win.setLayout(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                androidx.core.view.WindowCompat.setDecorFitsSystemWindows(win, false)
             }
             onDispose {}
         }

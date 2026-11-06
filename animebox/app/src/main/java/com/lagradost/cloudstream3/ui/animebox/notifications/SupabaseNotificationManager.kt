@@ -1,5 +1,7 @@
 package com.lagradost.cloudstream3.ui.animebox.notifications
 
+import com.lagradost.cloudstream3.ui.animebox.api.AnimeBoxConfig
+
 import android.content.Context
 import android.content.SharedPreferences
 import kotlinx.coroutines.Dispatchers
@@ -50,8 +52,8 @@ data class SupabaseNotification(
 }
 
 object SupabaseNotificationManager {
-    private const val SUPABASE_URL = "https://okiuzwsldqjrtuyqylhx.supabase.co"
-    private const val SUPABASE_ANON_KEY = "sb_publishable_O6CrSYrDu-GilobI41fSMg_DG7IdSbf"
+    private val SUPABASE_URL get() = AnimeBoxConfig.SUPABASE_URL
+    private val SUPABASE_ANON_KEY get() = AnimeBoxConfig.SUPABASE_ANON_KEY
     private const val PREFS_NAME = "firefly_notifications_prefs"
     private const val KEY_NOTIFICATIONS_CACHE = "cached_notifications_json"
     private const val KEY_READ_IDS = "read_notification_ids"
@@ -194,12 +196,15 @@ object SupabaseNotificationManager {
 
     fun filterForProfile(context: Context, profileId: String, list: List<SupabaseNotification>): List<SupabaseNotification> {
         val anilistUser = com.lagradost.cloudstream3.ui.animebox.sync.AnimeBoxAccountSyncManager.getAniListUser(context, profileId)
+        val reviewIdentity = com.lagradost.cloudstream3.ui.animebox.reviews.AnimeReviewCommentsManager.identity(context, profileId)
 
         return list.filter { notif ->
             val target = notif.userId?.trim()
             if (target.isNullOrEmpty() || target.equals("all", ignoreCase = true) || target.equals("broadcast", ignoreCase = true)) {
                 true
             } else if (target.equals(profileId, ignoreCase = true)) {
+                true
+            } else if (target.equals(reviewIdentity.id, ignoreCase = true)) {
                 true
             } else if (anilistUser != null && (
                 target.equals(anilistUser.id, ignoreCase = true) ||
